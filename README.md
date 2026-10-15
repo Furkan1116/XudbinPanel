@@ -20,16 +20,26 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Kaynak: Git reposu (özel repolar için token), sürükle-bırak dosya yükleme (klasör veya zip), Docker imajı veya Docker Compose
 - Framework'e göre deploy: uygulama eklerken repo taranır, uygun framework önerilir; her framework'ün ayarları, gereken ortam değişkenleri ve "deploy'da ne olacak" adımları gösterilir
 - Kodda okunan ortam değişkenleri ve `.env.example` tek tıkla eklenir; gizli anahtar, alan adı gibi değerler otomatik üretilir
-- Kesintisiz deploy: trafik, yeni sürüm portunu gerçekten dinlemeye başlayınca geçer; başlamazsa eski sürüm yayında kalır
+- Kesintisiz deploy: trafik, yeni sürüm gerçek alan adıyla yapılan HTTP isteğine sağlıklı yanıt verince geçer; 400/5xx dönerse eski sürüm yayında kalır
+- **Deploy Doktoru:** başarısız deploy'larda loglardaki bilinen hataları (Django ALLOWED_HOSTS, CSRF, eksik gizli anahtar, veritabanı bağlantısı, migration, eksik paket veya ortam değişkeni, bellek yetmezliği) açıklar, uygun olanları tek tıkla düzeltip yeniden deploy eder
+- Framework'ün istediği zorunlu ve alan adına bağlı ortam değişkenleri eksikse deploy sırasında eklenir; Django'da settings.py'nin hangi değişken adını okuduğu bulunur
+- Uygulama başına bellek/CPU sınırı; çalışan deploy iptal edilebilir, 30 dakikada biten zaman aşımı
+- Her deploy'dan sonra imaj Trivy ile bilinen güvenlik açıklarına karşı taranır
 - Tek tıkla önceki sürüme dönüş, canlı deploy ve uygulama logları
-- Git push webhook'u ile otomatik deploy (GitHub, GitLab, Gitea...)
+- Git push webhook'u ile otomatik deploy (GitHub, GitLab, Gitea...), HMAC imza doğrulamalı
 - Şifreli ortam değişkenleri, kalıcı depolama klasörleri, CPU/bellek izleme
 
 **Veritabanları**
 - PostgreSQL, MySQL, MariaDB, MongoDB, Redis; kullanıcı ve şifre otomatik üretilir
 - Elle veya zamanlanmış yedekleme, saklama sayısı, indirme ve geri yükleme
+- Yedekler S3 uyumlu uzak depolamaya da yüklenir (AWS S3, Cloudflare R2, Backblaze B2, MinIO)
+- **Doğrulanmış yedek:** yedekler düzenli olarak ağsız geçici bir veritabanına geri yüklenip denenir ("son yedek doğrulandı, 12 tablo")
+- **Panel yedeği:** panelin kendi verisi ve şifreleme anahtarı şifreli olarak yedeklenir; sunucu giderse yeni kurulumda `xudbin restore` ile geri gelir
 
 **Güvenlik**
+- **Güvenlik puanı:** panel, sunucular ve uygulamalar için kontroller (2FA, yedekler, güvenlik duvarı, fail2ban, SSH ayarları, otomatik güncellemeler, WAF, debug modu, imaj açıkları...) ve tek tıkla düzeltmeler
+- Docker'ın güvenlik duvarını atlaması engellenir: dışarıdan konteynerlere yalnız 80/443 ve panelden açılan veritabanı portları ulaşır
+- Üye rolü compose dosyasında sunucuya erişim (privileged, sunucu klasörü bağlama, host ağı) kullanamaz; bunu yalnız yönetici açabilir
 - Uygulama başına WAF, hız sınırı, güvenlik başlıkları, şifre koruması, IP listeleri
 - Tüm sunuculardaki Caddy loglarından saldırı ekranı: zaman çizelgesi, en çok saldıran IP'ler, hedeflenen adresler
 - Eşiği aşan IP'ler tüm sunucularda otomatik banlanır
@@ -85,6 +95,7 @@ xudbin user create ali@ornek.com Ali --member   # kullanıcı ekler, geçici şi
 xudbin user reset-password ali@ornek.com
 xudbin user disable-2fa ali@ornek.com # telefon kaybolduysa
 xudbin unban 203.0.113.7
+sudo xudbin restore /root/xudbin-panel-....xbk   # panel yedeğini geri yükler (s3://bucket/anahtar da olur)
 sudo xudbin update                    # Xudbin'i günceller, verilere dokunmaz
 xudbin logs                           # panel logları
 ```

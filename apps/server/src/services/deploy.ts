@@ -372,7 +372,7 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
   } else {
     const fw = getFramework(frameworkId);
     if (!fw) throw new Error(`Bilinmeyen framework: ${frameworkId}`);
-    addDefaultEnv(app, fw, log);
+    addDefaultEnv(app, fw, log, fw.envAliases?.(openRepo(contextDir), opts) ?? {});
     const env = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off").env;
     const result = fw.build(openRepo(contextDir), opts, env);
     dockerfile = "Dockerfile.xudbin";
@@ -397,9 +397,10 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
 }
 
 /** Framework'ün zorunlu ve alan adına bağlı env değişkenlerinden eksik olanları uygulamaya kalıcı olarak ekler. */
-function addDefaultEnv(app: AppRow, fw: Framework, log: (l: string) => void) {
+function addDefaultEnv(app: AppRow, fw: Framework, log: (l: string) => void, aliases: Record<string, string>) {
+  for (const [hint, name] of Object.entries(aliases)) log(`Proje ${hint} yerine ${name} değişkenini okuyor; değer bu adla verilecek.`);
   const raw = decrypt(app.env);
-  const add = missingDefaultEnv(fw, parseEnv(raw), randomAlnum);
+  const add = missingDefaultEnv(fw, parseEnv(raw), randomAlnum, aliases);
   if (!add.length) return;
   const next = (raw.trim() ? `${raw.trimEnd()}\n` : "") + add.map((e) => `${e.key}=${e.value}`).join("\n") + "\n";
   app.env = encrypt(next);
@@ -497,6 +498,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     const strict = Boolean(fresh.health_path);
     log(`HTTP kontrolü: GET ${pathToCheck} (Host: ${host})`);
     const deadline = Date.now() + 45_000;
+    let clientErrors = 0;
     for (;;) {
       if (signal.aborted) await failWithLogs(String(signal.reason));
       const probe = await probeHttp(docker, name, fresh.port, host, pathToCheck);
@@ -504,7 +506,9 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
         log(`HTTP kontrolü geçti: ${probe.statusLine}`);
         break;
       }
-      if (Date.now() > deadline) {
+      // 4xx uygulama ısındıkça değişmez; art arda üç kez aynıysa beklemeye gerek yok. 5xx ve yanıtsızlık için süre tanınır.
+      clientErrors = probe.status !== null && probe.status < 500 ? clientErrors + 1 : 0;
+      if (Date.now() > deadline || clientErrors >= 3) {
         await failWithLogs(
           probe.status !== null
             ? `Uygulama çalışıyor ama ${pathToCheck} isteğine ${probe.status} döndürüyor (${probe.statusLine}).`

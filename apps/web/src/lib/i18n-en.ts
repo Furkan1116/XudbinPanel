@@ -287,6 +287,7 @@ export const en: Record<string, string> = {
   "Hata ayıklama modu kapalı": "Debug mode off",
   "İmajda kritik açık yok": "No critical vulnerabilities in image",
   "İmajda kritik güvenlik açığı": "Critical vulnerability in image",
+  "Panelin, sunucuların ve uygulamaların güvenlik durumu; eksikler tek tıkla düzeltilebilir.": "Security posture of the panel, servers and apps; gaps can be fixed in one click.",
   "Gerekenlerin hepsini ekle": "Add all required",
   "Geri dönüş": "Rollback",
   "Geri dönüş başladı": "Rollback started",

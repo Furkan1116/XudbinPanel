@@ -179,6 +179,20 @@ export function diagnose(lines: string[], ctx: Ctx): Finding[] {
   if (!out.length && ctx.status) {
     const s = ctx.status;
     if (s >= 500) out.push({ id: "http-5xx", title: `Uygulama ${s} hatası veriyor`, detail: "Uygulama çalışıyor ama istekleri işlerken hata veriyor. Hatanın ayrıntısı uygulama loglarında; çoğu zaman eksik bir ortam değişkeni veya veritabanı bağlantısıdır." });
+    else if (s === 400 && ctx.framework === "django") {
+      // Alan adlarını içermeyen *ALLOWED_HOSTS değişkenlerine, mevcut değer korunarak alan adları eklenir.
+      const stale = Object.entries(ctx.env).filter(([k, v]) => /ALLOWED_HOSTS$/.test(k) && !v.includes("{{XUDBIN_DOMAINS}}") && !ctx.hosts.every((h) => v.split(",").includes(h)));
+      out.push({
+        id: "django-allowed-hosts",
+        title: "Django alan adını tanımıyor (ALLOWED_HOSTS)",
+        detail: stale.length
+          ? `${stale.map(([k, v]) => `${k}=${v}`).join(", ")} uygulamanın alan adlarını (${ctx.hosts.join(", ")}) içermiyor; Django bu adreslerden gelen isteklere 400 döndürüyor.`
+          : `Django, izin verilmeyen bir alan adından gelen isteklere 400 döndürür. settings.py içindeki ALLOWED_HOSTS bir ortam değişkeninden okunmalı ve o değişken alan adlarını içermeli, ör. ALLOWED_HOSTS = os.environ["DJANGO_ALLOWED_HOSTS"].split(","). Uygulamanın alan adları: ${ctx.hosts.join(", ") || "-"}.`,
+        fix: stale.length
+          ? { label: "Alan adlarını ekle ve yeniden deploy et", env: Object.fromEntries(stale.map(([k, v]) => [k, v.trim() ? `${v},{{XUDBIN_DOMAINS}}` : "{{XUDBIN_DOMAINS}}"])) }
+          : undefined,
+      });
+    }
     else if (s === 400) out.push({ id: "http-400", title: "Uygulama 400 (Bad Request) döndürüyor", detail: "Çoğu zaman uygulama alan adını tanımadığı için olur (Django ALLOWED_HOSTS, Vite/Nuxt allowedHosts, Rails config.hosts). Alan adını izinli adreslere ekle." });
     else if (s === 421) out.push({ id: "http-421", title: "Uygulama alan adını reddediyor (421)", detail: "Uygulama yalnız belirli alan adlarına yanıt veriyor; Xudbin'deki alan adını uygulamanın izinli adreslerine ekle." });
   }

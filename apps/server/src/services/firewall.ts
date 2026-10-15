@@ -49,7 +49,8 @@ export async function hostExec(server: ServerRow, script: string, timeoutMs = 60
   try {
     await container.start();
     const res = (await withTimeout(container.wait(), timeoutMs, "Sunucu komutu zaman aşımına uğradı")) as { StatusCode: number };
-    const logs = (await container.logs({ stdout: true, stderr: true })).toString("utf8").replace(/\r/g, "");
+    const raw = (await container.logs({ stdout: true, stderr: true })) as unknown;
+    const logs = (Buffer.isBuffer(raw) || typeof raw === "string" ? raw.toString() : JSON.stringify(raw)).replace(/\r/g, "");
     if (res.StatusCode !== 0) throw new Error(logs.trim().split("\n").pop() || `Komut ${res.StatusCode} koduyla çıktı`);
     return logs;
   } finally {

@@ -70,8 +70,9 @@ const DOMAIN_PLACEHOLDERS = { domains: "{{XUDBIN_DOMAINS}}", url: "{{XUDBIN_URL}
  * Deploy sırasında env'de eksikse otomatik eklenecek öneriler: zorunlu olanlar ve alan adına bağlı olanlar.
  * Alan adına bağlı değerler yer tutucu olarak yazılır; her deploy'da uygulamanın güncel alan adlarıyla doldurulur.
  */
-export function missingDefaultEnv(fw: Framework, env: Record<string, string>, random: (n: number) => string): { key: string; value: string }[] {
+export function missingDefaultEnv(fw: Framework, env: Record<string, string>, random: (n: number) => string, aliases: Record<string, string> = {}): { key: string; value: string }[] {
   return fw.envHints
+    .map((h) => ({ ...h, key: aliases[h.key] ?? h.key }))
     .filter((h) => !(h.key in env) && (h.required || (h.auto && h.auto in DOMAIN_PLACEHOLDERS)))
     .map((h) => {
       switch (h.auto) {

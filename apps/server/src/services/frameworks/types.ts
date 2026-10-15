@@ -48,6 +48,11 @@ export type Framework = {
   steps: string[];
   detect?: (repo: Repo) => Detection | null;
   build: (repo: Repo, opts: Options, env: Record<string, string>) => BuildResult;
+  /**
+   * Önerilen değişkenin projede gerçekte hangi adla okunduğu (ör. settings.py ALLOWED_HOSTS'u
+   * "ALLOWED_HOSTS" adından okuyorsa { DJANGO_ALLOWED_HOSTS: "ALLOWED_HOSTS" }).
+   */
+  envAliases?: (repo: Repo, opts: Options) => Record<string, string>;
 };
 
 /** Repo içeriğine güvenli, salt okunur erişim. */

@@ -73,16 +73,26 @@ async function doScan(appId: number) {
     });
     await container.start();
     const res = (await withTimeout(container.wait(), 20 * 60_000, "Tarama 20 dakikada bitmedi")) as { StatusCode: number };
-    const out = (await container.logs({ stdout: true, stderr: true })).toString("utf8");
+    // docker-modem, çıktı JSON olunca gövdeyi kendisi ayrıştırıp nesne döndürür.
+    const raw = (await container.logs({ stdout: true, stderr: true })) as unknown;
     await container.remove({ force: true }).catch(() => {});
-    const json = out.slice(out.indexOf("{"));
-    if (res.StatusCode !== 0 || !json.startsWith("{")) throw new Error(out.trim().split("\n").pop() || `Trivy ${res.StatusCode} koduyla çıktı`);
-    const summary = summarize(JSON.parse(json) as TrivyReport);
+    let report: TrivyReport;
+    if (Buffer.isBuffer(raw) || typeof raw === "string") {
+      const out = raw.toString();
+      const json = out.slice(out.indexOf("{"));
+      if (res.StatusCode !== 0 || !json.startsWith("{")) throw new Error(out.trim().split("\n").pop() || `Trivy ${res.StatusCode} koduyla çıktı`);
+      report = JSON.parse(json) as TrivyReport;
+    } else {
+      if (res.StatusCode !== 0) throw new Error(`Trivy ${res.StatusCode} koduyla çıktı`);
+      report = raw as TrivyReport;
+    }
+    const summary = summarize(report);
     db.prepare("UPDATE apps SET scan_status = 'success', scan_summary = ?, scanned_at = ? WHERE id = ?").run(JSON.stringify(summary), Date.now(), app.id);
     if (summary.critical > 0) notify("vulnerability", `${app.name}: ${summary.critical} kritik güvenlik açığı`, `İmajda ${summary.critical} kritik, ${summary.high} yüksek seviye açık var; ${summary.fixable} tanesi güncellemeyle kapanıyor.`);
     return summary;
   } catch (e) {
-    db.prepare("UPDATE apps SET scan_status = 'failed', scan_summary = ?, scanned_at = ? WHERE id = ?").run(JSON.stringify({ error: (e as Error).message }), Date.now(), app.id);
+    const message = e instanceof Error ? e.message : typeof e === "object" ? JSON.stringify(e) : String(e);
+    db.prepare("UPDATE apps SET scan_status = 'failed', scan_summary = ?, scanned_at = ? WHERE id = ?").run(JSON.stringify({ error: message }), Date.now(), app.id);
     await docker.getContainer(name).remove({ force: true }).catch(() => {});
     throw e;
   }

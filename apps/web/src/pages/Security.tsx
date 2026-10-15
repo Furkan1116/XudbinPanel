@@ -40,9 +40,9 @@ export function SecurityPage() {
     <>
       <PageHeader
         title={t("Güvenlik")}
-        description={t("Tüm sunuculardaki uygulamalara gelen ve engellenen saldırılar. Loglar 20 saniyede bir okunur.")}
+        description={tab === "score" ? t("Panelin, sunucuların ve uygulamaların güvenlik durumu; eksikler tek tıkla düzeltilebilir.") : t("Tüm sunuculardaki uygulamalara gelen ve engellenen saldırılar. Loglar 20 saniyede bir okunur.")}
         actions={
-          <select className="input w-auto" value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label={t("Zaman aralığı")}>
+          tab !== "score" && <select className="input w-auto" value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label={t("Zaman aralığı")}>
             <option value={24}>{t("Son 24 saat")}</option>
             <option value={168}>{t("Son 7 gün")}</option>
             <option value={720}>{t("Son 30 gün")}</option>

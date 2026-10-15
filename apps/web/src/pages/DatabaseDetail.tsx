@@ -133,7 +133,7 @@ function Backups({ d, backups }: { d: Database; backups: Backup[] }) {
           <div className="panel divide-y divide-line">
             {backups.map((b) => (
               <div key={b.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
-                <div className="min-w-0 flex-1">
+                <div className="min-w-[16rem] flex-1">
                   <div className="truncate font-mono text-[13px]">{b.file}</div>
                   <div className="text-[13px] text-faint">{dateTime(b.createdAt)}{b.status === "success" ? `, ${formatBytes(b.size)}` : ""}</div>
                   {b.error && <div className="text-[13px] text-accent">{b.error}</div>}

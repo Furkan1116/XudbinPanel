@@ -57,6 +57,23 @@ function djangoModules(repo: Repo) {
   return { settings, wsgi: `${pkg}.wsgi` };
 }
 
+/** Ayar modülünün kaynak metni (paket ise klasördeki tüm .py dosyaları). */
+function settingsSource(repo: Repo, module: string) {
+  const base = module.replace(/\./g, "/");
+  if (repo.has(`${base}.py`)) return repo.read(`${base}.py`);
+  return repo
+    .list(base)
+    .filter((f) => f.endsWith(".py"))
+    .map((f) => repo.read(`${base}/${f}`))
+    .join("\n");
+}
+
+/** settings.py'de bir ayarın okunduğu ortam değişkeninin adı: ALLOWED_HOSTS = env_list("X") / os.environ.get("X") ... */
+export function settingEnvName(source: string, setting: string): string | undefined {
+  const m = source.match(new RegExp(`^${setting}\\s*=\\s*([^\\n]*(?:\\n[ \\t)\\]]+[^\\n]*){0,3})`, "m"));
+  return m?.[1]?.match(/[([]\s*["']([A-Z][A-Z0-9_]*)["']/)?.[1];
+}
+
 export const django: Framework = {
   id: "django",
   name: "Django",
@@ -83,6 +100,16 @@ export const django: Framework = {
     "Konteyner başlarken collectstatic ve migrate çalışır; ortam değişkenleri bu anda okunur.",
     "Uygulama Gunicorn ile çalışır, statik dosyalar WhiteNoise ile aynı süreçten sunulur.",
   ],
+  envAliases(repo, opts) {
+    const source = settingsSource(repo, opt(opts.settingsModule, djangoModules(repo).settings));
+    const out: Record<string, string> = {};
+    const map = { DJANGO_ALLOWED_HOSTS: "ALLOWED_HOSTS", CSRF_TRUSTED_ORIGINS: "CSRF_TRUSTED_ORIGINS", DJANGO_SECRET_KEY: "SECRET_KEY", DJANGO_DEBUG: "DEBUG" };
+    for (const [hint, setting] of Object.entries(map)) {
+      const name = settingEnvName(source, setting);
+      if (name && name !== hint) out[hint] = name;
+    }
+    return out;
+  },
   detect: (repo) => (repo.has("manage.py") && /django/i.test(deps(repo) + repo.read("manage.py")) ? { score: 90, reason: "manage.py ve Django bağımlılığı bulundu", options: { settingsModule: djangoModules(repo).settings, wsgiModule: djangoModules(repo).wsgi, pythonVersion: pythonVersion(repo) } } : null),
   build(repo, opts) {
     const found = djangoModules(repo);
