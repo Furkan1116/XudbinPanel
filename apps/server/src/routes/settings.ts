@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { Readable } from "node:stream";
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import QRCode from "qrcode";
@@ -14,6 +17,8 @@ import type { AppEnv } from "../lib/types.js";
 import { applyCaddyConfig } from "../services/caddy.js";
 import { NOTIFY_EVENTS, sendTo } from "../services/notify.js";
 import { listServers } from "../services/servers.js";
+import { createPanelBackup, PANEL_BACKUP_DIR } from "../services/panel-backup.js";
+import { s3Test } from "../lib/s3.js";
 
 const pendingTotp = new Map<number, string>();
 const sessionKey = (hash: string) => hash.slice(0, 16);
@@ -160,7 +165,86 @@ export const settingsRoutes = new Hono<AppEnv>()
       throw new HttpError(400, `Gönderilemedi: ${(err as Error).message}`);
     }
     return c.json({ ok: true });
+  })
+
+  // --- Yedekleme: uzak depolama, panel yedeği, doğrulama sıklığı ---------------------------
+  .get("/backup", (c) => {
+    const s = getSettings();
+    const panelBackups = db
+      .prepare("SELECT id, file, size, status, error, remote_key IS NOT NULL AS remote, remote_error AS remoteError, created_at AS createdAt FROM panel_backups ORDER BY id DESC LIMIT 20")
+      .all();
+    return c.json({
+      s3: s.backupS3 ? { ...s.backupS3, secretKey: "", hasSecret: Boolean(s.backupS3.secretKey) } : null,
+      panelBackup: { enabled: Boolean(s.panelBackupPassphrase), intervalH: s.panelBackupIntervalH, keep: s.panelBackupKeep, lastAt: s.lastPanelBackupAt },
+      verifyEveryH: s.verifyBackupsEveryH,
+      panelBackups,
+    });
+  })
+
+  .put("/backup", async (c) => {
+    const input = await body(
+      c,
+      z.object({
+        s3: s3Schema.nullable().optional(),
+        passphrase: z.string().min(12, "Yedek şifresi en az 12 karakter olmalı").max(200).nullable().optional(),
+        intervalH: z.number().int().min(0).max(24 * 30).optional(),
+        keep: z.number().int().min(1).max(100).optional(),
+        verifyEveryH: z.number().int().min(0).max(24 * 30).optional(),
+      }),
+    );
+    const current = getSettings();
+    updateSettings({
+      backupS3: input.s3 === undefined ? undefined : input.s3 === null ? null : { ...input.s3, secretKey: input.s3.secretKey ? encrypt(input.s3.secretKey) : (current.backupS3?.secretKey ?? "") },
+      panelBackupPassphrase: input.passphrase === undefined ? undefined : input.passphrase === null ? "" : encrypt(input.passphrase),
+      panelBackupIntervalH: input.intervalH,
+      panelBackupKeep: input.keep,
+      verifyBackupsEveryH: input.verifyEveryH,
+    });
+    // updateSettings null'ı yazmaz; hedef kaldırıldıysa ayrıca sil.
+    if (input.s3 === null) db.prepare("DELETE FROM settings WHERE key = 'backupS3'").run();
+    return c.json({ ok: true });
+  })
+
+  .post("/backup/test", async (c) => {
+    const input = await body(c, s3Schema);
+    const secret = input.secretKey || (getSettings().backupS3?.secretKey ? decrypt(getSettings().backupS3!.secretKey) : "");
+    if (!secret) throw new HttpError(400, "Gizli anahtar (secret key) gerekli");
+    try {
+      await s3Test({ ...input, secretKey: secret });
+    } catch (err) {
+      throw new HttpError(400, `Bağlanılamadı: ${(err as Error).message}`);
+    }
+    return c.json({ ok: true });
+  })
+
+  .post("/backup/panel", async (c) => {
+    try {
+      await createPanelBackup();
+    } catch (err) {
+      throw new HttpError(500, `Panel yedeği alınamadı: ${(err as Error).message}`);
+    }
+    return c.json({ ok: true }, 201);
+  })
+
+  .get("/backup/panel/:id/download", (c) => {
+    const b = db.prepare("SELECT file FROM panel_backups WHERE id = ? AND status = 'success'").get(idParam(c)) as { file: string } | undefined;
+    if (!b) throw new HttpError(404, "Yedek bulunamadı");
+    const full = path.join(PANEL_BACKUP_DIR, path.basename(b.file));
+    if (!fs.existsSync(full)) throw new HttpError(404, "Yedek dosyası diskte yok");
+    c.header("Content-Type", "application/octet-stream");
+    c.header("Content-Disposition", `attachment; filename="${b.file}"`);
+    c.header("Content-Length", String(fs.statSync(full).size));
+    return c.body(Readable.toWeb(fs.createReadStream(full)) as ReadableStream);
   });
+
+const s3Schema = z.object({
+  endpoint: z.string().trim().url("Geçerli bir adres gir (https://...)").max(300),
+  region: z.string().trim().max(50).default("auto"),
+  bucket: z.string().trim().min(3, "Bucket adı gerekli").max(100),
+  accessKey: z.string().trim().min(1, "Access key gerekli").max(200),
+  secretKey: z.string().max(200).default(""),
+  prefix: z.string().trim().max(200).default("xudbin"),
+});
 
 const notificationSchema = z.object({
   name: z.string().trim().min(1).max(60),

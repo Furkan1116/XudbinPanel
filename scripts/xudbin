@@ -9,5 +9,8 @@ case "${1:-}" in
     exec bash "$DIR/install.sh" --update ;;
   logs) exec docker logs -f --tail 200 xudbin ;;
   restart) docker restart xudbin >/dev/null && echo "Panel yeniden başlatıldı" ;;
+  restore)
+    docker exec -i $TTY xudbin node dist/cli.js "$@"
+    docker restart xudbin >/dev/null && echo "Panel yedekten başlatıldı" ;;
   *) exec docker exec -i $TTY xudbin node dist/cli.js "$@" ;;
 esac

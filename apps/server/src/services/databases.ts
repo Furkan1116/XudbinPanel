@@ -4,10 +4,13 @@ import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 import { config } from "../config.js";
 import { db } from "../db.js";
-import { decrypt } from "../lib/crypto.js";
+import { decrypt, randomAlnum } from "../lib/crypto.js";
+import { getSettings } from "../lib/settings.js";
+import { s3Delete, s3Download, s3Upload } from "../lib/s3.js";
 import { containerState, dockerFor, execIn, pullImage, removeContainer } from "./docker.js";
 import { notify } from "./notify.js";
 import { applyDockerFirewall } from "./firewall.js";
+import { offsiteTarget } from "./offsite.js";
 import { getServer } from "./servers.js";
 
 export type Engine = "postgres" | "mysql" | "mariadb" | "mongo" | "redis";
@@ -28,6 +31,7 @@ export type DatabaseRow = {
   backup_interval_h: number;
   backup_keep: number;
   last_backup_at: number | null;
+  last_verify_at: number | null;
   created_at: number;
 };
 
@@ -195,7 +199,8 @@ export async function createBackup(d: DatabaseRow) {
     const size = fs.statSync(path.join(dir, file)).size;
     db.prepare("UPDATE backups SET status = 'success', size = ? WHERE id = ?").run(size, backupId);
     db.prepare("UPDATE databases SET last_backup_at = ? WHERE id = ?").run(Date.now(), d.id);
-    pruneBackups(d);
+    await uploadOffsite(d, backupId, path.join(dir, file));
+    await pruneBackups(d);
     return backupId;
   } catch (e) {
     const message = (e as Error).message;
@@ -206,29 +211,59 @@ export async function createBackup(d: DatabaseRow) {
   }
 }
 
-function pruneBackups(d: DatabaseRow) {
+/** Uzak depolama tanımlıysa yedeği oraya da yükler; sunucu giderse yedek kaybolmaz. */
+async function uploadOffsite(d: DatabaseRow, backupId: number, file: string) {
+  const target = offsiteTarget();
+  if (!target) return;
+  try {
+    const key = await s3Upload(target, `databases/${d.slug}/${path.basename(file)}`, file);
+    db.prepare("UPDATE backups SET remote_key = ?, remote_error = NULL WHERE id = ?").run(key, backupId);
+  } catch (e) {
+    db.prepare("UPDATE backups SET remote_error = ? WHERE id = ?").run((e as Error).message, backupId);
+    notify("backup_failed", `${d.name} yedeği uzak depolamaya yüklenemedi`, (e as Error).message);
+  }
+}
+
+async function pruneBackups(d: DatabaseRow) {
   const keep = Math.max(1, d.backup_keep);
   const old = db
-    .prepare("SELECT id, file FROM backups WHERE database_id = ? AND status = 'success' ORDER BY id DESC LIMIT -1 OFFSET ?")
-    .all(d.id, keep) as { id: number; file: string }[];
+    .prepare("SELECT id, file, remote_key FROM backups WHERE database_id = ? AND status = 'success' ORDER BY id DESC LIMIT -1 OFFSET ?")
+    .all(d.id, keep) as { id: number; file: string; remote_key: string | null }[];
+  const target = offsiteTarget();
   for (const b of old) {
     fs.rmSync(path.join(backupDir(d), b.file), { force: true });
+    if (b.remote_key && target) await s3Delete(target, b.remote_key).catch(() => {});
     db.prepare("DELETE FROM backups WHERE id = ?").run(b.id);
   }
 }
 
-export async function restoreBackup(d: DatabaseRow, file: string) {
+/** Yedek dosyası yerelde yoksa (ör. panel yeni sunucuya taşındı) uzak depolamadan indirir. */
+async function localBackupFile(d: DatabaseRow, file: string) {
   const full = path.join(backupDir(d), path.basename(file));
-  if (!fs.existsSync(full)) throw new Error("Yedek dosyası bulunamadı");
-  const password = decrypt(d.db_password);
+  if (fs.existsSync(full)) return full;
+  const row = db.prepare("SELECT remote_key FROM backups WHERE database_id = ? AND file = ?").get(d.id, path.basename(file)) as { remote_key: string | null } | undefined;
+  const target = offsiteTarget();
+  if (!row?.remote_key || !target) throw new Error("Yedek dosyası bulunamadı");
+  fs.mkdirSync(backupDir(d), { recursive: true });
+  await s3Download(target, row.remote_key, full);
+  return full;
+}
+
+function restoreCommand(d: DatabaseRow): string | null {
   const cmd: Record<Engine, string | null> = {
-    postgres: `PGPASSWORD="$P" psql -v ON_ERROR_STOP=1 -U ${d.db_user} -d ${d.db_name}`,
+    postgres: `PGPASSWORD="$P" psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U ${d.db_user} -d ${d.db_name}`,
     mysql: `mysql -u root -p"$P"`,
     mariadb: `mariadb -u root -p"$P"`,
     mongo: `mongorestore --archive --drop -u ${d.db_user} -p "$P" --authenticationDatabase admin`,
     redis: null,
   };
-  const c = cmd[d.engine];
+  return cmd[d.engine];
+}
+
+export async function restoreBackup(d: DatabaseRow, file: string) {
+  const full = await localBackupFile(d, file);
+  const password = decrypt(d.db_password);
+  const c = restoreCommand(d);
   if (!c) throw new Error("Redis yedeği panelden geri yüklenemez; .rdb dosyasını indirip elle yükle.");
   const res = await execIn(dockerFor(getServer(d.server_id)), containerName(d), ["sh", "-c", c], {
     stdin: fs.createReadStream(full).pipe(createGunzip()),
@@ -238,6 +273,120 @@ export async function restoreBackup(d: DatabaseRow, file: string) {
   if (res.exitCode !== 0) throw new Error(res.stderr.trim().split("\n").pop() || "Geri yükleme başarısız");
 }
 
+// ---------------------------------------------------------------------------
+// Yedek doğrulama: yedek, geçici bir konteynere geri yüklenip içi sayılır.
+// ---------------------------------------------------------------------------
+
+function readyCommand(d: DatabaseRow): string {
+  switch (d.engine) {
+    case "postgres":
+      return `pg_isready -q -h 127.0.0.1 -U ${d.db_user} -d ${d.db_name}`;
+    case "mysql":
+      return `mysqladmin ping -h 127.0.0.1 -uroot -p"$P" --silent`;
+    case "mariadb":
+      return `mariadb-admin ping -h 127.0.0.1 -uroot -p"$P" --silent`;
+    case "mongo":
+      return `mongosh --quiet -u ${d.db_user} -p "$P" --authenticationDatabase admin --eval 'db.runCommand({ping:1}).ok' | grep -q 1`;
+    case "redis":
+      return "redis-cli ping | grep -q PONG";
+  }
+}
+
+function countCommand(d: DatabaseRow): string {
+  switch (d.engine) {
+    case "postgres":
+      return `PGPASSWORD="$P" psql -h 127.0.0.1 -U ${d.db_user} -d ${d.db_name} -tAc "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')"`;
+    case "mysql":
+    case "mariadb":
+      return `${d.engine === "mysql" ? "mysql" : "mariadb"} -h 127.0.0.1 -uroot -p"$P" -N -e "select count(*) from information_schema.tables where table_schema='${d.db_name}'"`;
+    case "mongo":
+      return `mongosh --quiet -u ${d.db_user} -p "$P" --authenticationDatabase admin --eval "db.getSiblingDB('${d.db_name}').getCollectionNames().length"`;
+    case "redis":
+      return "";
+  }
+}
+
+let verifyChain: Promise<unknown> = Promise.resolve();
+
+/** Aynı anda tek doğrulama çalışır (geçici konteynerler sunucuyu yormasın). */
+export function verifyBackup(d: DatabaseRow, backupId: number) {
+  const run = verifyChain.then(() => doVerify(d, backupId));
+  verifyChain = run.catch(() => {});
+  return run;
+}
+
+async function doVerify(d: DatabaseRow, backupId: number) {
+  const b = db.prepare("SELECT * FROM backups WHERE id = ? AND database_id = ?").get(backupId, d.id) as { file: string; status: string } | undefined;
+  if (!b || b.status !== "success") throw new Error("Doğrulanacak başarılı bir yedek yok");
+  db.prepare("UPDATE backups SET verify_status = 'running', verify_note = NULL WHERE id = ?").run(backupId);
+  const docker = dockerFor(getServer(d.server_id));
+  const name = `xb-verify-${d.slug}`;
+  const pass = randomAlnum(24);
+  const env = [`P=${pass}`];
+  const finish = (status: "success" | "failed", note: string) => {
+    db.prepare("UPDATE backups SET verify_status = ?, verify_note = ?, verified_at = ? WHERE id = ?").run(status, note, Date.now(), backupId);
+    db.prepare("UPDATE databases SET last_verify_at = ? WHERE id = ?").run(Date.now(), d.id);
+    return { status, note };
+  };
+  try {
+    const full = await localBackupFile(d, b.file);
+    const image = `${ENGINES[d.engine].image}:${d.version}`;
+    await pullImage(docker, image, () => {});
+    await removeContainer(docker, name);
+    await docker.createContainer({
+      name,
+      Image: image,
+      Env: engineEnv(d, pass),
+      Labels: { "xudbin.managed": "true", "xudbin.task": "verify-backup" },
+      // Ağ yok: geri yüklenen veri hiçbir yere ulaşamaz, hiçbir yerden ulaşılamaz.
+      HostConfig: { NetworkMode: "none", Memory: 1024 * 1024 * 1024, AutoRemove: false },
+    });
+    await docker.getContainer(name).start();
+
+    if (d.engine === "redis") {
+      const res = await execIn(docker, name, ["sh", "-c", "cat > /tmp/dump.rdb && redis-check-rdb /tmp/dump.rdb"], {
+        stdin: fs.createReadStream(full).pipe(createGunzip()),
+        timeoutMs: 10 * 60_000,
+      });
+      const out = res.stdout + res.stderr;
+      if (res.exitCode !== 0 || !/RDB looks OK/i.test(out)) throw new Error(out.trim().split("\n").pop() || "RDB dosyası okunamadı");
+      const keys = out.match(/(\d+) keys read/)?.[1];
+      return finish("success", keys ? `${keys} anahtar` : "RDB dosyası sağlam");
+    }
+
+    // Hazır olana kadar bekle; ilk açılıştaki geçici sunucuya takılmamak için art arda iki başarılı yanıt aranır.
+    let ok = 0;
+    const deadline = Date.now() + 180_000;
+    while (ok < 2) {
+      if (Date.now() > deadline) throw new Error("Geçici veritabanı 3 dakikada hazır olmadı");
+      const state = await containerState(docker, name);
+      if (!state.running) throw new Error(`Geçici veritabanı kapandı (çıkış kodu ${state.exitCode})`);
+      const r = await execIn(docker, name, ["sh", "-c", readyCommand(d)], { env, timeoutMs: 15_000 }).catch(() => ({ exitCode: 1 }));
+      ok = r.exitCode === 0 ? ok + 1 : 0;
+      await new Promise((res) => setTimeout(res, 3000));
+    }
+
+    const restore = await execIn(docker, name, ["sh", "-c", restoreCommand(d)!], {
+      stdin: fs.createReadStream(full).pipe(createGunzip()),
+      env,
+      timeoutMs: 30 * 60_000,
+    });
+    if (restore.exitCode !== 0) throw new Error(`Geri yüklenemedi: ${restore.stderr.trim().split("\n").pop() || restore.exitCode}`);
+    const count = await execIn(docker, name, ["sh", "-c", countCommand(d)], { env, timeoutMs: 60_000 });
+    const n = Number(count.stdout.trim().split("\n").pop());
+    if (count.exitCode !== 0 || Number.isNaN(n)) throw new Error(`Geri yüklenen veri okunamadı: ${count.stderr.trim().split("\n").pop() ?? ""}`);
+    const unit = d.engine === "mongo" ? "koleksiyon" : "tablo";
+    return finish("success", n === 0 ? `Geri yüklendi, 0 ${unit} (veritabanı boş)` : `Geri yüklendi, ${n} ${unit}`);
+  } catch (e) {
+    const message = (e as Error).message;
+    finish("failed", message);
+    notify("backup_failed", `${d.name} yedeği doğrulanamadı`, `Yedek geçici bir veritabanına geri yüklenemedi: ${message}`);
+    throw e;
+  } finally {
+    await removeContainer(docker, name).catch(() => {});
+    await docker.getContainer(name).remove({ force: true, v: true }).catch(() => {});
+  }
+}
 
 /** Dakikada bir: zamanı gelen otomatik yedekleri alır. */
 export function startBackupScheduler() {
@@ -248,9 +397,16 @@ export function startBackupScheduler() {
          AND (last_backup_at IS NULL OR last_backup_at + backup_interval_h * 3600000 <= ?)`,
       )
       .all(Date.now()) as DatabaseRow[];
+    const everyH = getSettings().verifyBackupsEveryH;
     for (const d of due) {
       db.prepare("UPDATE databases SET last_backup_at = ? WHERE id = ?").run(Date.now(), d.id);
-      createBackup(d).catch((e) => console.error(`Otomatik yedek başarısız (${d.name}):`, (e as Error).message));
+      createBackup(d)
+        .then((backupId) => {
+          // Yedeğin gerçekten geri yüklenebildiği düzenli olarak denenir.
+          const fresh = getDatabase(d.id);
+          if (fresh && everyH > 0 && (!fresh.last_verify_at || fresh.last_verify_at + everyH * 3_600_000 <= Date.now())) return verifyBackup(fresh, backupId);
+        })
+        .catch((e) => console.error(`Otomatik yedek başarısız (${d.name}):`, (e as Error).message));
     }
   }, 60_000).unref();
 }

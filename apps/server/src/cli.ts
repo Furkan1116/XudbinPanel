@@ -2,10 +2,19 @@
  * Sunucudaki `xudbin` komutunun panel tarafı. install.sh /usr/local/bin/xudbin betiğini kurar;
  * o betik bu dosyayı konteyner içinde çalıştırır:  docker exec -it xudbin node dist/cli.js <komut>
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import readline from "node:readline";
+import { gunzipSync } from "node:zlib";
 import QRCode from "qrcode";
 import { ensureSetupToken } from "./auth/setup-token.js";
 import { db } from "./db.js";
+import { config } from "./config.js";
+import { decrypt } from "./lib/crypto.js";
+import { s3Download } from "./lib/s3.js";
 import { getSettings } from "./lib/settings.js";
+import { decryptArchive, unpackTar } from "./services/panel-backup.js";
 import { createUser, deleteUser, resetPassword, type UserRow } from "./services/users.js";
 
 const R = "\x1b[31m", G = "\x1b[32m", D = "\x1b[2m", B = "\x1b[1m", X = "\x1b[0m";
@@ -89,6 +98,10 @@ async function main() {
       console.log(n ? `${G}Ban kaldırıldı:${X} ${ip} (Caddy bir sonraki güncellemede uygular; panelde Güvenlik > Banlı IP'ler'den de kaldırabilirsin)` : `${ip} banlı değil`);
       return;
     }
+    case "restore": {
+      await restorePanel(args);
+      return;
+    }
     default:
       console.log(`Kullanım: xudbin <komut>
   link                          Panel adresini (ilk kurulumda kurulum linkini) QR kodla gösterir
@@ -99,9 +112,62 @@ async function main() {
   user disable-2fa <e-posta>    İki adımlı doğrulamayı kapatır (telefon kaybolduysa)
   user delete <e-posta>         Kullanıcıyı siler
   unban <ip>                    IP banını kaldırır
+  restore <dosya | s3://bucket/anahtar> [--endpoint URL --access-key K --secret-key S --region R]
+                                Panel yedeğini geri yükler (yedek şifresi sorulur), ardından paneli yeniden başlatır
   update                        Xudbin'i günceller (sunucudaki betik)
   logs                          Panel loglarını izler (sunucudaki betik)`);
   }
+}
+
+/** Panel yedeğini çözer ve data/restore klasörüne hazırlar; restore-boot.ts bir sonraki açılışta yerine koyar. */
+async function restorePanel(argv: string[]) {
+  const source = argv.find((a) => !a.startsWith("--"));
+  if (!source) throw new Error("Yedek dosyası veya s3://bucket/anahtar gerekli");
+  const opt = (name: string) => {
+    const i = argv.indexOf(`--${name}`);
+    return i >= 0 ? argv[i + 1] : undefined;
+  };
+  let file: string;
+  if (source.startsWith("s3://")) {
+    const [, , bucket, ...rest] = source.split("/");
+    const saved = getSettings().backupS3;
+    const target = {
+      endpoint: opt("endpoint") ?? saved?.endpoint ?? "",
+      region: opt("region") ?? saved?.region ?? "auto",
+      bucket: bucket ?? "",
+      accessKey: opt("access-key") ?? saved?.accessKey ?? "",
+      secretKey: opt("secret-key") ?? (saved?.secretKey ? decrypt(saved.secretKey) : ""),
+      prefix: "",
+    };
+    if (!target.endpoint || !target.accessKey || !target.secretKey) throw new Error("--endpoint, --access-key ve --secret-key gerekli");
+    file = path.join(os.tmpdir(), `xudbin-restore-${Date.now()}.xbk`);
+    console.log(`${D}İndiriliyor: ${source}${X}`);
+    await s3Download(target, rest.join("/"), file);
+  } else {
+    // Sunucunun dosya sistemi konteynerde /host altında salt okunur bağlı.
+    file = fs.existsSync(source) ? source : path.join("/host", path.resolve("/", source));
+    if (!fs.existsSync(file)) throw new Error(`Dosya bulunamadı: ${source}`);
+  }
+  const pass = opt("passphrase") ?? (await ask("Yedek şifresi: "));
+  const files = await unpackTar(gunzipSync(decryptArchive(fs.readFileSync(file), pass)));
+  if (!files["xudbin.db"] || !files["secret.key"]) throw new Error("Yedekte panel veritabanı veya anahtar yok");
+  const stage = path.join(config.dataDir, "restore");
+  fs.mkdirSync(stage, { recursive: true });
+  fs.writeFileSync(path.join(stage, "xudbin.db"), files["xudbin.db"], { mode: 0o600 });
+  fs.writeFileSync(path.join(stage, "secret.key"), files["secret.key"], { mode: 0o600 });
+  const manifest = files["manifest.json"] ? (JSON.parse(files["manifest.json"].toString()) as { createdAt?: number }) : {};
+  console.log(`${G}Yedek hazır${X}${manifest.createdAt ? ` (${new Date(manifest.createdAt).toLocaleString("tr-TR")})` : ""}. Panel yeniden başlayınca geri yüklenecek.`);
+  console.log(`${D}Yeni bir sunucuya taşındıysan: uygulamaları yeniden deploy et, veritabanlarını yedeklerinden geri yükle (uzak depolamadan otomatik indirilir).${X}`);
+}
+
+function ask(question: string) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<string>((resolve) =>
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer);
+    }),
+  );
 }
 
 main().catch((e) => {

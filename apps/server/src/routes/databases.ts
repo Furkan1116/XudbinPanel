@@ -19,10 +19,13 @@ import {
   getDatabase,
   restoreBackup,
   startDatabase,
+  verifyBackup,
   type DatabaseRow,
   type Engine,
 } from "../services/databases.js";
 import { demuxLogs } from "../services/deploy.js";
+import { offsiteTarget } from "../services/offsite.js";
+import { s3Delete } from "../lib/s3.js";
 import { dockerFor } from "../services/docker.js";
 import { getServer } from "../services/servers.js";
 
@@ -93,7 +96,13 @@ export const databaseRoutes = new Hono()
 
   .get("/:id", (c) => {
     const d = load(idParam(c));
-    const backups = db.prepare("SELECT id, file, size, status, error, created_at AS createdAt FROM backups WHERE database_id = ? ORDER BY id DESC").all(d.id);
+    const backups = db
+      .prepare(
+        `SELECT id, file, size, status, error, created_at AS createdAt, remote_key IS NOT NULL AS remote, remote_error AS remoteError,
+                verify_status AS verifyStatus, verify_note AS verifyNote, verified_at AS verifiedAt
+         FROM backups WHERE database_id = ? ORDER BY id DESC`,
+      )
+      .all(d.id);
     return c.json({ database: publicDb(d), backups });
   })
 
@@ -164,10 +173,22 @@ export const databaseRoutes = new Hono()
     return c.json({ ok: true });
   })
 
-  .delete("/:id/backups/:backupId", (c) => {
+  // Yedeği geçici bir konteynere geri yükleyip dener; arka planda çalışır, sonuç yedek listesinde görünür.
+  .post("/:id/backups/:backupId/verify", (c) => {
     const d = load(idParam(c));
-    const b = db.prepare("SELECT file FROM backups WHERE id = ? AND database_id = ?").get(idParam(c, "backupId"), d.id) as { file: string } | undefined;
+    const id = idParam(c, "backupId");
+    must(db.prepare("SELECT 1 FROM backups WHERE id = ? AND database_id = ? AND status = 'success'").get(id, d.id), "Yedek bulunamadı");
+    db.prepare("UPDATE backups SET verify_status = 'running', verify_note = NULL WHERE id = ?").run(id);
+    verifyBackup(d, id).catch(() => {});
+    return c.json({ ok: true }, 202);
+  })
+
+  .delete("/:id/backups/:backupId", async (c) => {
+    const d = load(idParam(c));
+    const b = db.prepare("SELECT file, remote_key FROM backups WHERE id = ? AND database_id = ?").get(idParam(c, "backupId"), d.id) as { file: string; remote_key: string | null } | undefined;
     if (b) fs.rmSync(path.join(backupDir(d), b.file), { force: true });
+    const target = offsiteTarget();
+    if (b?.remote_key && target) await s3Delete(target, b.remote_key).catch(() => {});
     db.prepare("DELETE FROM backups WHERE id = ? AND database_id = ?").run(idParam(c, "backupId"), d.id);
     return c.json({ ok: true });
   })

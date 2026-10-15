@@ -1,3 +1,4 @@
+import "./restore-boot.js";
 import fs from "node:fs";
 import path from "node:path";
 import { serve } from "@hono/node-server";
@@ -23,6 +24,7 @@ import { settingsRoutes } from "./routes/settings.js";
 import { userRoutes } from "./routes/users.js";
 import { applyCaddyConfig, ensureCaddy } from "./services/caddy.js";
 import { startBackupScheduler } from "./services/databases.js";
+import { startPanelBackupScheduler } from "./services/panel-backup.js";
 import { recoverInterruptedDeployments } from "./services/deploy.js";
 import { startFirewallKeeper } from "./services/firewall.js";
 import { getSettings, updateSettings } from "./lib/settings.js";
@@ -88,6 +90,7 @@ if (process.env.ACME_EMAIL) {
 }
 recoverInterruptedDeployments();
 startBackupScheduler();
+startPanelBackupScheduler();
 startSecurityMonitor();
 startFirewallKeeper();
 startServerMonitor((s, ok) =>

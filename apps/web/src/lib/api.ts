@@ -167,7 +167,19 @@ export type Database = {
   createdAt: number;
 };
 
-export type Backup = { id: number; file: string; size: number; status: "running" | "success" | "failed"; error: string | null; createdAt: number };
+export type Backup = {
+  id: number;
+  file: string;
+  size: number;
+  status: "running" | "success" | "failed";
+  error: string | null;
+  createdAt: number;
+  remote?: number;
+  remoteError?: string | null;
+  verifyStatus?: "running" | "success" | "failed" | null;
+  verifyNote?: string | null;
+  verifiedAt?: number | null;
+};
 
 export type FieldDef = {
   key: string;

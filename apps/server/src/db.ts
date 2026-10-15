@@ -246,6 +246,25 @@ const migrations: string[] = [
   ALTER TABLE apps ADD COLUMN health_path TEXT;
   ALTER TABLE deployments ADD COLUMN diagnosis TEXT;
   `,
+  // Uzak yedek ve geri yükleme testi.
+  `
+  ALTER TABLE backups ADD COLUMN remote_key TEXT;
+  ALTER TABLE backups ADD COLUMN remote_error TEXT;
+  ALTER TABLE backups ADD COLUMN verify_status TEXT;
+  ALTER TABLE backups ADD COLUMN verify_note TEXT;
+  ALTER TABLE backups ADD COLUMN verified_at INTEGER;
+  ALTER TABLE databases ADD COLUMN last_verify_at INTEGER;
+  CREATE TABLE panel_backups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    file        TEXT NOT NULL,
+    size        INTEGER NOT NULL DEFAULT 0,
+    status      TEXT NOT NULL,
+    error       TEXT,
+    remote_key  TEXT,
+    remote_error TEXT,
+    created_at  INTEGER NOT NULL
+  );
+  `,
 ];
 
 function migrate() {

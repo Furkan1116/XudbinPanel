@@ -7,6 +7,15 @@ export type Settings = {
   autoBanThreshold: number;   // pencere içinde kaç engellenen istek
   autoBanWindowMin: number;
   autoBanDurationH: number;
+  /** Uzak yedek hedefi (S3 uyumlu); secretKey şifreli saklanır. */
+  backupS3: { endpoint: string; region: string; bucket: string; accessKey: string; secretKey: string; prefix: string } | null;
+  /** Panel yedeğinin şifresi (panelin anahtarıyla şifreli). Boşsa panel yedeği alınmaz. */
+  panelBackupPassphrase: string;
+  panelBackupIntervalH: number;
+  panelBackupKeep: number;
+  lastPanelBackupAt: number | null;
+  /** Veritabanı yedekleri en fazla bu sıklıkta geçici bir konteynere geri yüklenip doğrulanır. */
+  verifyBackupsEveryH: number;
 };
 
 const DEFAULTS: Settings = {
@@ -16,6 +25,12 @@ const DEFAULTS: Settings = {
   autoBanThreshold: 30,
   autoBanWindowMin: 10,
   autoBanDurationH: 24,
+  backupS3: null,
+  panelBackupPassphrase: "",
+  panelBackupIntervalH: 24,
+  panelBackupKeep: 7,
+  lastPanelBackupAt: null,
+  verifyBackupsEveryH: 24,
 };
 
 export function getSettings(): Settings {

@@ -17,7 +17,7 @@ export function DatabaseDetailPage() {
   const { data } = useQuery({
     queryKey: ["database", id],
     queryFn: () => api.get<{ database: Database; backups: Backup[] }>(`/databases/${id}`),
-    refetchInterval: (q) => (q.state.data?.database.status === "starting" ? 2000 : 10_000),
+    refetchInterval: (q) => (q.state.data?.database.status === "starting" || q.state.data?.backups.some((b) => b.verifyStatus === "running") ? 2000 : 10_000),
   });
   const act = useAction((a: "start" | "stop" | "restart") => api.post(`/databases/${id}/${a}`), { success: t("İşlem tamamlandı"), invalidate: [["database", id]] });
   if (!data) return <PageLoading />;
@@ -103,6 +103,7 @@ function Backups({ d, backups }: { d: Database; backups: Backup[] }) {
   const create = useAction(() => api.post(`/databases/${d.id}/backups`), { success: t("Yedek alındı"), invalidate: [["database", d.id]] });
   const doRestore = useAction((b: Backup) => api.post(`/databases/${d.id}/backups/${b.id}/restore`), { success: t("Yedek geri yüklendi"), onSuccess: () => setRestore(null) });
   const del = useAction((b: Backup) => api.del(`/databases/${d.id}/backups/${b.id}`), { success: t("Yedek silindi"), invalidate: [["database", d.id]] });
+  const verify = useAction((b: Backup) => api.post(`/databases/${d.id}/backups/${b.id}/verify`), { success: t("Doğrulama başladı"), invalidate: [["database", d.id]] });
   const saveSchedule = useAction(
     () => api.patch(`/databases/${d.id}`, { backupIntervalH: schedule.on ? Number(schedule.hours) || 24 : 0, backupKeep: Number(schedule.keep) || 7 }),
     { success: t("Yedekleme planı kaydedildi"), invalidate: [["database", d.id]] },
@@ -125,7 +126,7 @@ function Backups({ d, backups }: { d: Database; backups: Backup[] }) {
         </div>
       </div>
 
-      <Section title={t("Yedekler")} description={t("Yedekler panelin çalıştığı sunucuda saklanır.")} actions={<Button variant="primary" onClick={() => create.mutate()} loading={create.isPending} disabled={d.status !== "running"}>{t("Şimdi yedekle")}</Button>}>
+      <Section title={t("Yedekler")} description={t("Yedekler panelin sunucusunda, uzak depolama tanımlıysa orada da saklanır. \"Doğrula\" yedeği geçici bir veritabanına geri yükleyip dener.")} actions={<Button variant="primary" onClick={() => create.mutate()} loading={create.isPending} disabled={d.status !== "running"}>{t("Şimdi yedekle")}</Button>}>
         {backups.length === 0 ? (
           <div className="panel px-5 py-6 text-[14px] text-muted">{t("Henüz yedek yok.")}</div>
         ) : (
@@ -136,6 +137,14 @@ function Backups({ d, backups }: { d: Database; backups: Backup[] }) {
                   <div className="truncate font-mono text-[13px]">{b.file}</div>
                   <div className="text-[13px] text-faint">{dateTime(b.createdAt)}{b.status === "success" ? `, ${formatBytes(b.size)}` : ""}</div>
                   {b.error && <div className="text-[13px] text-accent">{b.error}</div>}
+                  {b.status === "success" && (
+                    <div className="mt-0.5 flex flex-wrap gap-x-3 text-[12px]">
+                      {b.remote ? <span className="text-muted">{t("Uzak depolamada")} ✓</span> : b.remoteError ? <span className="text-accent">{t("Uzağa yüklenemedi")}: {b.remoteError}</span> : null}
+                      {b.verifyStatus === "running" && <span className="text-muted">{t("Doğrulanıyor...")}</span>}
+                      {b.verifyStatus === "success" && <span className="text-muted">{t("Doğrulandı")} ✓ {b.verifyNote}{b.verifiedAt ? `, ${timeAgo(b.verifiedAt)}` : ""}</span>}
+                      {b.verifyStatus === "failed" && <span className="text-accent">{t("Doğrulama başarısız")}: {b.verifyNote}</span>}
+                    </div>
+                  )}
                 </div>
                 <StatusBadge status={b.status} />
                 {b.status === "success" && (
@@ -143,6 +152,7 @@ function Backups({ d, backups }: { d: Database; backups: Backup[] }) {
                     <a href={`/api/databases/${d.id}/backups/${b.id}/download`} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg">
                       <Download className="size-4" /> {t("İndir")}
                     </a>
+                    <Button size="sm" variant="ghost" disabled={b.verifyStatus === "running"} onClick={() => verify.mutate(b)}>{t("Doğrula")}</Button>
                     {d.engine !== "redis" && <Button size="sm" variant="ghost" onClick={() => setRestore(b)}>{t("Geri yükle")}</Button>}
                     <Button size="sm" variant="ghost" onClick={() => del.mutate(b)}>{t("Sil")}</Button>
                   </div>
