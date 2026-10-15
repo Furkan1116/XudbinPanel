@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-bg: #0b0d0c;
+  --color-surface: #121513;
+  --color-surface-2: #181c19;
+  --color-line: #232824;
+  --color-line-strong: #2f3631;
+  --color-fg: #e8ece9;
+  --color-muted: #8a958d;
+  --color-faint: #5d6760;
+  --color-accent: #34d399;
+  --color-accent-dim: #10392b;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+}
+
+html { color-scheme: dark; }
+body {
+  @apply bg-bg text-fg font-sans antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+
+@utility input {
+  @apply w-full rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-fg outline-none
+    placeholder:text-faint transition focus:border-accent/60 focus:ring-2 focus:ring-accent/15;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition
+    disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-accent text-[#04140d] hover:bg-accent/90;
+}
+@utility btn-ghost {
+  @apply btn text-muted hover:bg-surface-2 hover:text-fg;
+}
+@utility card {
+  @apply rounded-xl border border-line bg-surface;
+}

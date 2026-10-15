@@ -1,0 +1,13 @@
+# Caddy, XUDBIN_DOMAIN için Let's Encrypt sertifikasını otomatik alır ve yeniler.
+{
+	email {$ACME_EMAIL}
+}
+
+{$XUDBIN_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	reverse_proxy xudbin:3000
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@xudbin/server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "dockerode": "^5.0.1",
+    "hono": "^4.13.13",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^4.0.2",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

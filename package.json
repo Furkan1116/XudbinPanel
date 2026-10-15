@@ -1,0 +1,22 @@
+{
+  "name": "xudbin",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Kendi sunucunu yönet: otomatik domain, ücretsiz HTTPS ve yerleşik saldırı koruması olan self-hosted panel.",
+  "license": "MIT",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @xudbin/server\" \"npm run dev -w @xudbin/web\"",
+    "build": "npm run build -w @xudbin/web && npm run build -w @xudbin/server",
+    "start": "npm run start -w @xudbin/server",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}
