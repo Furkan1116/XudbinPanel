@@ -181,6 +181,7 @@ export const en: Record<string, string> = {
   "Geçici şifre": "Temporary password",
   "Genel": "Overview",
   "Genel bakış": "Overview",
+  "* ile işaretliler ve alan adına bağlı olanlar eklemezsen deploy sırasında otomatik eklenir.": "Starred and domain-based ones are added automatically at deploy if you leave them out.",
   "Gerekenlerin hepsini ekle": "Add all required",
   "Geri dönüş": "Rollback",
   "Geri dönüş başladı": "Rollback started",

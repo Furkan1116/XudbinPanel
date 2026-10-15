@@ -1,7 +1,7 @@
 import { astro, bun, deno, nestjs, nextjs, node, nuxt, remix, spa, sveltekit } from "./node.js";
 import { django, fastapi, flask, python } from "./python.js";
 import { dockerfileFw, dotnet, go, java, laravel, php, rails, rust, staticSite } from "./others.js";
-import type { EnvHint, Framework, Options, Repo } from "./types.js";
+import type { Framework, Options, Repo } from "./types.js";
 import { openRepo, readEnvExample, scanEnvNames } from "./util.js";
 
 export type { Framework, Options } from "./types.js";
@@ -64,23 +64,30 @@ export function detectFrameworks(root: string): DetectResult {
   return { matches, envFromCode: scanRepoEnv(root, repo), envExample: readEnvExample(repo), dockerfilePort: port || undefined };
 }
 
-/** Otomatik değerli ortam değişkeni önerilerini uygulamanın alan adlarına göre doldurur. */
-export function resolveHintValue(h: EnvHint, ctx: { hosts: string[]; https: boolean }, random: (n: number) => string): string {
-  const scheme = ctx.https ? "https" : "http";
-  switch (h.auto) {
-    case "secret":
-      return random(50);
-    case "laravel-key":
-      return `base64:${Buffer.from(random(32)).toString("base64")}`;
-    case "domains":
-      return ctx.hosts.join(",");
-    case "url":
-      return ctx.hosts[0] ? `${scheme}://${ctx.hosts[0]}` : "";
-    case "https-origins":
-      return ctx.hosts.map((h2) => `${scheme}://${h2}`).join(",");
-    default:
-      return h.value ?? "";
-  }
+const DOMAIN_PLACEHOLDERS = { domains: "{{XUDBIN_DOMAINS}}", url: "{{XUDBIN_URL}}", "https-origins": "{{XUDBIN_ORIGINS}}" } as const;
+
+/**
+ * Deploy sırasında env'de eksikse otomatik eklenecek öneriler: zorunlu olanlar ve alan adına bağlı olanlar.
+ * Alan adına bağlı değerler yer tutucu olarak yazılır; her deploy'da uygulamanın güncel alan adlarıyla doldurulur.
+ */
+export function missingDefaultEnv(fw: Framework, env: Record<string, string>, random: (n: number) => string): { key: string; value: string }[] {
+  return fw.envHints
+    .filter((h) => !(h.key in env) && (h.required || (h.auto && h.auto in DOMAIN_PLACEHOLDERS)))
+    .map((h) => {
+      switch (h.auto) {
+        case "secret":
+          return { key: h.key, value: random(50) };
+        case "laravel-key":
+          return { key: h.key, value: `base64:${Buffer.from(random(32)).toString("base64")}` };
+        case "domains":
+        case "url":
+        case "https-origins":
+          return { key: h.key, value: DOMAIN_PLACEHOLDERS[h.auto] };
+        default:
+          return { key: h.key, value: h.value ?? "" };
+      }
+    })
+    .filter((e) => e.value !== "");
 }
 
 export { openRepo as _openRepo };

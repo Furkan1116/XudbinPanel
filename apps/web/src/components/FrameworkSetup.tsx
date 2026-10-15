@@ -219,6 +219,9 @@ export function EnvSuggestions({
               </li>
             ))}
           </ul>
+          {missingHints.some((h) => h.required || h.auto === "domains" || h.auto === "url" || h.auto === "https-origins") && (
+            <p className="mt-2 text-[12px] text-muted">{t("* ile işaretliler ve alan adına bağlı olanlar eklemezsen deploy sırasında otomatik eklenir.")}</p>
+          )}
         </div>
       )}
       {example.length > 0 && (

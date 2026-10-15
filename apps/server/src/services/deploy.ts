@@ -6,9 +6,9 @@ import tarFs from "tar-fs";
 import YAML from "yaml";
 import { config } from "../config.js";
 import { db } from "../db.js";
-import { decrypt } from "../lib/crypto.js";
+import { decrypt, encrypt, randomAlnum } from "../lib/crypto.js";
 import { bus } from "../lib/events.js";
-import { detectFrameworks, getFramework, openRepo, type Options } from "./frameworks/index.js";
+import { detectFrameworks, getFramework, missingDefaultEnv, openRepo, type Framework, type Options } from "./frameworks/index.js";
 import { applyCaddyConfig, CADDY_CONTAINER } from "./caddy.js";
 import { buildImage, containerState, dockerFor, execIn, pullImage, removeContainer, type ServerRow } from "./docker.js";
 import { notify } from "./notify.js";
@@ -314,6 +314,7 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
   } else {
     const fw = getFramework(frameworkId);
     if (!fw) throw new Error(`Bilinmeyen framework: ${frameworkId}`);
+    addDefaultEnv(app, fw, log);
     const env = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off").env;
     const result = fw.build(openRepo(contextDir), opts, env);
     dockerfile = "Dockerfile.xudbin";
@@ -335,6 +336,17 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
   const context = tarFs.pack(contextDir, { ignore: (name) => name.split(path.sep).includes(".git") });
   await buildImage(dockerFor(server), context, { tag, dockerfile }, log);
   return tag;
+}
+
+/** Framework'ün zorunlu ve alan adına bağlı env değişkenlerinden eksik olanları uygulamaya kalıcı olarak ekler. */
+function addDefaultEnv(app: AppRow, fw: Framework, log: (l: string) => void) {
+  const raw = decrypt(app.env);
+  const add = missingDefaultEnv(fw, parseEnv(raw), randomAlnum);
+  if (!add.length) return;
+  const next = (raw.trim() ? `${raw.trimEnd()}\n` : "") + add.map((e) => `${e.key}=${e.value}`).join("\n") + "\n";
+  app.env = encrypt(next);
+  db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(app.env, app.id);
+  log(`Eksik ortam değişkenleri otomatik eklendi: ${add.map((e) => e.key).join(", ")} (uygulama ayarlarından değiştirebilirsin)`);
 }
 
 type Volume = { name: string; path: string };
