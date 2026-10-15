@@ -16,6 +16,7 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:-}
       XUDBIN_HTTPS: ${XUDBIN_HTTPS:-1}
       XUDBIN_PUBLIC_IP: ${XUDBIN_PUBLIC_IP:-}
+      XUDBIN_ACME_CA: ${XUDBIN_ACME_CA:-}
     volumes:
       - xudbin-data:/data
       - /var/run/docker.sock:/var/run/docker.sock

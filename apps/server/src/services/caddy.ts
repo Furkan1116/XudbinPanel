@@ -359,7 +359,19 @@ export function buildCaddyConfig(server: ServerRow) {
     server.https_mode === "internal"
       ? [{ issuers: [{ module: "internal" }] }]
       : server.https_mode === "auto"
-        ? [{ issuers: [{ module: "acme", ...(server.acme_email ? { email: server.acme_email } : {}) }] }]
+        ? [
+            {
+              issuers: [
+                {
+                  module: "acme",
+                  ...(server.acme_email ? { email: server.acme_email } : {}),
+                  // İsteğe bağlı farklı ACME sunucusu (ör. Let's Encrypt staging) ve onun kök sertifikası.
+                  ...(config.acmeCa ? { ca: config.acmeCa } : {}),
+                  ...(config.acmeCaRoot ? { trusted_roots_pem_files: [config.acmeCaRoot] } : {}),
+                },
+              ],
+            },
+          ]
         : undefined;
 
   return {

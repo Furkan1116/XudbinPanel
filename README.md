@@ -65,6 +65,13 @@ Dış IP'si olmayan bir yerel ağ sunucusunda (ev sunucusu, test makinesi) Let's
 sudo XUDBIN_HTTPS=0 ./install.sh
 ```
 
+Sertifika denemelerinde Let's Encrypt limitlerine takılmamak için staging ortamını kullanabilirsin (tarayıcılar bu sertifikalara güvenmez, yalnız deneme içindir):
+
+```bash
+echo 'XUDBIN_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory' | sudo tee -a /opt/xudbin/.env
+cd /opt/xudbin && sudo docker compose up -d
+```
+
 Kurulum linkini kaçırırsan:
 
 ```bash
