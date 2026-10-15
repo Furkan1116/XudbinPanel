@@ -75,7 +75,9 @@ echo "disk $(df -kP / | tail -1 | awk '{print $2, $3}')"
 echo "uptime $(cut -d' ' -f1 /proc/uptime)"
 echo "kernel $(uname -sr)"
 echo "host $(hostname)"
-echo "model $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ //' || echo '')"
+m=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ //' || true)
+[ -n "$m" ] || m=$(lscpu 2>/dev/null | awk -F: '/Model name/{gsub(/^ +/,"",$2); print $2; exit}' || true)
+echo "model $m"
 . /etc/os-release 2>/dev/null && echo "os $PRETTY_NAME" || true
 `;
 
@@ -98,7 +100,7 @@ function parseRemoteStats(out: string): ServerStats {
       usage: Math.round(usage * 10) / 10,
       cores: Number(line("cores")) || 1,
       load: line("load").split(/\s+/).map(Number),
-      model: line("model") || "Bilinmiyor",
+      model: line("model").replace(/^-$/, ""),
     },
     memory: { total: memTotal, used: memTotal - memAvail },
     disk: diskTotal ? { total: diskTotal, used: diskUsed ?? 0 } : null,

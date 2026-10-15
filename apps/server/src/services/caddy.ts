@@ -271,14 +271,27 @@ export function buildCaddyConfig(server: ServerRow) {
     )
     .all(server.id) as DomainRow[];
 
-  const routes: Route[] = [];
+  // HTTPS'li alan adları :443 sunucusunda, yalnız HTTP olanlar :80 sunucusunda servis edilir.
+  // :80'de ayrı bir sunucu olunca Caddy HTTPS'li alan adları için HTTP→HTTPS yönlendirmesini kendisi ekler.
+  const httpsRoutes: Route[] = [];
+  const httpRoutes: Route[] = [];
   const httpOnlyHosts: string[] = [];
   const httpsHosts: string[] = [];
 
   // Panel: yalnızca panelin çalıştığı (yerel) sunucuda.
+  const httpsOff = server.https_mode === "off";
+  const add = (host: string, wantsHttps: boolean, route: Route) => {
+    if (wantsHttps && !httpsOff) {
+      httpsHosts.push(host);
+      httpsRoutes.push(route);
+    } else {
+      httpOnlyHosts.push(host);
+      httpRoutes.push(route);
+    }
+  };
+
   if (server.kind === "local" && settings.panelDomain) {
-    (settings.panelHttps ? httpsHosts : httpOnlyHosts).push(settings.panelDomain);
-    routes.push({
+    add(settings.panelDomain, settings.panelHttps, {
       match: [{ host: [settings.panelDomain] }],
       handle: [
         {
@@ -302,7 +315,6 @@ export function buildCaddyConfig(server: ServerRow) {
   }
 
   for (const d of domains) {
-    (d.https ? httpsHosts : httpOnlyHosts).push(d.host);
     const upstream = upstreamFor(d);
     const sec = parseSecurity(d.security);
     const { routes: secRoutes, handlers } = securityHandlers(sec, `app_${d.app_id}`);
@@ -319,7 +331,7 @@ export function buildCaddyConfig(server: ServerRow) {
               },
             ],
           };
-    routes.push({
+    add(d.host, Boolean(d.https), {
       match: [{ host: [d.host] }],
       handle: [
         {
@@ -332,7 +344,7 @@ export function buildCaddyConfig(server: ServerRow) {
   }
 
   // Hiçbir uygulamaya bağlı olmayan adresler.
-  routes.push({
+  const fallback: Route = {
     handle: [
       {
         handler: "static_response",
@@ -341,9 +353,8 @@ export function buildCaddyConfig(server: ServerRow) {
         body: placeholderPage("Bu adres bir uygulamaya bağlı değil", "Sunucu Xudbin ile yönetiliyor, ama bu alan adı için tanımlı bir uygulama yok."),
       },
     ],
-  });
+  };
 
-  const httpsOff = server.https_mode === "off";
   const tlsPolicies =
     server.https_mode === "internal"
       ? [{ issuers: [{ module: "internal" }] }]
@@ -365,14 +376,19 @@ export function buildCaddyConfig(server: ServerRow) {
     },
     apps: {
       http: {
-        servers: {
-          main: {
-            listen: httpsOff ? [":80"] : [":80", ":443"],
-            routes,
-            logs: { default_logger_name: "access" },
-            automatic_https: httpsOff ? { disable: true } : { skip: httpOnlyHosts },
-          },
-        },
+        servers: httpsOff
+          ? {
+              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, automatic_https: { disable: true } },
+            }
+          : {
+              https: {
+                listen: [":443"],
+                routes: [...httpsRoutes, fallback],
+                logs: { default_logger_name: "access" },
+                automatic_https: { skip: httpOnlyHosts },
+              },
+              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" } },
+            },
       },
       ...(tlsPolicies && !httpsOff && httpsHosts.length
         ? { tls: { automation: { policies: tlsPolicies } } }

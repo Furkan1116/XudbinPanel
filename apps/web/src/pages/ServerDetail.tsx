@@ -91,7 +91,7 @@ function Overview({ server }: { server: Server }) {
       <dl className="mt-6 grid gap-x-8 gap-y-3 text-[14px] sm:grid-cols-2">
         <Info label="İşletim sistemi" value={st.platform} />
         <Info label="Çalışma süresi" value={formatUptime(st.uptime)} />
-        <Info label="İşlemci" value={`${st.cpu.model}, ${st.cpu.cores} çekirdek`} />
+        <Info label="İşlemci" value={[st.cpu.model && st.cpu.model !== "Bilinmiyor" ? st.cpu.model : null, `${st.cpu.cores} çekirdek`].filter(Boolean).join(", ")} />
         <Info label="Yük ortalaması" value={st.cpu.load.map((n) => n.toFixed(2)).join("  ")} />
         <Info label="Docker" value={data.docker.available ? `${data.docker.version}, ${data.docker.containers.running}/${data.docker.containers.total} konteyner çalışıyor` : `Ulaşılamıyor: ${data.docker.error}`} />
       </dl>

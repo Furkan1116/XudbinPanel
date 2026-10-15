@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
  */
 export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = "Henüz çıktı yok." }: { url: string; height?: string; onDone?: () => void; emptyText?: string }) {
   const [lines, setLines] = useState<string[]>([]);
-  const [live, setLive] = useState(true);
+  const [state, setState] = useState<"live" | "done" | "closed">("live");
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const doneRef = useRef(onDone);
@@ -14,7 +14,7 @@ export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = "Hen�
 
   useEffect(() => {
     setLines([]);
-    setLive(true);
+    setState("live");
     const es = new EventSource(url);
     es.addEventListener("snapshot", (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { log?: string };
@@ -22,11 +22,11 @@ export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = "Hen�
     });
     es.addEventListener("line", (e) => setLines((prev) => (prev.length > 5000 ? [...prev.slice(-4000), (e as MessageEvent).data] : [...prev, (e as MessageEvent).data])));
     es.addEventListener("done", () => {
-      setLive(false);
+      setState("done");
       es.close();
       doneRef.current?.();
     });
-    es.onerror = () => setLive(false);
+    es.onerror = () => setState((s) => (s === "done" ? s : "closed"));
     return () => es.close();
   }, [url]);
 
@@ -40,8 +40,8 @@ export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = "Hen�
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-[12px] text-[#8f8a8e]">
         <span>{lines.length} satır</span>
         <span className="inline-flex items-center gap-1.5">
-          <span className={`size-1.5 rounded-full ${live ? "bg-[#62c08a]" : "bg-[#5f5a5e]"}`} />
-          {live ? "Canlı" : "Bağlantı kapalı"}
+          <span className={`size-1.5 rounded-full ${state === "live" ? "bg-[#62c08a]" : "bg-[#5f5a5e]"}`} />
+          {{ live: "Canlı", done: "Tamamlandı", closed: "Bağlantı kesildi" }[state]}
         </span>
       </div>
       <div

@@ -59,6 +59,12 @@ Kendi alan adınla (A kaydı sunucuya yönlendirilmiş olmalı):
 sudo XUDBIN_DOMAIN=panel.ornek.com ACME_EMAIL=sen@ornek.com ./install.sh
 ```
 
+Dış IP'si olmayan bir yerel ağ sunucusunda (ev sunucusu, test makinesi) Let's Encrypt sertifika veremez; HTTPS'i kapatarak kur:
+
+```bash
+sudo XUDBIN_HTTPS=0 ./install.sh
+```
+
 Kurulum linkini kaçırırsan:
 
 ```bash

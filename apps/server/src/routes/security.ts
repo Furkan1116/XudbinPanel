@@ -12,7 +12,8 @@ export const securityRoutes = new Hono()
     const bucketMs = hours <= 24 ? 3_600_000 : 86_400_000;
     const byKind = db.prepare("SELECT kind, COUNT(*) AS n FROM security_events WHERE created_at > ? GROUP BY kind").all(since) as { kind: string; n: number }[];
     const timeline = db
-      .prepare(`SELECT (created_at / ?) * ? AS t, COUNT(*) AS n FROM security_events WHERE created_at > ? GROUP BY t ORDER BY t`)
+      // Parametreler REAL olarak bağlanır; tam sayı bölmesi için CAST şart.
+      .prepare(`SELECT CAST(created_at / ? AS INTEGER) * ? AS t, COUNT(*) AS n FROM security_events WHERE created_at > ? GROUP BY t ORDER BY t`)
       .all(bucketMs, bucketMs, since);
     const topIps = db
       .prepare(
