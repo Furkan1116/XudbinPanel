@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -15,7 +16,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: "same-origin",
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, body.error ?? `İstek başarısız (${res.status})`, body);
+  if (!res.ok) throw new ApiError(res.status, body.error ?? t("İstek başarısız ({status})", { status: res.status }), body);
   return body as T;
 }
 

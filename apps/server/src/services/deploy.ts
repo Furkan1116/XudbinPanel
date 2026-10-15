@@ -9,8 +9,8 @@ import { db } from "../db.js";
 import { decrypt } from "../lib/crypto.js";
 import { bus } from "../lib/events.js";
 import { detectFrameworks, getFramework, openRepo, type Options } from "./frameworks/index.js";
-import { applyCaddyConfig } from "./caddy.js";
-import { buildImage, containerState, dockerFor, pullImage, removeContainer, type ServerRow } from "./docker.js";
+import { applyCaddyConfig, CADDY_CONTAINER } from "./caddy.js";
+import { buildImage, containerState, dockerFor, execIn, pullImage, removeContainer, type ServerRow } from "./docker.js";
 import { notify } from "./notify.js";
 import { getServer } from "./servers.js";
 import { getPrivateKey } from "./ssh.js";
@@ -351,17 +351,53 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   });
   await container.start();
 
-  // Kısa bir sağlık kontrolü: konteyner hemen çöküyorsa trafiği yeni sürüme yönlendirme.
-  await new Promise((r) => setTimeout(r, 4000));
-  const state = await containerState(docker, name);
-  if (!state.running) {
-    const logs = await container.logs({ stdout: true, stderr: true, tail: 30 });
-    log("Konteyner başlar başlamaz kapandı. Son çıktı:");
-    demuxLogs(logs).forEach((l) => log(`  ${l}`));
+  // Sağlık kontrolü: trafik, yeni konteyner portunu gerçekten dinlemeye başlayana kadar eski sürümde kalır.
+  // Kontrol, ortak ağdaki Caddy konteynerinden yapılır (uygulama imajında araç olması gerekmez).
+  const failWithLogs = async (message: string) => {
+    const logs = await container.logs({ stdout: true, stderr: true, tail: 30 }).catch(() => Buffer.from(""));
+    const lines = demuxLogs(logs);
+    if (lines.length) {
+      log("Uygulamanın son çıktısı:");
+      lines.forEach((l) => log(`  ${l}`));
+    }
     await removeContainer(docker, name);
-    throw new Error(`Konteyner çalışmaya devam etmedi (çıkış kodu ${state.exitCode}). Eski sürüm yayında kalmaya devam ediyor.`);
+    throw new Error(`${message} Eski sürüm yayında kalmaya devam ediyor.`);
+  };
+  const started = Date.now();
+  const limitMs = 120_000;
+  let announced = false;
+  let inspected = false;
+  for (;;) {
+    const state = await containerState(docker, name);
+    if (!state.running) await failWithLogs(`Konteyner kapandı (çıkış kodu ${state.exitCode}).`);
+    const probe = await execIn(docker, CADDY_CONTAINER, ["nc", "-z", "-w", "2", name, String(fresh.port)], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1 }));
+    if (probe.exitCode === 0) break;
+    // Uygulama başka bir portu dinliyorsa (ör. kodda sabitlenmiş) ayarı kendisi düzelt.
+    if (!inspected && Date.now() - started > 8000) {
+      inspected = true;
+      const ports = await listeningPorts(docker, name);
+      const external = ports.filter((p) => !p.localOnly).map((p) => p.port);
+      const found = external[0];
+      if (external.length === 1 && found !== undefined && found !== fresh.port) {
+        log(`Uygulama ${fresh.port} yerine ${found} portunu dinliyor; port ayarı ${found} olarak güncellendi.`);
+        db.prepare("UPDATE apps SET port = ? WHERE id = ?").run(found, app.id);
+        fresh.port = found;
+        continue;
+      }
+      if (!external.length && ports.some((p) => p.localOnly)) {
+        log(`Uyarı: Uygulama yalnız 127.0.0.1 adresini dinliyor (${ports.map((p) => p.port).join(", ")}). Dışarıdan erişilebilmesi için 0.0.0.0 dinlemeli.`);
+      }
+    }
+    if (Date.now() - started > limitMs) {
+      await failWithLogs(`Uygulama 2 dakika içinde ${fresh.port} portunu dinlemeye başlamadı. Port ayarını ve uygulamanın PORT değişkenini kullandığını kontrol et.`);
+    }
+    if (!announced && Date.now() - started > 5000) {
+      log(`Uygulamanın ${fresh.port} portunu açması bekleniyor...`);
+      announced = true;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
   }
-  log("Konteyner çalışıyor.");
+  log(`Konteyner çalışıyor, ${fresh.port} portu ${Math.round((Date.now() - started) / 1000)} sn içinde yanıt verdi.`);
 
   const previous = fresh.container;
   db.prepare("UPDATE apps SET container = ?, current_image = ? WHERE id = ?").run(name, image, app.id);
@@ -372,6 +408,22 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     log(`Eski konteyner kaldırılıyor: ${previous}`);
     await removeContainer(docker, previous);
   }
+}
+
+/** Konteynerde dinlenen TCP portları (/proc/net/tcp*). Araç gerektirmez; okunamazsa boş döner. */
+async function listeningPorts(docker: ReturnType<typeof dockerFor>, name: string) {
+  const res = await execIn(docker, name, ["cat", "/proc/net/tcp", "/proc/net/tcp6"], { timeoutMs: 5000 }).catch(() => null);
+  const out: { port: number; localOnly: boolean }[] = [];
+  for (const line of res?.stdout.split("\n") ?? []) {
+    const cols = line.trim().split(/\s+/);
+    if (cols[3] !== "0A") continue; // LISTEN
+    const [addr, portHex] = (cols[1] ?? "").split(":");
+    const port = parseInt(portHex ?? "", 16);
+    if (!port || out.some((p) => p.port === port)) continue;
+    const localOnly = addr === "0100007F" || addr === "00000000000000000000000001000000";
+    out.push({ port, localOnly });
+  }
+  return out;
 }
 
 /** Docker log akışındaki 8 baytlık çerçeve başlıklarını temizleyip satırlara ayırır. */

@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { AuthShell, Field, FormError } from "@/components/AuthShell";
 import { api, ApiError } from "@/lib/api";
+import { t } from "@/lib/i18n";
 
 export function LoginPage() {
   const qc = useQueryClient();
@@ -23,16 +24,16 @@ export function LoginPage() {
   const showError = login.error && !(needsCode && login.error instanceof ApiError && login.error.data.needsCode && !form.code);
 
   return (
-    <AuthShell title="Giriş yap" subtitle="Sunucularını yönetmek için hesabınla giriş yap.">
+    <AuthShell title={t("Giriş yap")} subtitle={t("Sunucularını yönetmek için hesabınla giriş yap.")}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="E-posta">
+        <Field label={t("E-posta")}>
           <input className="input" type="email" required autoFocus autoComplete="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         </Field>
-        <Field label="Şifre">
+        <Field label={t("Şifre")}>
           <input className="input" type="password" required autoComplete="current-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </Field>
         {needsCode && (
-          <Field label="Doğrulama kodu" hint="Kimlik doğrulama uygulamandaki 6 haneli kod.">
+          <Field label={t("Doğrulama kodu")} hint={t("Kimlik doğrulama uygulamandaki 6 haneli kod.")}>
             <input
               className="input font-mono tracking-[0.3em]"
               inputMode="numeric"
@@ -47,7 +48,7 @@ export function LoginPage() {
         )}
         <FormError message={showError ? login.error?.message : undefined} />
         <button className="btn-primary w-full" disabled={login.isPending}>
-          {login.isPending ? "Giriş yapılıyor…" : "Giriş yap"}
+          {login.isPending ? t("Giriş yapılıyor…") : t("Giriş yap")}
         </button>
       </form>
     </AuthShell>

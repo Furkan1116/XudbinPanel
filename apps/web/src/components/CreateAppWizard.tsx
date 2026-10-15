@@ -6,15 +6,16 @@ import { Button, Dialog, Field, Notice, useAction } from "@/components/ui";
 import { api, type App, type DetectResult, type Server } from "@/lib/api";
 import { DropZone, type Packed, uploadZip } from "./DropZone";
 import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frameworkById, useFrameworks } from "./FrameworkSetup";
+import { t } from "@/lib/i18n";
 
 type Source = App["sourceType"];
 type Step = "source" | "framework" | "settings";
 
 const SOURCES: { id: Source; label: string; text: string }[] = [
-  { id: "git", label: "Git reposu", text: "GitHub, GitLab, Gitea..." },
-  { id: "upload", label: "Dosya yükle", text: "Klasörü sürükle bırak" },
-  { id: "image", label: "Docker imajı", text: "Hazır bir imajı çalıştır" },
-  { id: "compose", label: "Docker Compose", text: "Birden çok servis" },
+  { id: "git", label: t("Git reposu"), text: t("GitHub, GitLab, Gitea...") },
+  { id: "upload", label: t("Dosya yükle"), text: t("Klasörü sürükle bırak") },
+  { id: "image", label: t("Docker imajı"), text: t("Hazır bir imajı çalıştır") },
+  { id: "compose", label: t("Docker Compose"), text: t("Birden çok servis") },
 ];
 
 /** Uygulama ekleme sihirbazı: kaynak → framework (algılamalı) → ayarlar ve ortam değişkenleri. */
@@ -69,7 +70,7 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
   const analyze = useAction(
     async () => {
       if (source === "upload") {
-        if (!packed) throw new Error("Önce proje klasörünü veya zip dosyasını bırak");
+        if (!packed) throw new Error(t("Önce proje klasörünü veya zip dosyasını bırak"));
         const r = await uploadZip<{ uploadId: string; detect: DetectResult }>("/uploads", packed.blob);
         setUploadId(r.uploadId);
         return r.detect;
@@ -129,10 +130,10 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
   };
 
   const stepsShown: Step[] = source === "git" || source === "upload" ? ["source", "framework", "settings"] : ["source", "settings"];
-  const titles: Record<Step, string> = { source: "Kaynak", framework: "Framework", settings: "Ayarlar" };
+  const titles: Record<Step, string> = { source: t("Kaynak"), framework: t("Framework"), settings: t("Ayarlar") };
 
   return (
-    <Dialog open={open} onClose={close} title="Uygulama ekle" wide>
+    <Dialog open={open} onClose={close} title={t("Uygulama ekle")} wide>
       <ol className="-mt-2 mb-5 flex items-center gap-2 text-[13px]">
         {stepsShown.map((s, i) => {
           const done = stepsShown.indexOf(step) > i;
@@ -152,19 +153,19 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
         {step === "source" && (
           <>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Ad">
-                <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={source === "upload" ? "Boşsa klasör adı kullanılır" : "blog"} required={source !== "upload"} />
+              <Field label={t("Ad")}>
+                <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={source === "upload" ? t("Boşsa klasör adı kullanılır") : "blog"} required={source !== "upload"} />
               </Field>
-              <Field label="Sunucu" hint={server && server.status !== "ready" ? "Bu sunucunun kurulumu tamamlanmamış; deploy edilemez." : undefined}>
+              <Field label={t("Sunucu")} hint={server && server.status !== "ready" ? t("Bu sunucunun kurulumu tamamlanmamış; deploy edilemez.") : undefined}>
                 <select className="input" value={serverId ?? defaultServer ?? ""} onChange={(e) => setServerId(Number(e.target.value))}>
                   {serverList.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}{s.status !== "ready" ? " (hazır değil)" : ""}</option>
+                    <option key={s.id} value={s.id}>{s.name}{s.status !== "ready" ? t(" (hazır değil)") : ""}</option>
                   ))}
                 </select>
               </Field>
             </div>
             <fieldset>
-              <legend className="mb-1.5 text-[14px] font-medium">Kaynak</legend>
+              <legend className="mb-1.5 text-[14px] font-medium">{t("Kaynak")}</legend>
               <div className="grid gap-2 sm:grid-cols-4">
                 {SOURCES.map((s) => (
                   <label key={s.id} className={`cursor-pointer rounded-md border px-3 py-2.5 transition-colors ${source === s.id ? "border-accent bg-accent-soft/40" : "border-line-strong hover:bg-surface-2"}`}>
@@ -179,19 +180,19 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
             {(source === "git" || source === "compose") && (
               <>
                 <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
-                  <Field label="Repo adresi" hint={source === "compose" ? "Boş bırakırsan compose dosyasını sonraki adımda yapıştırırsın." : "https:// ile başlamalı."}>
+                  <Field label={t("Repo adresi")} hint={source === "compose" ? t("Boş bırakırsan compose dosyasını sonraki adımda yapıştırırsın.") : "https:// ile başlamalı."}>
                     <input className="input" required={source === "git"} value={git.url} onChange={(e) => setGit({ ...git, url: e.target.value.trim() })} placeholder="https://github.com/kullanici/repo" />
                   </Field>
-                  <Field label="Dal">
+                  <Field label={t("Dal")}>
                     <input className="input" value={git.branch} onChange={(e) => setGit({ ...git, branch: e.target.value.trim() })} />
                   </Field>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-[1fr_12rem]">
-                  <Field label="Erişim token'ı" hint="Yalnız özel (private) repolar için, şifrelenerek saklanır.">
+                  <Field label={t("Erişim token'ı")} hint={t("Yalnız özel (private) repolar için, şifrelenerek saklanır.")}>
                     <input className="input" type="password" autoComplete="off" value={git.token} onChange={(e) => setGit({ ...git, token: e.target.value.trim() })} />
                   </Field>
                   {source === "git" && (
-                    <Field label="Proje klasörü" hint="Monorepo'da alt klasör, ör. apps/web">
+                    <Field label={t("Proje klasörü")} hint={t("Monorepo'da alt klasör, ör. apps/web")}>
                       <input className="input font-mono text-[13px]" value={git.context} onChange={(e) => setGit({ ...git, context: e.target.value.trim() || "." })} />
                     </Field>
                   )}
@@ -204,15 +205,15 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
                   <span>
                     <span className="font-medium">{packed.name}</span>
                     <span className="text-muted"> ({packed.files ? `${packed.files} dosya, ` : ""}{(packed.blob.size / 1024 / 1024).toFixed(1)} MB)</span>
-                    {packed.skippedEnv && <span className="block text-[13px] text-warn">.env dosyası yüklenmedi; değerlerini sonraki adımda ortam değişkenlerine gir.</span>}
+                    {packed.skippedEnv && <span className="block text-[13px] text-warn">{t(".env dosyası yüklenmedi; değerlerini sonraki adımda ortam değişkenlerine gir.")}</span>}
                   </span>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setPacked(null)}>Değiştir</Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setPacked(null)}>{t("Değiştir")}</Button>
                 </div>
               ) : (
                 <DropZone onReady={setPacked} />
               ))}
             {source === "image" && (
-              <Field label="İmaj" hint="Docker Hub veya başka bir kayıttan, ör. ghcr.io/kullanici/uygulama:latest">
+              <Field label={t("İmaj")} hint={t("Docker Hub veya başka bir kayıttan, ör. ghcr.io/kullanici/uygulama:latest")}>
                 <input className="input font-mono" required value={image} onChange={(e) => setImage(e.target.value.trim())} placeholder="nginx:alpine" />
               </Field>
             )}
@@ -225,7 +226,7 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
           <>
             {fw && (source === "git" || source === "upload") && (
               <div className="rounded-md border border-line p-4">
-                <div className="mb-3 text-[14px] font-medium">{fw.name}: deploy'da ne olacak</div>
+                <div className="mb-3 text-[14px] font-medium">{t("{name}: deploy'da ne olacak", { name: fw.name })}</div>
                 <FrameworkSteps fw={fw} />
                 {fw.fields.length > 0 && (
                   <div className="mt-4 border-t border-line pt-4">
@@ -235,22 +236,22 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
               </div>
             )}
             {source === "compose" && !git.url && (
-              <Field label="docker-compose.yml">
+              <Field label={t("docker-compose.yml")}>
                 <textarea className="input h-48 font-mono text-[13px]" required value={composeFile} onChange={(e) => setComposeFile(e.target.value)} placeholder={"services:\n  web:\n    image: nginx:alpine"} />
               </Field>
             )}
             {source !== "compose" && (
-              <Field label="Uygulamanın dinlediği port" hint={framework !== "auto" && framework !== "dockerfile" && source !== "image" ? "Framework'e göre ayarlandı; derlemede otomatik doğrulanır." : "Konteynerin içindeki port."}>
+              <Field label={t("Uygulamanın dinlediği port")} hint={framework !== "auto" && framework !== "dockerfile" && source !== "image" ? t("Framework'e göre ayarlandı; derlemede otomatik doğrulanır.") : t("Konteynerin içindeki port.")}>
                 <input className="input max-w-32" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} placeholder="3000" />
               </Field>
             )}
-            <Field label="Ortam değişkenleri" hint="Her satıra ANAHTAR=değer. Şifrelenerek saklanır; sonra da değiştirebilirsin.">
+            <Field label={t("Ortam değişkenleri")} hint={t("Her satıra ANAHTAR=değer. Şifrelenerek saklanır; sonra da değiştirebilirsin.")}>
               <textarea className="input h-36 font-mono text-[13px]" spellCheck={false} value={env} onChange={(e) => setEnv(e.target.value)} placeholder="DATABASE_URL=..." />
             </Field>
             {(source === "git" || source === "upload") && fw && (
               <EnvSuggestions hints={fw.envHints} detect={detect} env={env} onChange={setEnv} ctx={{ hosts: [], https: server?.httpsMode !== "off" }} />
             )}
-            {server && server.status !== "ready" && <Notice tone="warn" title="Sunucu hazır değil">Uygulama oluşturulur, sunucu kurulumu bitince deploy edebilirsin.</Notice>}
+            {server && server.status !== "ready" && <Notice tone="warn" title={t("Sunucu hazır değil")}>{t("Uygulama oluşturulur, sunucu kurulumu bitince deploy edebilirsin.")}</Notice>}
           </>
         )}
 
@@ -263,9 +264,9 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
             <span />
           )}
           <div className="flex gap-2">
-            <Button type="button" variant="ghost" onClick={close}>Vazgeç</Button>
+            <Button type="button" variant="ghost" onClick={close}>{t("Vazgeç")}</Button>
             <Button type="submit" variant="primary" loading={analyze.isPending || create.isPending} disabled={step === "source" && source === "upload" && !packed}>
-              {step === "settings" ? (server?.status === "ready" && source !== "compose" ? "Oluştur ve deploy et" : "Oluştur") : step === "source" && (source === "git" || source === "upload") ? "Repoyu incele" : "Devam"}
+              {step === "settings" ? (server?.status === "ready" && source !== "compose" ? t("Oluştur ve deploy et") : t("Oluştur")) : step === "source" && (source === "git" || source === "upload") ? t("Repoyu incele") : t("Devam")}
             </Button>
           </div>
         </div>

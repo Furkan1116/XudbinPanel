@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { t } from "@/lib/i18n";
 
 type Point = { t: number; cpu: number; mem: number };
 
@@ -34,9 +35,9 @@ export function ResourceChart({ history }: { history: Point[] }) {
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[13px]">
-        <Legend color="bg-accent" label="İşlemci" value={active?.cpu} />
-        <Legend color="bg-[var(--chart-2)]" label="Bellek" value={active?.mem} />
-        <span className="ml-auto text-faint">{hover !== null && secondsAgo > 0 ? `${secondsAgo} sn önce` : "Son 2 dakika"}</span>
+        <Legend color="bg-accent" label={t("İşlemci")} value={active?.cpu} />
+        <Legend color="bg-[var(--chart-2)]" label={t("Bellek")} value={active?.mem} />
+        <span className="ml-auto text-faint">{hover !== null && secondsAgo > 0 ? t("{s} sn önce", { s: secondsAgo }) : t("Son 2 dakika")}</span>
       </div>
 
       <div className="relative" style={{ height: H }}>
@@ -53,7 +54,7 @@ export function ResourceChart({ history }: { history: Point[] }) {
           onPointerMove={onMove}
           onPointerLeave={() => setHover(null)}
           role="img"
-          aria-label={`İşlemci %${active?.cpu ?? 0}, bellek %${active?.mem ?? 0}`}
+          aria-label={t("İşlemci %{cpu}, bellek %{mem}", { cpu: active?.cpu ?? 0, mem: active?.mem ?? 0 })}
         >
           <path d={path("mem")} fill="none" stroke="var(--chart-2)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
           <path d={path("cpu")} fill="none" stroke="var(--accent)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />

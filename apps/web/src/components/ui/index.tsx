@@ -3,6 +3,7 @@ import { ArrowLeft, Check, Copy, Loader2, X } from "lucide-react";
 import { type ButtonHTMLAttributes, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "./toast";
+import { t } from "@/lib/i18n";
 
 export { toast } from "./toast";
 
@@ -86,7 +87,7 @@ export function Dialog({ open, onClose, title, description, children, wide }: { 
               <h2 className="text-[18px] font-semibold tracking-[-0.01em]">{title}</h2>
               {description && <p className="mt-1 text-[14px] leading-relaxed text-muted">{description}</p>}
             </div>
-            <button onClick={onClose} className="-mt-1 -mr-2 rounded-md p-1.5 text-faint hover:bg-surface-2 hover:text-fg" aria-label="Kapat">
+            <button onClick={onClose} className="-mt-1 -mr-2 rounded-md p-1.5 text-faint hover:bg-surface-2 hover:text-fg" aria-label={t("Kapat")}>
               <X className="size-4" />
             </button>
           </div>
@@ -116,13 +117,13 @@ export function ConfirmDialog(props: {
     <Dialog open={props.open} onClose={props.onClose} title={props.title} description={props.description}>
       {props.children}
       {props.typeToConfirm && (
-        <Field label={`Onaylamak için "${props.typeToConfirm}" yaz`} className="mb-5">
+        <Field label={t("Onaylamak için \"{name}\" yaz", { name: props.typeToConfirm })} className="mb-5">
           <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus />
         </Field>
       )}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={props.onClose}>
-          Vazgeç
+          {t("Vazgeç")}
         </Button>
         <Button variant="primary" disabled={!ok} loading={props.loading} onClick={props.onConfirm}>
           {props.confirmLabel}
@@ -135,21 +136,21 @@ export function ConfirmDialog(props: {
 // ---------------------------------------------------------------------------
 
 const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad" | "muted" | "busy" }> = {
-  running: { label: "Çalışıyor", tone: "ok" },
-  ready: { label: "Hazır", tone: "ok" },
-  success: { label: "Başarılı", tone: "ok" },
-  deploying: { label: "Deploy ediliyor", tone: "busy" },
-  setting_up: { label: "Kuruluyor", tone: "busy" },
-  starting: { label: "Başlatılıyor", tone: "busy" },
-  queued: { label: "Sırada", tone: "busy" },
-  idle: { label: "Henüz deploy edilmedi", tone: "muted" },
-  pending: { label: "Kurulum bekliyor", tone: "warn" },
-  stopped: { label: "Durduruldu", tone: "muted" },
-  cancelled: { label: "İptal edildi", tone: "muted" },
-  failed: { label: "Başarısız", tone: "bad" },
-  error: { label: "Hata", tone: "bad" },
-  exited: { label: "Durdu", tone: "muted" },
-  restarting: { label: "Yeniden başlıyor", tone: "warn" },
+  running: { label: t("Çalışıyor"), tone: "ok" },
+  ready: { label: t("Hazır"), tone: "ok" },
+  success: { label: t("Başarılı"), tone: "ok" },
+  deploying: { label: t("Deploy ediliyor"), tone: "busy" },
+  setting_up: { label: t("Kuruluyor"), tone: "busy" },
+  starting: { label: t("Başlatılıyor"), tone: "busy" },
+  queued: { label: t("Sırada"), tone: "busy" },
+  idle: { label: t("Henüz deploy edilmedi"), tone: "muted" },
+  pending: { label: t("Kurulum bekliyor"), tone: "warn" },
+  stopped: { label: t("Durduruldu"), tone: "muted" },
+  cancelled: { label: t("İptal edildi"), tone: "muted" },
+  failed: { label: t("Başarısız"), tone: "bad" },
+  error: { label: t("Hata"), tone: "bad" },
+  exited: { label: t("Durdu"), tone: "muted" },
+  restarting: { label: t("Yeniden başlıyor"), tone: "warn" },
 };
 
 export function StatusBadge({ status, label }: { status: string; label?: string }) {
@@ -245,7 +246,7 @@ export function CopyField({ value, secret, mono = true }: { value: string; secre
       <span className={`min-w-0 flex-1 truncate text-[13px] ${mono ? "font-mono" : ""}`}>{shown ? value : "•".repeat(Math.min(value.length, 24))}</span>
       {secret && (
         <button type="button" onClick={() => setShown(!shown)} className="rounded-md px-2 py-1 text-[13px] text-muted hover:bg-surface hover:text-fg">
-          {shown ? "Gizle" : "Göster"}
+          {shown ? t("Gizle") : t("Göster")}
         </button>
       )}
       <CopyButton value={value} />
@@ -286,7 +287,7 @@ export function useAction<TVars = void, TResult = unknown>(
       opts.invalidate?.forEach((k) => qc.invalidateQueries({ queryKey: k }));
       opts.onSuccess?.(r);
     },
-    onError: (err) => toast(err.message, "error"),
+    onError: (err) => toast(t(err.message), "error"),
   });
 }
 

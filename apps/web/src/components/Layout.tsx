@@ -3,14 +3,16 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router";
 import { useAuthStatus, useLogout } from "@/lib/auth";
 import { Logo } from "./Logo";
+import { LangSwitch } from "./LangSwitch";
 import { ThemeSwitch } from "./ThemeSwitch";
+import { t } from "@/lib/i18n";
 
 const NAV = [
-  { to: "/", label: "Genel bakış", icon: LayoutGrid, end: true },
-  { to: "/projects", label: "Projeler", icon: FolderKanban },
-  { to: "/servers", label: "Sunucular", icon: Server, admin: true },
-  { to: "/security", label: "Güvenlik", icon: ShieldCheck, admin: true },
-  { to: "/settings", label: "Ayarlar", icon: Settings },
+  { to: "/", label: t("Genel bakış"), icon: LayoutGrid, end: true },
+  { to: "/projects", label: t("Projeler"), icon: FolderKanban },
+  { to: "/servers", label: t("Sunucular"), icon: Server, admin: true },
+  { to: "/security", label: t("Güvenlik"), icon: ShieldCheck, admin: true },
+  { to: "/settings", label: t("Ayarlar"), icon: Settings },
 ];
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -24,8 +26,9 @@ export function Layout({ children }: { children: ReactNode }) {
         <div className="flex items-center justify-between px-4 pt-4 pb-3 md:px-5 md:pt-6 md:pb-6">
           <Logo />
           <div className="flex items-center gap-1 md:hidden">
+            <LangSwitch />
             <ThemeSwitch />
-            <button className="btn-ghost p-2" onClick={() => logout.mutate()} aria-label="Çıkış yap">
+            <button className="btn-ghost p-2" onClick={() => logout.mutate()} aria-label={t("Çıkış yap")}>
               <LogOut className="size-4" />
             </button>
           </div>
@@ -53,13 +56,16 @@ export function Layout({ children }: { children: ReactNode }) {
 
         {user && (
           <div className="hidden space-y-3 border-t border-line px-5 py-4 md:block">
-            <ThemeSwitch />
+            <div className="flex items-center gap-2">
+              <ThemeSwitch />
+              <LangSwitch />
+            </div>
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[14px] font-medium">{user.name}</div>
                 <div className="truncate text-[13px] text-faint">{user.email}</div>
               </div>
-              <button className="btn-ghost -mr-2 p-2" onClick={() => logout.mutate()} aria-label="Çıkış yap" title="Çıkış yap">
+              <button className="btn-ghost -mr-2 p-2" onClick={() => logout.mutate()} aria-label={t("Çıkış yap")} title={t("Çıkış yap")}>
                 <LogOut className="size-4" />
               </button>
             </div>

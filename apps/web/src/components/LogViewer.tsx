@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "@/lib/i18n";
 
 /**
  * SSE ile akan logları gösterir. Sunucu "snapshot" (mevcut log), "line" (yeni satır) ve
  * "done" (bitti) olayları gönderir. Kullanıcı yukarı kaydırmadıkça en alta kayar.
  */
-export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = "Henüz çıktı yok." }: { url: string; height?: string; onDone?: () => void; emptyText?: string }) {
+export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = t("Henüz çıktı yok.") }: { url: string; height?: string; onDone?: () => void; emptyText?: string }) {
   const [lines, setLines] = useState<string[]>([]);
   const [state, setState] = useState<"live" | "done" | "closed">("live");
   const box = useRef<HTMLDivElement>(null);
@@ -38,10 +39,10 @@ export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = "Hen�
   return (
     <div className="overflow-hidden rounded-[10px] border border-line bg-[#141315] text-[#d9d6d8]">
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-[12px] text-[#8f8a8e]">
-        <span>{lines.length} satır</span>
+        <span>{t("{n} satır", { n: lines.length })}</span>
         <span className="inline-flex items-center gap-1.5">
           <span className={`size-1.5 rounded-full ${state === "live" ? "bg-[#62c08a]" : "bg-[#5f5a5e]"}`} />
-          {{ live: "Canlı", done: "Tamamlandı", closed: "Bağlantı kesildi" }[state]}
+          {{ live: t("Canlı"), done: t("Tamamlandı"), closed: t("Bağlantı kesildi") }[state]}
         </span>
       </div>
       <div

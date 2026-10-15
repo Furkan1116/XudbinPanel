@@ -1,4 +1,4 @@
-import { flag, opt, shCmd, staticCaddyfile } from "./util.js";
+import { DEBIAN_ARCHIVE_FIX, flag, opt, shCmd, staticCaddyfile } from "./util.js";
 import type { Framework, Repo } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -6,6 +6,12 @@ import type { Framework, Repo } from "./types.js";
 // ---------------------------------------------------------------------------
 
 const PHP_VERSIONS = ["8.4", "8.3", "8.2"].map((v) => ({ value: v, label: `PHP ${v}` }));
+
+/** Heroku Procfile'ındaki "heroku-php-apache2 web/" gibi kök klasör tanımı. */
+function procfileRoot(repo: Repo) {
+  return repo.read("Procfile").match(/heroku-php-(?:apache2|nginx)(?:\s+-\S+\s+\S+)*\s+([\w./-]+)/)?.[1]?.replace(/\/$/, "");
+}
+const phpRoot = (repo: Repo) => procfileRoot(repo) ?? (repo.has("public/index.php") ? "public" : repo.has("web/index.php") ? "web" : ".");
 
 function phpVersion(repo: Repo) {
   const req = repo.json<{ require?: Record<string, string> }>("composer.json")?.require?.php ?? "";
@@ -90,10 +96,10 @@ export const php: Framework = {
   fields: [...phpFields, { key: "documentRoot", label: "Kök klasör", type: "text", placeholder: ".", hint: "index.php'nin bulunduğu klasör, ör. public" }],
   envHints: [],
   steps: ["Varsa composer install çalışır.", "Kök klasör FrankenPHP ile sunulur."],
-  detect: (repo) => (repo.has("composer.json") || repo.has("index.php") ? { score: 50, reason: "PHP dosyaları bulundu", options: { documentRoot: repo.has("public/index.php") ? "public" : ".", phpVersion: phpVersion(repo) } } : null),
+  detect: (repo) => (repo.has("composer.json") || repo.has("index.php") ? { score: 50, reason: "PHP dosyaları bulundu", options: { documentRoot: phpRoot(repo), phpVersion: phpVersion(repo) } } : null),
   build(repo, opts) {
     const base = phpBase(repo, opt(opts.phpVersion, phpVersion(repo) ?? "8.3"), opt(opts.extensions, ""));
-    const root = opt(opts.documentRoot, repo.has("public/index.php") ? "public" : ".");
+    const root = opt(opts.documentRoot, phpRoot(repo));
     return { port: 80, dockerfile: `${base.text}\nEXPOSE 80\n${shCmd(`exec frankenphp php-server --root /app/${root} --listen :80`)}\n` };
   },
 };
@@ -142,6 +148,7 @@ export const dotnet: Framework = {
       dockerfile: `FROM mcr.microsoft.com/dotnet/sdk:${v} AS build
 WORKDIR /src
 COPY . .
+RUN if [ -f .config/dotnet-tools.json ] || [ -f "$(dirname "${project}")/.config/dotnet-tools.json" ]; then dotnet tool restore; fi
 RUN dotnet publish "${project}" -c Release -o /out /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:${v}
@@ -169,7 +176,7 @@ export const go: Framework = {
   defaultPort: 8080,
   fields: [{ key: "buildPath", label: "main paketinin yolu", type: "text", placeholder: ".", hint: "ör. ./cmd/server" }],
   envHints: [],
-  steps: ["go build çalışır (CGO kapalı).", "İkili dosya Alpine'da başlar; uygulama PORT değişkenini dinlemeli."],
+  steps: ["go build çalışır (CGO kapalı).", "İkili dosya, şablon ve statik dosyalarla birlikte Alpine'da başlar; uygulama PORT değişkenini dinlemeli."],
   detect: (repo) => (repo.has("go.mod") ? { score: 90, reason: "go.mod bulundu", options: { buildPath: repo.has("main.go") ? "." : (repo.list("cmd")[0] ? `./cmd/${repo.list("cmd")[0]}` : ".") } } : null),
   build(repo, opts) {
     const v = repo.read("go.mod").match(/^go (\d+\.\d+)/m)?.[1] ?? "1.24";
@@ -185,10 +192,13 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/app ${p}
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata
-COPY --from=build /out/app /app
+WORKDIR /app
+# Şablonlar ve statik dosyalar çalışma anında göreli yoldan okunabilsin diye kaynak da kopyalanır.
+COPY --from=build /src /app
+COPY --from=build /out/app /usr/local/bin/app
 ENV PORT=8080
 EXPOSE 8080
-CMD ["/app"]
+CMD ["app"]
 `,
     };
   },
@@ -261,11 +271,11 @@ export const java: Framework = {
       ? `FROM maven:3-eclipse-temurin-${v} AS build
 WORKDIR /src
 COPY . .
-RUN (if [ -x mvnw ]; then ./mvnw -B -DskipTests package; else mvn -B -DskipTests package; fi) && find target -maxdepth 1 -name "*.jar" ! -name "*-plain.jar" ! -name "original-*" -exec cp {} /app.jar \;`
+RUN (if [ -x mvnw ]; then ./mvnw -B -DskipTests package; else mvn -B -DskipTests package; fi) && cp "$(ls target/*.jar | grep -v -e '-plain.jar$' -e '/original-' | head -1)" /app.jar`
       : `FROM gradle:jdk${v} AS build
 WORKDIR /src
 COPY . .
-RUN (if [ -x gradlew ]; then ./gradlew --no-daemon -x test bootJar || ./gradlew --no-daemon -x test build; else gradle --no-daemon -x test bootJar || gradle --no-daemon -x test build; fi) && find build/libs -name "*.jar" ! -name "*-plain.jar" -exec cp {} /app.jar \;`;
+RUN (if [ -x gradlew ]; then ./gradlew --no-daemon -x test bootJar || ./gradlew --no-daemon -x test build; else gradle --no-daemon -x test bootJar || gradle --no-daemon -x test build; fi) && cp "$(ls build/libs/*.jar | grep -v -e '-plain.jar$' | head -1)" /app.jar`
     return {
       port: 8080,
       dockerfile: `${build}
@@ -307,6 +317,7 @@ export const rails: Framework = {
     return {
       port: 3000,
       dockerfile: `FROM ruby:${v}-slim
+${DEBIAN_ARCHIVE_FIX}
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential git libpq-dev libyaml-dev pkg-config curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV RAILS_ENV=production BUNDLE_WITHOUT="development:test" BUNDLE_DEPLOYMENT=1 RAILS_SERVE_STATIC_FILES=1 PORT=3000

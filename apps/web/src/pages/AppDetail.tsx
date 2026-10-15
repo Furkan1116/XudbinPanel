@@ -9,6 +9,7 @@ import { LogViewer } from "@/components/LogViewer";
 import { Button, ConfirmDialog, CopyField, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, Toggle, useAction } from "@/components/ui";
 import { api, type App, type DetectResult, type Deployment } from "@/lib/api";
 import { dateTime, duration, formatBytes, timeAgo } from "@/lib/format";
+import { t } from "@/lib/i18n";
 
 type Tab = "overview" | "deployments" | "logs" | "env" | "domains" | "security" | "settings";
 type AppData = { app: App; env: string; deployments: Deployment[] };
@@ -34,7 +35,7 @@ export function AppDetailPage() {
   return (
     <>
       <PageHeader
-        back={{ to: `/projects/${app.projectId}`, label: "Proje" }}
+        back={{ to: `/projects/${app.projectId}`, label: t("Proje") }}
         title={app.name}
         description={
           <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -52,32 +53,32 @@ export function AppDetailPage() {
           <>
             {app.container && <AppPower app={app} />}
             <Button variant="primary" onClick={() => deploy.mutate()} loading={deploy.isPending} disabled={app.server.status !== "ready"}>
-              {app.container ? "Yeniden deploy et" : "Deploy et"}
+              {app.container ? t("Yeniden deploy et") : t("Deploy et")}
             </Button>
           </>
         }
       />
       {app.server.status !== "ready" && (
         <div className="mb-6">
-          <Notice tone="warn" title={`"${app.server.name}" sunucusu hazır değil`}>Deploy yapabilmek için önce sunucu kurulumunu tamamla.</Notice>
+          <Notice tone="warn" title={t("\"{name}\" sunucusu hazır değil", { name: app.server.name })}>{t("Deploy yapabilmek için önce sunucu kurulumunu tamamla.")}</Notice>
         </div>
       )}
       <Tabs
         value={tab}
         onChange={setTab}
         tabs={[
-          { id: "overview", label: "Genel" },
-          { id: "deployments", label: "Deploylar" },
-          { id: "logs", label: "Loglar" },
-          { id: "env", label: "Ortam değişkenleri" },
-          { id: "domains", label: "Domainler" },
-          { id: "security", label: "Güvenlik" },
-          { id: "settings", label: "Ayarlar" },
+          { id: "overview", label: t("Genel") },
+          { id: "deployments", label: t("Deploylar") },
+          { id: "logs", label: t("Loglar") },
+          { id: "env", label: t("Ortam değişkenleri") },
+          { id: "domains", label: t("Domainler") },
+          { id: "security", label: t("Güvenlik") },
+          { id: "settings", label: t("Ayarlar") },
         ]}
       />
       {tab === "overview" && <Overview data={data} onDeploy={() => deploy.mutate()} />}
       {tab === "deployments" && <Deployments data={data} />}
-      {tab === "logs" && <LogViewer url={`/api/apps/${id}/logs/stream`} emptyText="Log bekleniyor..." />}
+      {tab === "logs" && <LogViewer url={`/api/apps/${id}/logs/stream`} emptyText={t("Log bekleniyor...")} />}
       {tab === "env" && <Env data={data} />}
       {tab === "domains" && <Domains app={app} />}
       {tab === "security" && <Security app={app} />}
@@ -88,14 +89,14 @@ export function AppDetailPage() {
 
 function AppPower({ app }: { app: App }) {
   const act = useAction((a: "start" | "stop" | "restart") => api.post(`/apps/${app.id}/${a}`), {
-    success: "İşlem tamamlandı",
+    success: t("İşlem tamamlandı"),
     invalidate: [["app", app.id]],
   });
-  if (app.status === "stopped") return <Button onClick={() => act.mutate("start")} loading={act.isPending}>Başlat</Button>;
+  if (app.status === "stopped") return <Button onClick={() => act.mutate("start")} loading={act.isPending}>{t("Başlat")}</Button>;
   return (
     <>
-      <Button variant="ghost" onClick={() => act.mutate("restart")} loading={act.isPending && act.variables === "restart"}>Yeniden başlat</Button>
-      <Button variant="ghost" onClick={() => act.mutate("stop")} loading={act.isPending && act.variables === "stop"}>Durdur</Button>
+      <Button variant="ghost" onClick={() => act.mutate("restart")} loading={act.isPending && act.variables === "restart"}>{t("Yeniden başlat")}</Button>
+      <Button variant="ghost" onClick={() => act.mutate("stop")} loading={act.isPending && act.variables === "stop"}>{t("Durdur")}</Button>
     </>
   );
 }
@@ -118,25 +119,25 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
       : app.sourceType === "image"
         ? app.image
         : app.sourceType === "upload"
-          ? "Yüklenen dosyalar"
+          ? t("Yüklenen dosyalar")
           : app.gitUrl
             ? `Compose, ${app.gitUrl}`
-            : "Compose dosyası";
+            : t("Compose dosyası");
 
   if (!last && app.sourceType === "upload") return <UploadNewVersion app={app} first />;
   if (!last)
     return (
       <div className="panel px-5 py-6">
-        <h2 className="font-medium">İlk deploy'a hazır</h2>
+        <h2 className="font-medium">{t("İlk deploy'a hazır")}</h2>
         <p className="mt-1 max-w-xl text-[14px] leading-relaxed text-muted">
           {app.sourceType === "git"
-            ? "Repo klonlanacak; Dockerfile varsa o kullanılacak, yoksa proje türü (Node, Python, Django, Go, statik site) tanınıp Dockerfile üretilecek."
+            ? t("Repo klonlanacak; Dockerfile varsa o kullanılacak, yoksa proje türü (Node, Python, Django, Go, statik site) tanınıp Dockerfile üretilecek.")
             : app.sourceType === "image"
-              ? "İmaj çekilip çalıştırılacak."
-              : "Compose servisleri başlatılacak."}{" "}
-          Ortam değişkenleri gerekiyorsa önce onları gir.
+              ? t("İmaj çekilip çalıştırılacak.")
+              : t("Compose servisleri başlatılacak.")}{" "}
+          {t("Ortam değişkenleri gerekiyorsa önce onları gir.")}
         </p>
-        <Button variant="primary" className="mt-4" onClick={onDeploy}>Deploy et</Button>
+        <Button variant="primary" className="mt-4" onClick={onDeploy}>{t("Deploy et")}</Button>
       </div>
     );
 
@@ -149,24 +150,24 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
               <span className="truncate">{d.url}</span>
               <ExternalLink className="size-3.5 shrink-0 text-faint" />
             </a>
-            <span className="shrink-0 text-[13px] text-faint">{d.generated ? "Otomatik adres" : "Alan adı"}{d.https ? ", HTTPS" : ""}</span>
+            <span className="shrink-0 text-[13px] text-faint">{d.generated ? t("Otomatik adres") : t("Alan adı")}{d.https ? t(", HTTPS") : ""}</span>
           </div>
         ))}
-        {app.domains.length === 0 && <div className="px-5 py-3 text-[14px] text-muted">Alan adı yok. Domainler sekmesinden ekle.</div>}
+        {app.domains.length === 0 && <div className="px-5 py-3 text-[14px] text-muted">{t("Alan adı yok. Domainler sekmesinden ekle.")}</div>}
       </div>
 
       <dl className="grid gap-x-8 gap-y-3 text-[14px] sm:grid-cols-2">
-        <Row label="Kaynak" value={source ?? ""} mono />
-        <Row label="Son deploy" value={`${timeAgo(last.startedAt)}, ${last.status === "success" ? "başarılı" : last.status === "failed" ? "başarısız" : "sürüyor"}`} />
-        {stats.data?.stats && <Row label="İşlemci" value={`%${stats.data.stats.cpu.toFixed(1)}`} />}
-        {stats.data?.stats && <Row label="Bellek" value={formatBytes(stats.data.stats.memory)} />}
-        <Row label="İç adres" value={`${app.internalHost}:${app.port}`} hint="Aynı sunucudaki diğer uygulamalar bu adresle ulaşır." mono />
+        <Row label={t("Kaynak")} value={source ?? ""} mono />
+        <Row label={t("Son deploy")} value={`${timeAgo(last.startedAt)}, ${last.status === "success" ? t("başarılı") : last.status === "failed" ? t("başarısız") : t("sürüyor")}`} />
+        {stats.data?.stats && <Row label={t("İşlemci")} value={`%${stats.data.stats.cpu.toFixed(1)}`} />}
+        {stats.data?.stats && <Row label={t("Bellek")} value={formatBytes(stats.data.stats.memory)} />}
+        <Row label={t("İç adres")} value={`${app.internalHost}:${app.port}`} hint={t("Aynı sunucudaki diğer uygulamalar bu adresle ulaşır.")} mono />
       </dl>
 
       {app.sourceType === "upload" && <UploadNewVersion app={app} />}
 
       {(app.sourceType === "git" || app.sourceType === "compose") && (
-        <Section title="Otomatik deploy" description="Git sağlayıcında bu adresi push webhook'u olarak ekle; her push'ta uygulama yeniden deploy edilir.">
+        <Section title={t("Otomatik deploy")} description={t("Git sağlayıcında bu adresi push webhook'u olarak ekle; her push'ta uygulama yeniden deploy edilir.")}>
           <CopyField value={webhook} secret />
         </Section>
       )}
@@ -192,13 +193,13 @@ function Deployments({ data }: { data: AppData }) {
   const selected = Number(params.get("d")) || deployments[0]?.id;
   const dep = deployments.find((d) => d.id === selected);
   const rollback = useAction((depId: number) => api.post<{ deploymentId: number }>(`/apps/${app.id}/rollback/${depId}`), {
-    success: "Geri dönüş başladı",
+    success: t("Geri dönüş başladı"),
     invalidate: [["app", app.id]],
     onSuccess: (r) => setParams({ tab: "deployments", d: String(r.deploymentId) }, { replace: true }),
   });
-  const cancel = useAction((depId: number) => api.post(`/deployments/${depId}/cancel`), { success: "Deploy iptal edildi", invalidate: [["app", app.id]] });
+  const cancel = useAction((depId: number) => api.post(`/deployments/${depId}/cancel`), { success: t("Deploy iptal edildi"), invalidate: [["app", app.id]] });
 
-  if (!deployments.length) return <Notice tone="info" title="Henüz deploy yok">Sağ üstteki "Deploy et" ile ilk sürümü yayınla.</Notice>;
+  if (!deployments.length) return <Notice tone="info" title={t("Henüz deploy yok")}>Sağ üstteki "Deploy et" ile ilk sürümü yayınla.</Notice>;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[17rem_1fr]">
@@ -213,7 +214,7 @@ function Deployments({ data }: { data: AppData }) {
               <span className="text-[14px] font-medium">#{d.id}</span>
               <StatusBadge status={d.status} />
             </div>
-            <div className="mt-0.5 truncate text-[13px] text-muted">{d.title || { manual: "Elle başlatıldı", webhook: "Git push", rollback: "Geri dönüş" }[d.trigger]}</div>
+            <div className="mt-0.5 truncate text-[13px] text-muted">{d.title || { manual: t("Elle başlatıldı"), webhook: t("Git push"), rollback: t("Geri dönüş") }[d.trigger]}</div>
             <div className="mt-0.5 text-[12px] text-faint">{dateTime(d.startedAt)}, {duration(d.startedAt, d.finishedAt)}</div>
           </button>
         ))}
@@ -226,9 +227,9 @@ function Deployments({ data }: { data: AppData }) {
               {dep.image && <span className="font-mono text-[13px]">{dep.image}</span>}
             </div>
             <div className="flex gap-2">
-              {dep.status === "queued" && <Button size="sm" variant="ghost" onClick={() => cancel.mutate(dep.id)}>İptal et</Button>}
+              {dep.status === "queued" && <Button size="sm" variant="ghost" onClick={() => cancel.mutate(dep.id)}>{t("İptal et")}</Button>}
               {dep.status === "success" && dep.image && dep.image !== app.currentImage && app.sourceType !== "compose" && (
-                <Button size="sm" onClick={() => rollback.mutate(dep.id)} loading={rollback.isPending}>Bu sürüme dön</Button>
+                <Button size="sm" onClick={() => rollback.mutate(dep.id)} loading={rollback.isPending}>{t("Bu sürüme dön")}</Button>
               )}
             </div>
           </div>
@@ -245,7 +246,7 @@ function Env({ data }: { data: AppData }) {
   const [env, setEnv] = useState(data.env);
   const frameworks = useFrameworks();
   const fw = frameworkById(frameworks.data?.frameworks, data.app.framework);
-  const save = useAction(() => api.put(`/apps/${data.app.id}/env`, { env }), { success: "Kaydedildi. Geçerli olması için yeniden deploy et.", invalidate: [["app", data.app.id]] });
+  const save = useAction(() => api.put(`/apps/${data.app.id}/env`, { env }), { success: t("Kaydedildi. Geçerli olması için yeniden deploy et."), invalidate: [["app", data.app.id]] });
   return (
     <form
       onSubmit={(e) => {
@@ -254,7 +255,7 @@ function Env({ data }: { data: AppData }) {
       }}
     >
       <p className="mb-3 max-w-2xl text-[14px] text-muted">
-        Her satıra bir değişken: <code className="font-mono text-fg">ANAHTAR=değer</code>. Değerler şifrelenerek saklanır. <code className="font-mono text-fg">PORT</code> otomatik eklenir.
+        Her satıra bir değişken: <code className="font-mono text-fg">ANAHTAR=değer</code>{t(". Değerler şifrelenerek saklanır.")} <code className="font-mono text-fg">{t("PORT")}</code> otomatik eklenir.
       </p>
       <textarea
         className="input h-80 font-mono text-[13px] leading-relaxed"
@@ -269,10 +270,10 @@ function Env({ data }: { data: AppData }) {
         </div>
       )}
       <p className="mt-3 text-[13px] text-faint">
-        <code className="font-mono">{"{{XUDBIN_URL}}"}</code>, <code className="font-mono">{"{{XUDBIN_DOMAINS}}"}</code> ve <code className="font-mono">{"{{XUDBIN_ORIGINS}}"}</code> deploy sırasında uygulamanın güncel alan adlarıyla doldurulur.
+        <code className="font-mono">{"{{XUDBIN_URL}}"}</code>, <code className="font-mono">{"{{XUDBIN_DOMAINS}}"}</code> {t("ve")} <code className="font-mono">{"{{XUDBIN_ORIGINS}}"}</code> deploy sırasında uygulamanın güncel alan adlarıyla doldurulur.
       </p>
       <div className="mt-3 flex justify-end">
-        <Button type="submit" variant="primary" loading={save.isPending} disabled={env === data.env}>Kaydet</Button>
+        <Button type="submit" variant="primary" loading={save.isPending} disabled={env === data.env}>{t("Kaydet")}</Button>
       </div>
     </form>
   );
@@ -284,9 +285,9 @@ function Domains({ app }: { app: App }) {
   const [host, setHost] = useState("");
   const [https, setHttps] = useState(true);
   const servers = useQuery({ queryKey: ["server", app.server.id], queryFn: () => api.get<{ server: { publicIp: string | null; httpsMode: string } }>(`/servers/${app.server.id}`) });
-  const add = useAction(() => api.post(`/apps/${app.id}/domains`, { host, https }), { success: "Alan adı eklendi", invalidate: [["app", app.id]], onSuccess: () => setHost("") });
-  const gen = useAction(() => api.post(`/apps/${app.id}/domains/generate`), { success: "Yeni otomatik adres oluşturuldu", invalidate: [["app", app.id]] });
-  const del = useAction((domainId: number) => api.del(`/apps/${app.id}/domains/${domainId}`), { success: "Alan adı kaldırıldı", invalidate: [["app", app.id]] });
+  const add = useAction(() => api.post(`/apps/${app.id}/domains`, { host, https }), { success: t("Alan adı eklendi"), invalidate: [["app", app.id]], onSuccess: () => setHost("") });
+  const gen = useAction(() => api.post(`/apps/${app.id}/domains/generate`), { success: t("Yeni otomatik adres oluşturuldu"), invalidate: [["app", app.id]] });
+  const del = useAction((domainId: number) => api.del(`/apps/${app.id}/domains/${domainId}`), { success: t("Alan adı kaldırıldı"), invalidate: [["app", app.id]] });
   const ip = servers.data?.server.publicIp;
   const httpsOff = servers.data?.server.httpsMode === "off";
 
@@ -297,17 +298,17 @@ function Domains({ app }: { app: App }) {
           <div key={d.id} className="flex items-center gap-3 px-5 py-3">
             <div className="min-w-0 flex-1">
               <a href={d.url} target="_blank" rel="noreferrer" className="block truncate font-medium hover:underline">{d.host}</a>
-              <div className="text-[13px] text-faint">{d.generated ? "Otomatik (sslip.io), DNS ayarı gerekmez" : "Kendi alan adın"}, {d.https ? "HTTPS otomatik" : "yalnız HTTP"}</div>
+              <div className="text-[13px] text-faint">{d.generated ? t("Otomatik (sslip.io), DNS ayarı gerekmez") : t("Kendi alan adın")}, {d.https ? t("HTTPS otomatik") : t("yalnız HTTP")}</div>
             </div>
-            <Button size="sm" variant="ghost" aria-label="Kaldır" onClick={() => del.mutate(d.id)}>
+            <Button size="sm" variant="ghost" aria-label={t("Kaldır")} onClick={() => del.mutate(d.id)}>
               <Trash2 className="size-4" />
             </Button>
           </div>
         ))}
-        {app.domains.length === 0 && <div className="px-5 py-4 text-[14px] text-muted">Bu uygulamanın adresi yok.</div>}
+        {app.domains.length === 0 && <div className="px-5 py-4 text-[14px] text-muted">{t("Bu uygulamanın adresi yok.")}</div>}
       </div>
 
-      <Section title="Alan adı bağla" description={ip ? `Alan adının DNS ayarlarında ${ip} adresine bir A kaydı oluştur, sonra buraya ekle. Sertifika ilk ziyarette otomatik alınır.` : "Önce sunucunun dış IP adresini sunucu ayarlarından gir."}>
+      <Section title={t("Alan adı bağla")} description={ip ? t("Alan adının DNS ayarlarında {ip} adresine bir A kaydı oluştur, sonra buraya ekle. Sertifika ilk ziyarette otomatik alınır.", { ip }) : t("Önce sunucunun dış IP adresini sunucu ayarlarından gir.")}>
         <form
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -315,15 +316,15 @@ function Domains({ app }: { app: App }) {
           }}
           className="panel space-y-4 p-5"
         >
-          <Field label="Alan adı">
+          <Field label={t("Alan adı")}>
             <input className="input" required value={host} onChange={(e) => setHost(e.target.value.trim().toLowerCase())} placeholder="blog.ornek.com" />
           </Field>
-          <Toggle checked={https && !httpsOff} disabled={httpsOff} onChange={setHttps} label="HTTPS" description={httpsOff ? "Bu sunucuda HTTPS kapalı." : "Let's Encrypt sertifikası otomatik alınır ve yenilenir, ücretsiz."} />
+          <Toggle checked={https && !httpsOff} disabled={httpsOff} onChange={setHttps} label={t("HTTPS")} description={httpsOff ? t("Bu sunucuda HTTPS kapalı.") : t("Let's Encrypt sertifikası otomatik alınır ve yenilenir, ücretsiz.")} />
           <div className="flex flex-wrap justify-between gap-2">
             <Button type="button" variant="ghost" onClick={() => gen.mutate()} loading={gen.isPending} disabled={!ip}>
-              <Plus className="size-4" /> Otomatik adres üret
+              <Plus className="size-4" /> {t("Otomatik adres üret")}
             </Button>
-            <Button type="submit" variant="primary" loading={add.isPending}>Ekle</Button>
+            <Button type="submit" variant="primary" loading={add.isPending}>{t("Ekle")}</Button>
           </div>
         </form>
       </Section>
@@ -358,7 +359,7 @@ function Security({ app }: { app: App }) {
         denyIps: lines(form.denyIps),
         basicAuth: form.authOn ? { username: form.authUser, password: form.authPass || undefined } : null,
       }),
-    { success: "Güvenlik ayarları uygulandı", invalidate: [["app", app.id]] },
+    { success: t("Güvenlik ayarları uygulandı"), invalidate: [["app", app.id]] },
   );
 
   return (
@@ -373,32 +374,32 @@ function Security({ app }: { app: App }) {
         <Toggle
           checked={form.waf}
           onChange={(v) => setForm({ ...form, waf: v })}
-          label="Web uygulama güvenlik duvarı (WAF)"
-          description="OWASP Core Rule Set ile SQL injection, XSS, dosya yolu saldırıları ve kötü niyetli tarayıcılar engellenir."
+          label={t("Web uygulama güvenlik duvarı (WAF)")}
+          description={t("OWASP Core Rule Set ile SQL injection, XSS, dosya yolu saldırıları ve kötü niyetli tarayıcılar engellenir.")}
         />
         <div>
           <Toggle
             checked={form.rateLimitOn}
             onChange={(v) => setForm({ ...form, rateLimitOn: v })}
-            label="Hız sınırı"
-            description="Aynı IP'den gelen istek sayısını sınırlar; kaba kuvvet ve küçük çaplı DoS denemelerini durdurur."
+            label={t("Hız sınırı")}
+            description={t("Aynı IP'den gelen istek sayısını sınırlar; kaba kuvvet ve küçük çaplı DoS denemelerini durdurur.")}
           />
           {form.rateLimitOn && (
             <div className="mt-3 ml-12 flex items-center gap-2 text-[14px]">
               <input className="input w-28" inputMode="numeric" value={form.rateLimit} onChange={(e) => setForm({ ...form, rateLimit: e.target.value.replace(/\D/g, "") })} />
-              <span className="text-muted">istek / dakika / IP</span>
+              <span className="text-muted">{t("istek / dakika / IP")}</span>
             </div>
           )}
         </div>
-        <Toggle checked={form.headers} onChange={(v) => setForm({ ...form, headers: v })} label="Güvenlik başlıkları" description="Clickjacking ve MIME türü tahminine karşı başlıklar eklenir, sunucu bilgisi gizlenir." />
+        <Toggle checked={form.headers} onChange={(v) => setForm({ ...form, headers: v })} label={t("Güvenlik başlıkları")} description={t("Clickjacking ve MIME türü tahminine karşı başlıklar eklenir, sunucu bilgisi gizlenir.")} />
         <div>
-          <Toggle checked={form.authOn} onChange={(v) => setForm({ ...form, authOn: v })} label="Şifre koruması" description="Siteyi açmak için kullanıcı adı ve şifre istenir. Test ortamları için kullanışlı." />
+          <Toggle checked={form.authOn} onChange={(v) => setForm({ ...form, authOn: v })} label={t("Şifre koruması")} description={t("Siteyi açmak için kullanıcı adı ve şifre istenir. Test ortamları için kullanışlı.")} />
           {form.authOn && (
             <div className="mt-3 ml-12 grid max-w-md gap-3 sm:grid-cols-2">
-              <Field label="Kullanıcı adı">
+              <Field label={t("Kullanıcı adı")}>
                 <input className="input" value={form.authUser} onChange={(e) => setForm({ ...form, authUser: e.target.value })} />
               </Field>
-              <Field label="Şifre" hint={s.basicAuth ? "Değiştirmek istemiyorsan boş bırak." : "En az 8 karakter."}>
+              <Field label={t("Şifre")} hint={s.basicAuth ? t("Değiştirmek istemiyorsan boş bırak.") : t("En az 8 karakter.")}>
                 <input className="input" type="password" autoComplete="new-password" value={form.authPass} onChange={(e) => setForm({ ...form, authPass: e.target.value })} />
               </Field>
             </div>
@@ -406,15 +407,15 @@ function Security({ app }: { app: App }) {
         </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Yalnız bu IP'lere izin ver" hint="Boşsa herkes erişebilir. Satır başına bir IP veya CIDR (ör. 10.0.0.0/8).">
+        <Field label={t("Yalnız bu IP'lere izin ver")} hint={t("Boşsa herkes erişebilir. Satır başına bir IP veya CIDR (ör. 10.0.0.0/8).")}>
           <textarea className="input h-28 font-mono text-[13px]" value={form.allowIps} onChange={(e) => setForm({ ...form, allowIps: e.target.value })} />
         </Field>
-        <Field label="Bu IP'leri engelle" hint="Tüm uygulamalar için engellemek istersen Güvenlik sayfasını kullan.">
+        <Field label={t("Bu IP'leri engelle")} hint={t("Tüm uygulamalar için engellemek istersen Güvenlik sayfasını kullan.")}>
           <textarea className="input h-28 font-mono text-[13px]" value={form.denyIps} onChange={(e) => setForm({ ...form, denyIps: e.target.value })} />
         </Field>
       </div>
       <div className="flex justify-end">
-        <Button type="submit" variant="primary" loading={save.isPending}>Kaydet ve uygula</Button>
+        <Button type="submit" variant="primary" loading={save.isPending}>{t("Kaydet ve uygula")}</Button>
       </div>
     </form>
   );
@@ -462,9 +463,9 @@ function Settings({ app }: { app: App }) {
         autoDeploy: form.autoDeploy,
         volumes: form.volumes.filter((v) => v.name && v.path),
       }),
-    { success: "Ayarlar kaydedildi", invalidate: [["app", app.id]] },
+    { success: t("Ayarlar kaydedildi"), invalidate: [["app", app.id]] },
   );
-  const del = useAction(() => api.del(`/apps/${app.id}`), { success: "Uygulama silindi", onSuccess: () => navigate(`/projects/${app.projectId}`) });
+  const del = useAction(() => api.del(`/apps/${app.id}`), { success: t("Uygulama silindi"), onSuccess: () => navigate(`/projects/${app.projectId}`) });
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
 
   return (
@@ -477,20 +478,20 @@ function Settings({ app }: { app: App }) {
         className="space-y-6"
       >
         <div className="panel space-y-4 p-5">
-          <Field label="Ad">
+          <Field label={t("Ad")}>
             <input className="input" value={form.name} onChange={set("name")} />
           </Field>
           {(app.sourceType === "git" || app.sourceType === "compose") && (
             <>
               <div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
-                <Field label="Repo adresi">
+                <Field label={t("Repo adresi")}>
                   <input className="input" value={form.gitUrl} onChange={set("gitUrl")} />
                 </Field>
-                <Field label="Dal">
+                <Field label={t("Dal")}>
                   <input className="input" value={form.gitBranch} onChange={set("gitBranch")} />
                 </Field>
               </div>
-              <Field label="Erişim token'ı" hint={app.hasGitToken ? "Kayıtlı bir token var. Değiştirmek için yenisini gir." : "Yalnız özel repolar için."}>
+              <Field label={t("Erişim token'ı")} hint={app.hasGitToken ? t("Kayıtlı bir token var. Değiştirmek için yenisini gir.") : t("Yalnız özel repolar için.")}>
                 <input className="input" type="password" autoComplete="off" value={form.gitToken} onChange={set("gitToken")} />
               </Field>
             </>
@@ -506,72 +507,72 @@ function Settings({ app }: { app: App }) {
             />
           )}
           {app.sourceType === "image" && (
-            <Field label="İmaj">
+            <Field label={t("İmaj")}>
               <input className="input font-mono" value={form.image} onChange={set("image")} />
             </Field>
           )}
           {app.sourceType === "compose" && (
             <>
               {form.gitUrl ? (
-                <Field label="Compose dosyasının yolu">
+                <Field label={t("Compose dosyasının yolu")}>
                   <input className="input font-mono text-[13px]" value={form.dockerfilePath} onChange={set("dockerfilePath")} />
                 </Field>
               ) : (
-                <Field label="docker-compose.yml">
+                <Field label={t("docker-compose.yml")}>
                   <textarea className="input h-56 font-mono text-[13px]" value={form.composeFile} onChange={set("composeFile")} />
                 </Field>
               )}
-              <Field label="Alan adının yönleneceği servis" hint="Compose dosyasındaki servis adı, ör. web.">
+              <Field label={t("Alan adının yönleneceği servis")} hint={t("Compose dosyasındaki servis adı, ör. web.")}>
                 <input className="input" value={form.composeService} onChange={set("composeService")} />
               </Field>
             </>
           )}
           <div className="grid gap-3 sm:grid-cols-[8rem_1fr]">
-            <Field label="Port">
+            <Field label={t("Port")}>
               <input className="input" inputMode="numeric" value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value.replace(/\D/g, "") })} />
             </Field>
             {app.sourceType !== "compose" && (
-              <Field label="Başlatma komutu" hint="Boşsa imajın kendi komutu kullanılır.">
+              <Field label={t("Başlatma komutu")} hint={t("Boşsa imajın kendi komutu kullanılır.")}>
                 <input className="input font-mono text-[13px]" value={form.command} onChange={set("command")} />
               </Field>
             )}
           </div>
-          {app.sourceType !== "image" && <Toggle checked={form.autoDeploy} onChange={(v) => setForm({ ...form, autoDeploy: v })} label="Push'ta otomatik deploy" description="Webhook çağrıldığında yeni sürüm otomatik yayınlanır." />}
+          {app.sourceType !== "image" && <Toggle checked={form.autoDeploy} onChange={(v) => setForm({ ...form, autoDeploy: v })} label={t("Push'ta otomatik deploy")} description={t("Webhook çağrıldığında yeni sürüm otomatik yayınlanır.")} />}
         </div>
 
         {app.sourceType !== "compose" && (
-          <Section title="Kalıcı depolama" description="Deploylar arasında silinmemesi gereken klasörler (yüklenen dosyalar, SQLite veritabanı...).">
+          <Section title={t("Kalıcı depolama")} description={t("Deploylar arasında silinmemesi gereken klasörler (yüklenen dosyalar, SQLite veritabanı...).")}>
             <div className="space-y-2">
               {form.volumes.map((v, i) => (
                 <div key={i} className="flex gap-2">
-                  <input className="input" placeholder="ad (ör. uploads)" value={v.name} onChange={(e) => setForm({ ...form, volumes: form.volumes.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
+                  <input className="input" placeholder={t("ad (ör. uploads)")} value={v.name} onChange={(e) => setForm({ ...form, volumes: form.volumes.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
                   <input className="input font-mono text-[13px]" placeholder="/app/uploads" value={v.path} onChange={(e) => setForm({ ...form, volumes: form.volumes.map((x, j) => (j === i ? { ...x, path: e.target.value } : x)) })} />
-                  <Button type="button" variant="ghost" aria-label="Kaldır" onClick={() => setForm({ ...form, volumes: form.volumes.filter((_, j) => j !== i) })}>
+                  <Button type="button" variant="ghost" aria-label={t("Kaldır")} onClick={() => setForm({ ...form, volumes: form.volumes.filter((_, j) => j !== i) })}>
                     <Trash2 className="size-4" />
                   </Button>
                 </div>
               ))}
               <Button type="button" size="sm" variant="ghost" onClick={() => setForm({ ...form, volumes: [...form.volumes, { name: "", path: "" }] })}>
-                <Plus className="size-4" /> Klasör ekle
+                <Plus className="size-4" /> {t("Klasör ekle")}
               </Button>
             </div>
           </Section>
         )}
         <div className="flex justify-end">
-          <Button type="submit" variant="primary" loading={save.isPending}>Kaydet</Button>
+          <Button type="submit" variant="primary" loading={save.isPending}>{t("Kaydet")}</Button>
         </div>
       </form>
 
-      <Section title="Uygulamayı sil" description="Konteynerler, imajlar ve alan adı bağlantıları silinir. Kalıcı depolama klasörleri sunucuda kalır.">
-        <Button variant="danger" onClick={() => setConfirm(true)}>Uygulamayı sil</Button>
+      <Section title={t("Uygulamayı sil")} description={t("Konteynerler, imajlar ve alan adı bağlantıları silinir. Kalıcı depolama klasörleri sunucuda kalır.")}>
+        <Button variant="danger" onClick={() => setConfirm(true)}>{t("Uygulamayı sil")}</Button>
       </Section>
       <ConfirmDialog
         open={confirm}
         onClose={() => setConfirm(false)}
-        title="Uygulama silinsin mi?"
-        description="Bu işlem geri alınamaz. Uygulama yayından kalkar."
+        title={t("Uygulama silinsin mi?")}
+        description={t("Bu işlem geri alınamaz. Uygulama yayından kalkar.")}
         typeToConfirm={app.name}
-        confirmLabel="Sil"
+        confirmLabel={t("Sil")}
         loading={del.isPending}
         onConfirm={() => del.mutate()}
       />
@@ -582,12 +583,12 @@ function Settings({ app }: { app: App }) {
 function UploadNewVersion({ app, first }: { app: App; first?: boolean }) {
   const [, setParams] = useSearchParams();
   const up = useAction((blob: Blob) => uploadZip<{ deploymentId: number }>(`/apps/${app.id}/upload`, blob), {
-    success: "Dosyalar yüklendi, deploy başladı",
+    success: t("Dosyalar yüklendi, deploy başladı"),
     invalidate: [["app", app.id]],
     onSuccess: (r) => setParams({ tab: "deployments", d: String(r.deploymentId) }, { replace: true }),
   });
   return (
-    <Section title={first ? "Proje dosyalarını yükle" : "Yeni sürüm yükle"} description="Klasörü veya zip'i bırakınca yüklenir ve hemen deploy edilir.">
+    <Section title={first ? t("Proje dosyalarını yükle") : t("Yeni sürüm yükle")} description={t("Klasörü veya zip'i bırakınca yüklenir ve hemen deploy edilir.")}>
       <DropZone busy={up.isPending} onReady={(p) => up.mutate(p.blob)} />
     </Section>
   );
@@ -624,9 +625,9 @@ function FrameworkSection(props: {
         </div>
         <div className="flex gap-2">
           {props.app.sourceType === "git" && (
-            <Button type="button" size="sm" variant="ghost" onClick={() => analyze.mutate()} loading={analyze.isPending}>Repoyu yeniden incele</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => analyze.mutate()} loading={analyze.isPending}>{t("Repoyu yeniden incele")}</Button>
           )}
-          <Button type="button" size="sm" onClick={() => setPicking(!picking)}>{picking ? "Kapat" : "Değiştir"}</Button>
+          <Button type="button" size="sm" onClick={() => setPicking(!picking)}>{picking ? t("Kapat") : t("Değiştir")}</Button>
         </div>
       </div>
       {picking && (
@@ -644,7 +645,7 @@ function FrameworkSection(props: {
       {fw && <FrameworkSteps fw={fw} />}
       {fw && fw.fields.length > 0 && <FrameworkFields fw={fw} values={props.opts} onChange={(v) => props.onChange(props.framework, v)} />}
       {props.app.sourceType === "git" && (
-        <Field label="Proje klasörü" hint="Monorepo'da derlenecek alt klasör.">
+        <Field label={t("Proje klasörü")} hint={t("Monorepo'da derlenecek alt klasör.")}>
           <input className="input max-w-sm font-mono text-[13px]" value={props.context} onChange={(e) => props.onContext(e.target.value || ".")} />
         </Field>
       )}

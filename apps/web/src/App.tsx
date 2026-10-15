@@ -14,13 +14,14 @@ import { ServersPage } from "@/pages/Servers";
 import { SettingsPage } from "@/pages/Settings";
 import { SetupPage } from "@/pages/Setup";
 import { ChangePasswordPage } from "@/pages/ChangePassword";
+import { t } from "@/lib/i18n";
 
 export function App() {
   const { data, isLoading, error } = useAuthStatus();
 
   if (isLoading) return <div className="min-h-dvh" />;
   if (error || !data)
-    return <div className="grid min-h-dvh place-items-center px-4 text-center text-[15px] text-muted">Panel sunucusuna ulaşılamıyor. Sunucunun çalıştığından emin olup sayfayı yenile.</div>;
+    return <div className="grid min-h-dvh place-items-center px-4 text-center text-[15px] text-muted">{t("Panel sunucusuna ulaşılamıyor. Sunucunun çalıştığından emin olup sayfayı yenile.")}</div>;
 
   return (
     <>

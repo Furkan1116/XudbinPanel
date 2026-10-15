@@ -1,16 +1,17 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { type ThemeChoice, useTheme } from "@/lib/theme";
+import { t } from "@/lib/i18n";
 
 const OPTIONS: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [
-  { value: "light", label: "Açık tema", icon: Sun },
-  { value: "dark", label: "Koyu tema", icon: Moon },
-  { value: "system", label: "Sistem temasını kullan", icon: Monitor },
+  { value: "light", label: t("Açık tema"), icon: Sun },
+  { value: "dark", label: t("Koyu tema"), icon: Moon },
+  { value: "system", label: t("Sistem temasını kullan"), icon: Monitor },
 ];
 
 export function ThemeSwitch() {
   const [choice, setChoice] = useTheme();
   return (
-    <div role="radiogroup" aria-label="Tema" className="inline-flex rounded-md border border-line p-0.5">
+    <div role="radiogroup" aria-label={t("Tema")} className="inline-flex rounded-md border border-line p-0.5">
       {OPTIONS.map((o) => (
         <button
           key={o.value}

@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import { Button, Dialog, Field, Notice, PageHeader, PageLoading, Section, Tabs, Toggle, useAction } from "@/components/ui";
 import { api } from "@/lib/api";
 import { dateTime, timeAgo } from "@/lib/format";
+import { locale, t } from "@/lib/i18n";
 
 type Summary = {
   hours: number;
@@ -18,12 +19,12 @@ type Event = { id: number; ip: string; kind: string; method: string | null; path
 type Blocked = { id: number; ip: string; reason: string; auto: number; expiresAt: number | null; createdAt: number };
 
 const KIND: Record<string, string> = {
-  waf: "WAF engelledi",
-  ratelimit: "Hız sınırı",
-  blocked: "Banlı IP",
-  denied: "IP kuralı",
-  auth: "Hatalı şifre",
-  panel_login: "Panel girişi",
+  waf: t("WAF engelledi"),
+  ratelimit: t("Hız sınırı"),
+  blocked: t("Banlı IP"),
+  denied: t("IP kuralı"),
+  auth: t("Hatalı şifre"),
+  panel_login: t("Panel girişi"),
 };
 
 export function SecurityPage() {
@@ -37,13 +38,13 @@ export function SecurityPage() {
   return (
     <>
       <PageHeader
-        title="Güvenlik"
-        description="Tüm sunuculardaki uygulamalara gelen ve engellenen saldırılar. Loglar 20 saniyede bir okunur."
+        title={t("Güvenlik")}
+        description={t("Tüm sunuculardaki uygulamalara gelen ve engellenen saldırılar. Loglar 20 saniyede bir okunur.")}
         actions={
-          <select className="input w-auto" value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label="Zaman aralığı">
-            <option value={24}>Son 24 saat</option>
-            <option value={168}>Son 7 gün</option>
-            <option value={720}>Son 30 gün</option>
+          <select className="input w-auto" value={hours} onChange={(e) => setHours(Number(e.target.value))} aria-label={t("Zaman aralığı")}>
+            <option value={24}>{t("Son 24 saat")}</option>
+            <option value={168}>{t("Son 7 gün")}</option>
+            <option value={720}>{t("Son 30 gün")}</option>
           </select>
         }
       />
@@ -51,19 +52,19 @@ export function SecurityPage() {
         value={tab}
         onChange={setTab}
         tabs={[
-          { id: "overview", label: "Özet" },
-          { id: "events", label: "Olaylar" },
-          { id: "blocked", label: `Banlı IP'ler (${s.blockedCount})` },
+          { id: "overview", label: t("Özet") },
+          { id: "events", label: t("Olaylar") },
+          { id: "blocked", label: t("Banlı IP'ler ({n})", { n: s.blockedCount }) },
         ]}
       />
       {tab === "overview" && (
         <>
           <section className="panel">
             <dl className="grid grid-cols-2 border-b border-line sm:grid-cols-4">
-              <Stat label="Engellenen istek" value={total} big />
-              <Stat label="WAF" value={s.byKind.find((k) => k.kind === "waf")?.n ?? 0} />
-              <Stat label="Hız sınırı" value={s.byKind.find((k) => k.kind === "ratelimit")?.n ?? 0} />
-              <Stat label="Banlı IP" value={s.blockedCount} />
+              <Stat label={t("Engellenen istek")} value={total} big />
+              <Stat label={t("WAF")} value={s.byKind.find((k) => k.kind === "waf")?.n ?? 0} />
+              <Stat label={t("Hız sınırı")} value={s.byKind.find((k) => k.kind === "ratelimit")?.n ?? 0} />
+              <Stat label={t("Banlı IP")} value={s.blockedCount} />
             </dl>
             <div className="px-5 pt-4 pb-5">
               <Timeline data={s.timeline} hours={hours} bucketMs={s.bucketMs} />
@@ -71,16 +72,16 @@ export function SecurityPage() {
           </section>
           {total === 0 ? (
             <div className="mt-6">
-              <Notice tone="info" title="Bu dönemde engellenen istek yok">
-                Uygulamalarına gelen şüpheli istekler (SQL injection, XSS, tarama botları, aşırı istek) burada görünür.
+              <Notice tone="info" title={t("Bu dönemde engellenen istek yok")}>
+                {t("Uygulamalarına gelen şüpheli istekler (SQL injection, XSS, tarama botları, aşırı istek) burada görünür.")}
               </Notice>
             </div>
           ) : (
             <div className="mt-9 grid gap-9 lg:grid-cols-2">
               <TopIps rows={s.topIps} />
               <div className="space-y-9">
-                <RankList title="En çok hedeflenen adresler" rows={s.topPaths.map((p) => ({ key: p.path, n: p.n }))} mono />
-                <RankList title="Hedeflenen siteler" rows={s.topHosts.map((h) => ({ key: h.host, n: h.n }))} />
+                <RankList title={t("En çok hedeflenen adresler")} rows={s.topPaths.map((p) => ({ key: p.path, n: p.n }))} mono />
+                <RankList title={t("Hedeflenen siteler")} rows={s.topHosts.map((h) => ({ key: h.host, n: h.n }))} />
               </div>
             </div>
           )}
@@ -97,7 +98,7 @@ function Stat({ label, value, big }: { label: string; value: number; big?: boole
   return (
     <div className="border-line px-5 py-4 [&:not(:last-child)]:border-r max-sm:[&:nth-child(2)]:border-r-0 max-sm:[&:nth-child(-n+2)]:border-b">
       <dt className="text-[13px] text-muted">{label}</dt>
-      <dd className={`mt-1 leading-none font-medium tracking-[-0.02em] tabular-nums ${big ? "text-[32px] text-accent" : "text-[28px]"}`}>{value.toLocaleString("tr-TR")}</dd>
+      <dd className={`mt-1 leading-none font-medium tracking-[-0.02em] tabular-nums ${big ? "text-[32px] text-accent" : "text-[28px]"}`}>{value.toLocaleString(locale())}</dd>
     </div>
   );
 }
@@ -117,8 +118,8 @@ function Timeline({ data, hours, bucketMs }: { data: { t: number; n: number }[];
   return (
     <div>
       <div className="mb-3 flex justify-between text-[13px]">
-        <span className="text-muted">{bucketMs === 3_600_000 ? "Saatlik" : "Günlük"} engellenen istek</span>
-        <span className="text-faint tabular-nums">{h ? `${new Date(h.t).toLocaleString("tr-TR", bucketMs === 3_600_000 ? { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" } : { day: "numeric", month: "short" })}: ${h.n}` : `en yüksek ${max === 1 && !bars.some((b) => b.n) ? 0 : max}`}</span>
+        <span className="text-muted">{bucketMs === 3_600_000 ? t("Saatlik") : t("Günlük")} engellenen istek</span>
+        <span className="text-faint tabular-nums">{h ? `${new Date(h.t).toLocaleString(locale(), bucketMs === 3_600_000 ? { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" } : { day: "numeric", month: "short" })}: ${h.n}` : t("en yüksek {n}", { n: max === 1 && !bars.some((b) => b.n) ? 0 : max })}</span>
       </div>
       <div className="flex h-28 items-end gap-[2px]" onMouseLeave={() => setHover(null)}>
         {bars.map((b, i) => (
@@ -137,7 +138,7 @@ function Timeline({ data, hours, bucketMs }: { data: { t: number; n: number }[];
 function TopIps({ rows }: { rows: Summary["topIps"] }) {
   const [blockIp, setBlockIp] = useState<string | null>(null);
   return (
-    <Section title="En çok engellenen IP'ler" className="!mt-0">
+    <Section title={t("En çok engellenen IP'ler")} className="!mt-0">
       <div className="panel divide-y divide-line">
         {rows.map((r) => (
           <div key={r.ip} className="flex items-center gap-3 px-5 py-2.5">
@@ -146,7 +147,7 @@ function TopIps({ rows }: { rows: Summary["topIps"] }) {
               <div className="text-[12px] text-faint">son {timeAgo(r.last)}</div>
             </div>
             <span className="text-[14px] font-medium tabular-nums">{r.n}</span>
-            {r.blocked ? <span className="w-20 text-right text-[13px] text-accent">Banlı</span> : <Button size="sm" variant="ghost" className="w-20" onClick={() => setBlockIp(r.ip)}>Banla</Button>}
+            {r.blocked ? <span className="w-20 text-right text-[13px] text-accent">{t("Banlı")}</span> : <Button size="sm" variant="ghost" className="w-20" onClick={() => setBlockIp(r.ip)}>{t("Banla")}</Button>}
           </div>
         ))}
       </div>
@@ -182,8 +183,8 @@ function Events() {
   return (
     <>
       <div className="mb-4">
-        <select className="input w-auto" value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Olay türü">
-          <option value="">Tüm olaylar</option>
+        <select className="input w-auto" value={kind} onChange={(e) => setKind(e.target.value)} aria-label={t("Olay türü")}>
+          <option value="">{t("Tüm olaylar")}</option>
           {Object.entries(KIND).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
           ))}
@@ -192,23 +193,23 @@ function Events() {
       {!data ? (
         <div className="panel h-40 animate-pulse" />
       ) : data.events.length === 0 ? (
-        <div className="panel px-5 py-6 text-[14px] text-muted">Olay yok.</div>
+        <div className="panel px-5 py-6 text-[14px] text-muted">{t("Olay yok.")}</div>
       ) : (
         <div className="panel overflow-x-auto">
           <table className="w-full text-left text-[13px]">
             <thead className="border-b border-line text-muted">
               <tr>
-                <th className="px-4 py-2.5 font-normal">Zaman</th>
-                <th className="px-4 py-2.5 font-normal">Tür</th>
-                <th className="px-4 py-2.5 font-normal">IP</th>
-                <th className="px-4 py-2.5 font-normal">İstek</th>
+                <th className="px-4 py-2.5 font-normal">{t("Zaman")}</th>
+                <th className="px-4 py-2.5 font-normal">{t("Tür")}</th>
+                <th className="px-4 py-2.5 font-normal">{t("IP")}</th>
+                <th className="px-4 py-2.5 font-normal">{t("İstek")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line">
               {data.events.map((e) => (
                 <tr key={e.id} className="align-top">
                   <td className="px-4 py-2.5 whitespace-nowrap text-muted">{dateTime(e.createdAt)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">{KIND[e.kind] ?? e.kind}</td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">{t(KIND[e.kind] ?? e.kind)}</td>
                   <td className="px-4 py-2.5 font-mono whitespace-nowrap">{e.ip}</td>
                   <td className="max-w-[28rem] px-4 py-2.5">
                     <div className="truncate font-mono" title={e.path ?? ""}>
@@ -229,17 +230,17 @@ function Events() {
 function BlockedList() {
   const [adding, setAdding] = useState(false);
   const { data } = useQuery({ queryKey: ["security", "blocked"], queryFn: () => api.get<{ blocked: Blocked[] }>("/security/blocked"), refetchInterval: 20_000 });
-  const remove = useAction((id: number) => api.del(`/security/blocked/${id}`), { success: "Ban kaldırıldı", invalidate: [["security"]] });
+  const remove = useAction((id: number) => api.del(`/security/blocked/${id}`), { success: t("Ban kaldırıldı"), invalidate: [["security"]] });
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-xl text-[14px] text-muted">Banlı IP'ler tüm sunuculardaki uygulamalara ve panele erişemez.</p>
-        <Button variant="primary" onClick={() => setAdding(true)}>IP banla</Button>
+        <p className="max-w-xl text-[14px] text-muted">{t("Banlı IP'ler tüm sunuculardaki uygulamalara ve panele erişemez.")}</p>
+        <Button variant="primary" onClick={() => setAdding(true)}>{t("IP banla")}</Button>
       </div>
       {!data ? (
         <div className="panel h-32 animate-pulse" />
       ) : data.blocked.length === 0 ? (
-        <div className="panel px-5 py-6 text-[14px] text-muted">Banlı IP yok.</div>
+        <div className="panel px-5 py-6 text-[14px] text-muted">{t("Banlı IP yok.")}</div>
       ) : (
         <div className="panel divide-y divide-line">
           {data.blocked.map((b) => (
@@ -248,11 +249,11 @@ function BlockedList() {
                 <div className="font-mono text-[14px]">{b.ip}</div>
                 <div className="text-[13px] text-muted">
                   {b.reason}
-                  {b.auto ? ", otomatik" : ""}
+                  {b.auto ? t(", otomatik") : ""}
                 </div>
               </div>
-              <span className="text-[13px] text-faint">{b.expiresAt ? `${new Date(b.expiresAt).toLocaleString("tr-TR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} tarihine kadar` : "Süresiz"}</span>
-              <Button size="sm" variant="ghost" onClick={() => remove.mutate(b.id)}>Banı kaldır</Button>
+              <span className="text-[13px] text-faint">{b.expiresAt ? t("{date} tarihine kadar", { date: new Date(b.expiresAt).toLocaleString(locale(), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) }) : t("Süresiz")}</span>
+              <Button size="sm" variant="ghost" onClick={() => remove.mutate(b.id)}>{t("Banı kaldır")}</Button>
             </div>
           ))}
         </div>
@@ -266,7 +267,7 @@ function BlockDialog({ ip, onClose }: { ip: string | null; onClose: () => void }
   const [form, setForm] = useState({ ip: "", reason: "", hours: "" });
   const open = ip !== null;
   const block = useAction(() => api.post("/security/blocked", { ip: form.ip || ip, reason: form.reason, hours: form.hours ? Number(form.hours) : null }), {
-    success: "IP banlandı, tüm sunuculara uygulandı",
+    success: t("IP banlandı, tüm sunuculara uygulandı"),
     invalidate: [["security"]],
     onSuccess: () => {
       onClose();
@@ -274,7 +275,7 @@ function BlockDialog({ ip, onClose }: { ip: string | null; onClose: () => void }
     },
   });
   return (
-    <Dialog open={open} onClose={onClose} title="IP banla">
+    <Dialog open={open} onClose={onClose} title={t("IP banla")}>
       <form
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
@@ -282,18 +283,18 @@ function BlockDialog({ ip, onClose }: { ip: string | null; onClose: () => void }
         }}
         className="space-y-4"
       >
-        <Field label="IP veya CIDR">
+        <Field label={t("IP veya CIDR")}>
           <input className="input font-mono" required autoFocus value={form.ip || ip || ""} onChange={(e) => setForm({ ...form, ip: e.target.value.trim() })} placeholder="203.0.113.7" />
         </Field>
-        <Field label="Neden" hint="İsteğe bağlı, kendin için not.">
+        <Field label={t("Neden")} hint={t("İsteğe bağlı, kendin için not.")}>
           <input className="input" value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
         </Field>
-        <Field label="Süre (saat)" hint="Boş bırakırsan süresiz.">
+        <Field label={t("Süre (saat)")} hint={t("Boş bırakırsan süresiz.")}>
           <input className="input max-w-32" inputMode="numeric" value={form.hours} onChange={(e) => setForm({ ...form, hours: e.target.value.replace(/\D/g, "") })} />
         </Field>
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>Vazgeç</Button>
-          <Button type="submit" variant="primary" loading={block.isPending}>Banla</Button>
+          <Button type="button" variant="ghost" onClick={onClose}>{t("Vazgeç")}</Button>
+          <Button type="submit" variant="primary" loading={block.isPending}>{t("Banla")}</Button>
         </div>
       </form>
     </Dialog>
@@ -309,23 +310,23 @@ function AutoBanSettings() {
   const f = form ?? (data ? { on: data.autoBanEnabled, threshold: String(data.autoBanThreshold), window: String(data.autoBanWindowMin), duration: String(data.autoBanDurationH) } : null);
   const save = useAction(
     () => api.put("/security/settings", { autoBanEnabled: f!.on, autoBanThreshold: Number(f!.threshold), autoBanWindowMin: Number(f!.window), autoBanDurationH: Number(f!.duration) }),
-    { success: "Otomatik ban ayarları kaydedildi", invalidate: [["security", "settings"]] },
+    { success: t("Otomatik ban ayarları kaydedildi"), invalidate: [["security", "settings"]] },
   );
   if (!f) return null;
   const num = (k: "threshold" | "window" | "duration") => (
     <input className="input w-20" inputMode="numeric" value={f[k]} onChange={(e) => setForm({ ...f, [k]: e.target.value.replace(/\D/g, "") })} />
   );
   return (
-    <Section title="Otomatik ban" description="Saldırgan IP'ler kısa sürede çok fazla engellenirse tüm sunucularda geçici olarak banlanır.">
+    <Section title={t("Otomatik ban")} description={t("Saldırgan IP'ler kısa sürede çok fazla engellenirse tüm sunucularda geçici olarak banlanır.")}>
       <div className="panel space-y-4 p-5">
-        <Toggle checked={f.on} onChange={(v) => setForm({ ...f, on: v })} label="Otomatik ban açık" />
+        <Toggle checked={f.on} onChange={(v) => setForm({ ...f, on: v })} label={t("Otomatik ban açık")} />
         {f.on && (
           <div className="flex flex-wrap items-center gap-2 text-[14px] text-muted">
-            {num("window")} dakika içinde {num("threshold")} engellenen istek yapan IP {num("duration")} saat banlansın.
+            {num("window")} {t("dakika içinde")} {num("threshold")} {t("engellenen istek yapan IP")} {num("duration")} {t("saat banlansın.")}
           </div>
         )}
         <div className="flex justify-end">
-          <Button onClick={() => save.mutate()} loading={save.isPending}>Kaydet</Button>
+          <Button onClick={() => save.mutate()} loading={save.isPending}>{t("Kaydet")}</Button>
         </div>
       </div>
     </Section>

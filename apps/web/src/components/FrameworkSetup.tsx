@@ -3,21 +3,39 @@ import { Check, Plus, Sparkles } from "lucide-react";
 import { Field, Toggle } from "@/components/ui";
 import { api, type DetectResult, type EnvHint, type FrameworkInfo } from "@/lib/api";
 import { FrameworkLogo } from "./FrameworkLogo";
+import { t } from "@/lib/i18n";
+
+/** Sunucudan gelen katalog metinleri (Türkçe) seçili dile çevrilir. */
+function translateCatalog(list: FrameworkInfo[]): FrameworkInfo[] {
+  return list.map((f) => ({
+    ...f,
+    name: t(f.name),
+    description: t(f.description),
+    category: t(f.category),
+    steps: f.steps.map((x) => t(x)),
+    fields: f.fields.map((x) => ({ ...x, label: t(x.label), hint: x.hint && t(x.hint), options: x.options?.map((o) => ({ ...o, label: t(o.label) })) })),
+    envHints: f.envHints.map((h) => ({ ...h, description: t(h.description) })),
+  }));
+}
 
 export function useFrameworks() {
-  return useQuery({ queryKey: ["frameworks"], queryFn: () => api.get<{ frameworks: FrameworkInfo[] }>("/frameworks"), staleTime: Infinity });
+  return useQuery({
+    queryKey: ["frameworks"],
+    queryFn: () => api.get<{ frameworks: FrameworkInfo[] }>("/frameworks").then((r) => ({ frameworks: translateCatalog(r.frameworks) })),
+    staleTime: Infinity,
+  });
 }
 
 const AUTO_ENTRY: FrameworkInfo = {
   id: "auto",
-  name: "Otomatik algıla",
+  name: t("Otomatik algıla"),
   language: "",
   category: "",
-  description: "Her deploy'da repo taranır, en uygun framework seçilir.",
+  description: t("Her deploy'da repo taranır, en uygun framework seçilir."),
   defaultPort: 3000,
   fields: [],
   envHints: [],
-  steps: ["Repo klonlanır ve proje türü algılanır.", "Algılanan framework'ün adımları uygulanır."],
+  steps: [t("Repo klonlanır ve proje türü algılanır."), t("Algılanan framework'ün adımları uygulanır.")],
 };
 
 /** Dillere göre gruplanmış framework seçimi; algılananlar önerilen olarak işaretlenir. */
@@ -44,7 +62,7 @@ export function FrameworkPicker({ value, onChange, detected }: { value: string; 
         {f.id === "auto" ? <Sparkles className="size-5 shrink-0 text-accent" /> : <FrameworkLogo id={f.id} className="size-5 shrink-0" />}
         <span className="min-w-0">
           <span className="block truncate text-[14px] font-medium">{f.name}</span>
-          {match && <span className="block truncate text-[12px] text-ok">{match === top ? "Önerilen" : "Uygun"}</span>}
+          {match && <span className="block truncate text-[12px] text-ok">{match === top ? t("Önerilen") : t("Uygun")}</span>}
         </span>
         {selected && <Check className="absolute top-2 right-2 size-3.5 text-accent" />}
       </button>
@@ -55,7 +73,7 @@ export function FrameworkPicker({ value, onChange, detected }: { value: string; 
     <div className="space-y-4">
       {top && (
         <p className="rounded-md bg-surface-2 px-3 py-2 text-[13px] text-muted">
-          Repoda <span className="font-medium text-fg">{data.frameworks.find((f) => f.id === top.id)?.name}</span> bulundu: {top.reason}.
+          {t("Repoda {name} bulundu: {reason}.", { name: data.frameworks.find((f) => f.id === top.id)?.name ?? "", reason: t(top.reason) })}
         </p>
       )}
       <div className="grid gap-2 sm:grid-cols-3">{card(AUTO_ENTRY)}</div>
@@ -87,7 +105,7 @@ export function FrameworkFields({ fw, values, onChange }: { fw: FrameworkInfo; v
         ) : f.type === "select" ? (
           <Field key={f.key} label={f.label} hint={f.hint}>
             <select className="input" value={String(values[f.key] ?? "")} onChange={(e) => set(f.key, e.target.value)}>
-              <option value="">Otomatik</option>
+              <option value="">{t("Otomatik")}</option>
               {f.options?.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
@@ -180,10 +198,10 @@ export function EnvSuggestions({
       {missingHints.length > 0 && (
         <div>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[13px] font-medium">Bu framework için önerilenler</span>
+            <span className="text-[13px] font-medium">{t("Bu framework için önerilenler")}</span>
             {required.length > 0 && (
               <button type="button" className="text-[13px] text-accent hover:underline" onClick={() => onChange(appendEnv(env, required.map((h) => `${h.key}=${hintValue(h, ctx)}`)))}>
-                Gerekenlerin hepsini ekle
+                {t("Gerekenlerin hepsini ekle")}
               </button>
             )}
           </div>
@@ -196,7 +214,7 @@ export function EnvSuggestions({
                 <span className="text-[13px]">
                   <code className="font-mono">{h.key}</code>
                   {h.required && <span className="ml-1 text-accent">*</span>}
-                  <span className="text-muted"> {h.description}{h.auto ? " Değer otomatik üretilir." : ""}</span>
+                  <span className="text-muted"> {h.description}{h.auto ? t(" Değer otomatik üretilir.") : ""}</span>
                 </span>
               </li>
             ))}
@@ -206,9 +224,9 @@ export function EnvSuggestions({
       {example.length > 0 && (
         <div>
           <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-[13px] font-medium">.env.example dosyasında ({example.length})</span>
+            <span className="text-[13px] font-medium">{t(".env.example dosyasında ({n})", { n: example.length })}</span>
             <button type="button" className="text-[13px] text-accent hover:underline" onClick={() => onChange(appendEnv(env, example.map((e) => `${e.key}=${e.value}`)))}>
-              Hepsini ekle
+              {t("Hepsini ekle")}
             </button>
           </div>
           <div className="flex flex-wrap gap-1">
@@ -222,7 +240,7 @@ export function EnvSuggestions({
       )}
       {fromCode.length > 0 && (
         <div>
-          <div className="mb-1.5 text-[13px] font-medium">Kodunda okunan değişkenler</div>
+          <div className="mb-1.5 text-[13px] font-medium">{t("Kodunda okunan değişkenler")}</div>
           <div className="flex flex-wrap gap-1">
             {fromCode.slice(0, 40).map((k) => (
               <button type="button" key={k} onClick={() => onChange(appendEnv(env, [`${k}=`]))} className="rounded border border-line-strong px-1.5 py-0.5 font-mono text-[12px] text-muted hover:border-accent hover:text-fg">

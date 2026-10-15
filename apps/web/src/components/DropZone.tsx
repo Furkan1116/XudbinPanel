@@ -1,6 +1,7 @@
 import { zipSync } from "fflate";
 import { FolderUp, Loader2 } from "lucide-react";
 import { useRef, useState } from "react";
+import { t } from "@/lib/i18n";
 
 /** Arşive girmeyecekler: bağımlılık klasörleri, derleme önbellekleri ve gizli bilgi içeren .env dosyaları. */
 const SKIP = /(^|\/)(node_modules|\.git|venv|\.venv|__pycache__|\.next|\.nuxt|\.svelte-kit|\.turbo|\.cache|\.DS_Store|\.idea|\.vscode)(\/|$)|(^|\/)\.env(\.[\w-]+)?$/;
@@ -30,7 +31,7 @@ async function pack(files: Record<string, File>, name: string): Promise<Packed> 
   const skippedEnv = Boolean(files.__skippedEnv);
   delete files.__skippedEnv;
   const entries = Object.entries(files);
-  if (!entries.length) throw new Error("Klasör boş");
+  if (!entries.length) throw new Error(t("Klasör boş"));
   const data: Record<string, Uint8Array> = {};
   for (const [p, f] of entries) data[p] = new Uint8Array(await f.arrayBuffer());
   const zipped = zipSync(data, { level: 6 });
@@ -115,18 +116,18 @@ export function DropZone({ onReady, busy, hint }: { onReady: (p: Packed) => void
         }`}
       >
         {loading ? <Loader2 className="size-7 animate-spin text-accent" /> : <FolderUp className="size-7 text-faint" strokeWidth={1.6} />}
-        <div className="text-[15px] font-medium">{loading ? (working ? "Hazırlanıyor..." : "Yükleniyor...") : "Proje klasörünü veya .zip dosyasını buraya bırak"}</div>
+        <div className="text-[15px] font-medium">{loading ? (working ? t("Hazırlanıyor...") : t("Yükleniyor...")) : t("Proje klasörünü veya .zip dosyasını buraya bırak")}</div>
         <div className="text-[13px] text-muted">
-          {hint ?? "node_modules, .git, venv ve .env dosyaları otomatik atlanır."} En fazla 300 MB.
+          {hint ?? t("node_modules, .git, venv ve .env dosyaları otomatik atlanır.")} En fazla 300 MB.
         </div>
         {!loading && (
           <div className="mt-1 flex gap-2">
             <button type="button" className="text-[13px] text-accent hover:underline" onClick={() => dirInput.current?.click()}>
-              Klasör seç
+              {t("Klasör seç")}
             </button>
-            <span className="text-faint">ya da</span>
+            <span className="text-faint">{t("ya da")}</span>
             <button type="button" className="text-[13px] text-accent hover:underline" onClick={() => zipInput.current?.click()}>
-              Zip seç
+              {t("Zip seç")}
             </button>
           </div>
         )}
@@ -145,6 +146,6 @@ export function DropZone({ onReady, busy, hint }: { onReady: (p: Packed) => void
 export async function uploadZip<T>(path: string, blob: Blob): Promise<T> {
   const res = await fetch(`/api${path}`, { method: "POST", body: blob, headers: { "content-type": "application/zip" }, credentials: "same-origin" });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `Yükleme başarısız (${res.status})`);
+  if (!res.ok) throw new Error(body.error ?? t("Yükleme başarısız ({status})", { status: res.status }));
   return body as T;
 }

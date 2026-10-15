@@ -1,4 +1,4 @@
-import { flag, opt, shCmd } from "./util.js";
+import { DEBIAN_ARCHIVE_FIX, flag, opt, shCmd } from "./util.js";
 import type { Framework, Options, Repo } from "./types.js";
 
 const PY_VERSIONS = ["3.14", "3.13", "3.12", "3.11", "3.10"].map((v) => ({ value: v, label: `Python ${v}` }));
@@ -31,7 +31,8 @@ function systemPackages(repo: Repo, extra: string) {
   if (d.includes("mysqlclient")) ["gcc", "pkg-config", "default-libmysqlclient-dev"].forEach((p) => pkgs.add(p));
   if (/\bpillow\b/.test(d)) ["libjpeg62-turbo-dev", "zlib1g-dev"].forEach((p) => pkgs.add(p));
   if (!pkgs.size) return "";
-  return `RUN apt-get update && apt-get install -y --no-install-recommends ${[...pkgs].join(" ")} && rm -rf /var/lib/apt/lists/*`;
+  return `${DEBIAN_ARCHIVE_FIX}
+RUN apt-get update && apt-get install -y --no-install-recommends ${[...pkgs].join(" ")} && rm -rf /var/lib/apt/lists/*`;
 }
 
 const commonFields = (o: { entry?: boolean } = {}) => [

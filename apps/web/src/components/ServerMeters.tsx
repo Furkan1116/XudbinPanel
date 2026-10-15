@@ -1,5 +1,6 @@
 import type { ServerStats } from "@/lib/api";
 import { formatBytes, percent } from "@/lib/format";
+import { t } from "@/lib/i18n";
 
 /** Sunucu kartlarında kullanılan küçük CPU/RAM/disk çubukları. */
 export function ServerMeters({ stats }: { stats: ServerStats }) {
@@ -7,9 +8,9 @@ export function ServerMeters({ stats }: { stats: ServerStats }) {
   const disk = stats.disk ? percent(stats.disk.used, stats.disk.total) : null;
   return (
     <dl className="grid grid-cols-3 gap-4">
-      <Meter label="İşlemci" pct={stats.cpu.usage} detail={`${stats.cpu.cores} çekirdek`} />
-      <Meter label="Bellek" pct={mem} detail={`${formatBytes(stats.memory.used)} / ${formatBytes(stats.memory.total)}`} />
-      <Meter label="Disk" pct={disk} detail={stats.disk ? `${formatBytes(stats.disk.total - stats.disk.used)} boş` : "Okunamadı"} />
+      <Meter label={t("İşlemci")} pct={stats.cpu.usage} detail={t("{n} çekirdek", { n: stats.cpu.cores })} />
+      <Meter label={t("Bellek")} pct={mem} detail={`${formatBytes(stats.memory.used)} / ${formatBytes(stats.memory.total)}`} />
+      <Meter label={t("Disk")} pct={disk} detail={stats.disk ? t("{n} boş", { n: formatBytes(stats.disk.total - stats.disk.used) }) : t("Okunamadı")} />
     </dl>
   );
 }

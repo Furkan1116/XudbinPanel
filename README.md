@@ -17,9 +17,10 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Erişilemeyen sunucu için bildirim
 
 **Uygulamalar**
-- Kaynak: Git reposu (özel repolar için token), Docker imajı veya Docker Compose
-- Dockerfile yoksa proje türünü tanır: Node.js, Next.js, Vite/statik derleme, Django, Flask, FastAPI, Go, statik site
-- Kesintisiz deploy: yeni konteyner sağlıklı başlayınca trafik ona geçer, başarısızsa eski sürüm yayında kalır
+- Kaynak: Git reposu (özel repolar için token), sürükle-bırak dosya yükleme (klasör veya zip), Docker imajı veya Docker Compose
+- Framework'e göre deploy: uygulama eklerken repo taranır, uygun framework önerilir; her framework'ün ayarları, gereken ortam değişkenleri ve "deploy'da ne olacak" adımları gösterilir
+- Kodda okunan ortam değişkenleri ve `.env.example` tek tıkla eklenir; gizli anahtar, alan adı gibi değerler otomatik üretilir
+- Kesintisiz deploy: trafik, yeni sürüm portunu gerçekten dinlemeye başlayınca geçer; başlamazsa eski sürüm yayında kalır
 - Tek tıkla önceki sürüme dönüş, canlı deploy ve uygulama logları
 - Git push webhook'u ile otomatik deploy (GitHub, GitLab, Gitea...)
 - Şifreli ortam değişkenleri, kalıcı depolama klasörleri, CPU/bellek izleme
@@ -37,21 +38,56 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 
 **Bildirimler:** Discord, Telegram, Slack, genel webhook. Olaylar: deploy sonucu, banlanan IP, başarısız yedek, erişilemeyen sunucu.
 
+**Kullanıcılar:** Yönetici ve üye rolleri. Üyeler proje, uygulama ve veritabanlarını yönetir; sunuculara, güvenliğe ve ayarlara erişemez. Yeni kullanıcı geçici şifreyle eklenir, ilk girişte kendi şifresini belirler.
+
+**Arayüz:** Türkçe ve İngilizce, açık ve koyu tema.
+
+## Desteklenen frameworkler
+
+Dockerfile'ı olmayan projeler için Xudbin şu türleri tanır ve Dockerfile'ı kendisi üretir (üretilen Dockerfile deploy logunda görünür):
+
+| Dil | Frameworkler |
+|---|---|
+| Python | Django (Gunicorn + WhiteNoise, başlangıçta collectstatic/migrate), Flask, FastAPI, genel Python |
+| JavaScript / TypeScript | Next.js (standalone dahil), Nuxt, SvelteKit, Astro, Remix / React Router, NestJS, React/Vue/Angular SPA, Express/Fastify/Hono, Bun, Deno |
+| PHP | Laravel, genel PHP ve WordPress (FrankenPHP, Nginx gerekmez) |
+| .NET | ASP.NET Core |
+| Go, Rust, Java | Go, Rust, Spring Boot (Maven/Gradle) |
+| Ruby | Rails |
+| Diğer | Statik site, kendi Dockerfile'ın |
+
+Bunlar dışındaki projeler repodaki Dockerfile ile deploy edilir.
+
 ## Kurulum
 
-Ubuntu veya Debian bir sunucuda, 80 ve 443 portları boşken:
+Ubuntu, Debian veya AlmaLinux/Rocky bir sunucuda, 80 ve 443 portları boşken tek komut:
 
 ```bash
-git clone <repo-adresi> xudbin && cd xudbin
-sudo ./install.sh
+curl -fsSL https://raw.githubusercontent.com/furkan1116/xudbin/main/install.sh | sudo bash
 ```
 
-Script şunları yapar:
-1. Docker kurulu değilse kurar.
-2. UFW ile yalnız SSH, 80 ve 443 portlarını açar; SSH için fail2ban kurar (`XUDBIN_HARDEN=0` ile atlanır).
-3. Sunucunun IP'sinden bir panel adresi üretir (`xudbin.1-2-3-4.sslip.io`).
-4. Paneli başlatır. Panel, Caddy'yi WAF modülleriyle derler ve HTTPS sertifikasını alır (ilk seferde 3-6 dakika).
-5. Ekrana **kurulum linkini** yazar. Yönetici hesabı yalnız bu linkle oluşturulabilir; böylece panel internete açıldığı anda başkası kurulumu senden önce ele geçiremez.
+Betik şunları yapar ve her adımı terminalde gösterir:
+1. Sistemi kontrol eder; RAM 3 GB'tan azsa 2 GB swap açar.
+2. Docker kurulu değilse kurar.
+3. Xudbin'i indirir ve `xudbin` komutunu kurar.
+4. Güvenlik duvarında yalnız SSH, 80 ve 443'ü açar, SSH için fail2ban kurar (`XUDBIN_HARDEN=0` ile atlanır).
+5. Paneli başlatır: hazır imaj varsa indirir, yoksa kaynaktan derler.
+6. Sunucunun IP'sinden bir panel adresi üretir (`xudbin.1-2-3-4.sslip.io`) ve HTTPS sertifikasını alır.
+7. **Kurulum linkini** çerçeve içinde ve telefondan okutulabilir QR kodla gösterir. Yönetici hesabı yalnız bu linkle oluşturulabilir; böylece panel internete açıldığı anda başkası kurulumu senden önce ele geçiremez.
+
+## Sunucudaki `xudbin` komutu
+
+```bash
+xudbin link                           # panel adresi (ilk kurulumda kurulum linki), QR kodla
+xudbin status                         # özet durum
+xudbin user list                      # kullanıcılar
+xudbin user create ali@ornek.com Ali --member   # kullanıcı ekler, geçici şifre verir
+xudbin user reset-password ali@ornek.com
+xudbin user disable-2fa ali@ornek.com # telefon kaybolduysa
+xudbin unban 203.0.113.7
+sudo xudbin update                    # Xudbin'i günceller, verilere dokunmaz
+xudbin logs                           # panel logları
+```
 
 Kendi alan adınla (A kaydı sunucuya yönlendirilmiş olmalı):
 
@@ -72,11 +108,11 @@ echo 'XUDBIN_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory' | s
 cd /opt/xudbin && sudo docker compose up -d
 ```
 
-Kurulum linkini kaçırırsan:
+Kurulum linkini kaçırırsan `xudbin link` komutunu çalıştır.
 
-```bash
-docker exec xudbin cat /data/setup-token
-```
+## Hazır imajlar
+
+Repo GitHub'a gönderildiğinde `.github/workflows/images.yml` panel ve Caddy imajlarını (amd64 + arm64) `ghcr.io/<sahip>/xudbin` ve `ghcr.io/<sahip>/xudbin-caddy` olarak yayınlar. İlk yayından sonra GitHub > Packages'ta iki paketi de **Public** yap; kurulumlar derleme yapmadan bu imajları kullanır.
 
 ## Uzak sunucu eklemek
 

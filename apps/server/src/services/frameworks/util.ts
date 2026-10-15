@@ -97,3 +97,11 @@ ${spa ? "\ttry_files {path} {path}/ /index.html\n" : ""}	file_server
 }
 `;
 }
+
+/**
+ * Desteği biten Debian sürümlerine (buster, bullseye) dayanan eski dil imajlarında paket depoları
+ * archive.debian.org'a taşınmıştır; apt-get bu satır olmadan 404 alır.
+ */
+export const DEBIAN_ARCHIVE_FIX = `RUN . /etc/os-release && case "$VERSION_CODENAME" in buster|bullseye) \\
+    sed -i -e 's|deb.debian.org|archive.debian.org|g' -e 's|security.debian.org|archive.debian.org|g' -e '/-updates/d' /etc/apt/sources.list 2>/dev/null; \\
+    rm -f /etc/apt/sources.list.d/debian.sources;; esac`;
