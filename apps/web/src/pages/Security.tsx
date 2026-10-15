@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
+import { SecurityScore } from "@/components/SecurityScore";
 import { Button, Dialog, Field, Notice, PageHeader, PageLoading, Section, Tabs, Toggle, useAction } from "@/components/ui";
 import { api } from "@/lib/api";
 import { dateTime, timeAgo } from "@/lib/format";
@@ -29,7 +30,7 @@ const KIND: Record<string, string> = {
 
 export function SecurityPage() {
   const [hours, setHours] = useState(24);
-  const [tab, setTab] = useState<"overview" | "events" | "blocked">("overview");
+  const [tab, setTab] = useState<"score" | "overview" | "events" | "blocked">("score");
   const summary = useQuery({ queryKey: ["security", "summary", hours], queryFn: () => api.get<Summary>(`/security/summary?hours=${hours}`), refetchInterval: 20_000 });
   if (!summary.data) return <PageLoading />;
   const s = summary.data;
@@ -52,7 +53,8 @@ export function SecurityPage() {
         value={tab}
         onChange={setTab}
         tabs={[
-          { id: "overview", label: t("Özet") },
+          { id: "score", label: t("Puan") },
+          { id: "overview", label: t("Saldırılar") },
           { id: "events", label: t("Olaylar") },
           { id: "blocked", label: t("Banlı IP'ler ({n})", { n: s.blockedCount }) },
         ]}
@@ -88,6 +90,7 @@ export function SecurityPage() {
           <AutoBanSettings />
         </>
       )}
+      {tab === "score" && <SecurityScore />}
       {tab === "events" && <Events />}
       {tab === "blocked" && <BlockedList />}
     </>

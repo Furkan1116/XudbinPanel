@@ -16,6 +16,8 @@ export type Settings = {
   lastPanelBackupAt: number | null;
   /** Veritabanı yedekleri en fazla bu sıklıkta geçici bir konteynere geri yüklenip doğrulanır. */
   verifyBackupsEveryH: number;
+  /** Her başarılı deploy'dan sonra imaj Trivy ile taranır. */
+  imageScanEnabled: boolean;
 };
 
 const DEFAULTS: Settings = {
@@ -31,6 +33,7 @@ const DEFAULTS: Settings = {
   panelBackupKeep: 7,
   lastPanelBackupAt: null,
   verifyBackupsEveryH: 24,
+  imageScanEnabled: true,
 };
 
 export function getSettings(): Settings {

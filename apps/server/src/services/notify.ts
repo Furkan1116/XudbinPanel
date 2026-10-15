@@ -7,6 +7,7 @@ export const NOTIFY_EVENTS = {
   ip_banned: "Saldırgan IP banlandı",
   backup_failed: "Yedekleme başarısız",
   server_down: "Sunucuya ulaşılamıyor",
+  vulnerability: "İmajda kritik güvenlik açığı",
 } as const;
 export type NotifyEvent = keyof typeof NOTIFY_EVENTS;
 

@@ -33,22 +33,24 @@ done
 /** Geliştirmede (Mac + OrbStack) kapalı; sunucuda XUDBIN_DOCKER_FIREWALL=0 ile kapatılabilir. */
 export const dockerFirewallEnabled = () => config.isProd && process.env.XUDBIN_DOCKER_FIREWALL !== "0";
 
-/** Sunucunun kendi kabuğunda komut çalıştırır: Caddy imajından, sunucunun köküne chroot eden kısa ömürlü bir konteyner. */
-async function runOnHost(server: ServerRow, script: string) {
+/** Sunucunun kendi kabuğunda root olarak komut çalıştırır: Caddy imajından, sunucunun köküne chroot eden kısa ömürlü bir konteyner. */
+export async function hostExec(server: ServerRow, script: string, timeoutMs = 60_000) {
   const docker = dockerFor(server);
   if (!(await imageExists(docker, config.caddyImage))) throw new Error("Caddy imajı yok; önce sunucu kurulumunu tamamla");
   const container = await docker.createContainer({
     Image: config.caddyImage,
     Entrypoint: ["chroot", "/host", "sh", "-c", script],
     Cmd: [],
-    Labels: { "xudbin.managed": "true", "xudbin.task": "firewall" },
+    // TTY: çıktı Docker'ın çoklama başlıkları olmadan, düz metin gelir.
+    Tty: true,
+    Labels: { "xudbin.managed": "true", "xudbin.task": "host-exec" },
     HostConfig: { AutoRemove: false, Privileged: true, NetworkMode: "host", Binds: ["/:/host"] },
   });
   try {
     await container.start();
-    const res = (await withTimeout(container.wait(), 60_000, "Güvenlik duvarı komutu zaman aşımına uğradı")) as { StatusCode: number };
-    const logs = (await container.logs({ stdout: true, stderr: true })).toString("utf8").replace(/[\x00-\x08]/g, "");
-    if (res.StatusCode !== 0) throw new Error(`Güvenlik duvarı kuralları uygulanamadı: ${logs.trim().split("\n").pop()}`);
+    const res = (await withTimeout(container.wait(), timeoutMs, "Sunucu komutu zaman aşımına uğradı")) as { StatusCode: number };
+    const logs = (await container.logs({ stdout: true, stderr: true })).toString("utf8").replace(/\r/g, "");
+    if (res.StatusCode !== 0) throw new Error(logs.trim().split("\n").pop() || `Komut ${res.StatusCode} koduyla çıktı`);
     return logs;
   } finally {
     await container.remove({ force: true }).catch(() => {});
@@ -65,7 +67,9 @@ export async function applyDockerFirewall(server: ServerRow, opts: { force?: boo
   );
   const script = firewallScript(ports);
   if (!opts.force && lastApplied.get(server.id) === script) return;
-  await runOnHost(server, script);
+  await hostExec(server, script).catch((e: Error) => {
+    throw new Error(`Güvenlik duvarı kuralları uygulanamadı: ${e.message}`);
+  });
   lastApplied.set(server.id, script);
 }
 

@@ -15,6 +15,7 @@ import { composeHostAccessIssues } from "./compose-policy.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "./doctor.js";
 import { buildImage, containerState, dockerFor, execIn, pullImage, removeContainer, type ServerRow } from "./docker.js";
 import { notify } from "./notify.js";
+import { imageScanEnabled, scanApp } from "./scan.js";
 import { getServer } from "./servers.js";
 import { getPrivateKey } from "./ssh.js";
 import { extractZip, latestAppUpload } from "./uploads.js";
@@ -54,6 +55,9 @@ export type AppRow = {
   memory_limit: number | null;
   http_check: number;
   health_path: string | null;
+  scan_status: string | null;
+  scan_summary: string | null;
+  scanned_at: number | null;
   created_at: number;
 };
 
@@ -236,6 +240,10 @@ async function runDeployment(deploymentId: number) {
     log(`Deploy tamamlandı (${seconds} sn).`);
     db.prepare("UPDATE deployments SET status = 'success', finished_at = ? WHERE id = ?").run(Date.now(), deploymentId);
     db.prepare("UPDATE apps SET status = 'running' WHERE id = ?").run(app.id);
+    if (app.source_type !== "compose" && imageScanEnabled()) {
+      log("İmaj güvenlik açıklarına karşı arka planda taranıyor (sonuç uygulama sayfasında).");
+      scanApp(app.id).catch((e) => console.error(`İmaj taranamadı (${app.name}):`, (e as Error).message));
+    }
     notify("deploy_success", `${app.name} yayında`, `Deploy #${deploymentId} ${seconds} saniyede tamamlandı.`);
   } catch (err) {
     const message = signal.aborted ? String(signal.reason) : (err as Error).message;

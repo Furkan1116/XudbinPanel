@@ -265,6 +265,12 @@ const migrations: string[] = [
     created_at  INTEGER NOT NULL
   );
   `,
+  // İmaj güvenlik taraması (Trivy).
+  `
+  ALTER TABLE apps ADD COLUMN scan_status TEXT;
+  ALTER TABLE apps ADD COLUMN scan_summary TEXT;
+  ALTER TABLE apps ADD COLUMN scanned_at INTEGER;
+  `,
 ];
 
 function migrate() {

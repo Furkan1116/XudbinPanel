@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { DeployDoctor } from "@/components/DeployDoctor";
 import { DropZone, uploadZip } from "@/components/DropZone";
+import { ImageScan } from "@/components/ImageScan";
 import { FrameworkLogo } from "@/components/FrameworkLogo";
 import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frameworkById, useFrameworks } from "@/components/FrameworkSetup";
 import { LogViewer } from "@/components/LogViewer";
@@ -24,7 +25,7 @@ export function AppDetailPage() {
   const { data } = useQuery({
     queryKey: ["app", id],
     queryFn: () => api.get<AppData>(`/apps/${id}`),
-    refetchInterval: (q) => (q.state.data?.app.status === "deploying" ? 2000 : 8000),
+    refetchInterval: (q) => (q.state.data?.app.status === "deploying" || q.state.data?.app.scan.status === "running" ? 2000 : 8000),
   });
   const deploy = useAction(() => api.post<{ deploymentId: number }>(`/apps/${id}/deploy`), {
     invalidate: [["app", id]],
@@ -167,6 +168,7 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
       </dl>
 
       <DeployDoctor app={app} last={last} />
+      <ImageScan app={app} />
 
       {app.sourceType === "upload" && <UploadNewVersion app={app} />}
 

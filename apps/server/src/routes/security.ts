@@ -4,8 +4,26 @@ import { db } from "../db.js";
 import { body, HttpError, idParam } from "../lib/http.js";
 import { getSettings, updateSettings } from "../lib/settings.js";
 import { applyToAllServers } from "../services/security.js";
+import { applyFix, computeScore } from "../services/posture.js";
 
 export const securityRoutes = new Hono()
+  .get("/score", async (c) => c.json({ ...(await computeScore({ refresh: c.req.query("refresh") === "1" })), imageScanEnabled: getSettings().imageScanEnabled }))
+
+  .put("/image-scan", async (c) => {
+    const { enabled } = await body(c, z.object({ enabled: z.boolean() }));
+    updateSettings({ imageScanEnabled: enabled });
+    return c.json({ ok: true });
+  })
+
+  .post("/score/fix", async (c) => {
+    const { action } = await body(c, z.object({ action: z.string().max(100) }));
+    try {
+      return c.json(await applyFix(action));
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+  })
+
   .get("/summary", (c) => {
     const hours = Math.min(Math.max(Number(c.req.query("hours")) || 24, 1), 24 * 30);
     const since = Date.now() - hours * 3_600_000;

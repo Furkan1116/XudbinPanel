@@ -30,6 +30,15 @@ import path from "node:path";
 import { extractZip, newTempUpload, saveUpload, storeAppUpload, tempUploadFile } from "../services/uploads.js";
 import { getServer } from "../services/servers.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor.js";
+import { scanApp } from "../services/scan.js";
+
+const parseJson = (raw: string | null) => {
+  try {
+    return raw ? (JSON.parse(raw) as unknown) : null;
+  } catch {
+    return null;
+  }
+};
 
 const HOST_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
@@ -80,6 +89,7 @@ function publicApp(a: AppRow) {
     webhookSigned: Boolean(a.webhook_signed),
     cpuLimit: a.cpu_limit,
     httpCheck: Boolean(a.http_check),
+    scan: { status: a.scan_status, at: a.scanned_at, summary: parseJson(a.scan_summary) },
     healthPath: a.health_path,
     memoryLimit: a.memory_limit,
     domains: domains.map((d) => ({ ...d, https: Boolean(d.https) && httpsActive, generated: Boolean(d.generated), url: `${d.https && httpsActive ? "https" : "http"}://${d.host}` })),
@@ -269,6 +279,14 @@ export const appRoutes = new Hono<AppEnv>()
     const { env } = await body(c, z.object({ env: z.string().max(200_000) }));
     db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(env.trim() ? encrypt(env) : null, app.id);
     return c.json({ ok: true, note: "Değişikliklerin geçerli olması için yeniden deploy et." });
+  })
+
+  .post("/:id/scan", (c) => {
+    const app = loadApp(idParam(c));
+    if (!app.current_image || app.source_type === "compose") throw new HttpError(422, "Taranacak bir imaj yok; önce deploy et");
+    db.prepare("UPDATE apps SET scan_status = 'running' WHERE id = ?").run(app.id);
+    scanApp(app.id).catch(() => {});
+    return c.json({ ok: true }, 202);
   })
 
   // Deploy Doktoru'nun önerdiği değişkenleri ekler/günceller; istenirse yeniden deploy eder.

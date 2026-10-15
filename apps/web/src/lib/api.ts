@@ -118,6 +118,14 @@ export type App = {
   cpuLimit: number | null;
   memoryLimit: number | null;
   httpCheck: boolean;
+  scan: {
+    status: "running" | "success" | "failed" | null;
+    at: number | null;
+    summary:
+      | { critical: number; high: number; fixable: number; top: { id: string; pkg: string; installed: string; fixed: string | null; severity: string; title: string }[] }
+      | { error: string }
+      | null;
+  };
   healthPath: string | null;
   status: "idle" | "deploying" | "running" | "stopped" | "failed";
   container: string | null;
