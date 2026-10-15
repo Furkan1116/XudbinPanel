@@ -238,14 +238,32 @@ function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.Pro
 }
 
 /** Repoyu yalnız son commit'iyle klonlar (algılama ve derleme için). */
+// git'in "could not read Username" gibi hatalarını kullanıcının anlayacağı bir mesaja çevirir.
+async function gitClone(args: string[], opts: { cwd?: string; token: string; log: (l: string) => void }) {
+  let output = "";
+  const log = (l: string) => {
+    output += l + "\n";
+    opts.log(l);
+  };
+  try {
+    await run("git", args, { cwd: opts.cwd, env: { GIT_TERMINAL_PROMPT: "0" }, log, redact: [opts.token] });
+  } catch (e) {
+    if (/Remote branch .* not found/i.test(output)) throw new Error("Repo klonlanamadı: bu isimde bir dal yok.");
+    if (/could not read Username|Authentication failed|Repository not found|returned error: 40[134]/i.test(output)) {
+      throw new Error(
+        opts.token
+          ? "Repo klonlanamadı: token geçersiz ya da bu repoya erişimi yok."
+          : "Repo klonlanamadı: repo özel veya adres yanlış. Özel repolar için uygulama ayarlarına bir erişim token'ı ekle.",
+      );
+    }
+    throw e;
+  }
+}
+
 export async function shallowClone(url: string, branch: string, token: string, dest: string, log: (l: string) => void = () => {}) {
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  await run("git", ["clone", "--depth", "1", "--branch", branch, gitUrlWithToken(url, token), dest], {
-    env: { GIT_TERMINAL_PROMPT: "0" },
-    log,
-    redact: [token],
-  });
+  await gitClone(["clone", "--depth", "1", "--branch", branch, gitUrlWithToken(url, token), dest], { token, log });
 }
 
 async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void) {
@@ -254,12 +272,7 @@ async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void)
   fs.mkdirSync(workdir, { recursive: true });
   const token = decrypt(app.git_token);
   log(`Klonlanıyor: ${app.git_url} (${app.git_branch})`);
-  await run("git", ["clone", "--depth", "1", "--branch", app.git_branch, gitUrlWithToken(app.git_url, token), "src"], {
-    cwd: workdir,
-    env: { GIT_TERMINAL_PROMPT: "0" },
-    log,
-    redact: [token],
-  });
+  await gitClone(["clone", "--depth", "1", "--branch", app.git_branch, gitUrlWithToken(app.git_url, token), "src"], { cwd: workdir, token, log });
   const sha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   const msg = (await run("git", ["log", "-1", "--pretty=%s"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   log(`Commit ${sha}: ${msg}`);
