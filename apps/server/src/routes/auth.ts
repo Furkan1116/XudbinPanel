@@ -5,6 +5,9 @@ import { SESSION_COOKIE } from "../auth/middleware.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { createSession, destroySession, validateSession } from "../auth/session.js";
 import { checkSetupToken, clearSetupToken } from "../auth/setup-token.js";
+import { verifyTotp } from "../auth/totp.js";
+import { decrypt } from "../lib/crypto.js";
+import { recordPanelEvent } from "../services/security.js";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { clientIp } from "../lib/client-ip.js";
@@ -21,6 +24,7 @@ const userCount = () => (db.prepare("SELECT COUNT(*) AS n FROM users").get() as 
 const credentials = z.object({
   email: z.email("Geçerli bir e-posta girin").max(254),
   password: z.string().min(1).max(256),
+  code: z.string().max(10).optional(),
 });
 
 const setupSchema = credentials.extend({
@@ -81,12 +85,22 @@ export const authRoutes = new Hono()
       return c.json({ error: `Çok fazla deneme. ${Math.ceil(retryAfter / 60)} dakika sonra tekrar deneyin.` }, 429);
     }
 
-    const user = db.prepare("SELECT id, password_hash FROM users WHERE email = ?").get(parsed.data.email) as
-      | { id: number; password_hash: string }
+    const user = db.prepare("SELECT id, password_hash, totp_secret FROM users WHERE email = ?").get(parsed.data.email) as
+      | { id: number; password_hash: string; totp_secret: string | null }
       | undefined;
     // Kullanıcı yoksa da hash doğrulaması yapılır ki yanıt süresi e-postanın varlığını ele vermesin.
     const valid = await verifyPassword(parsed.data.password, user?.password_hash ?? DUMMY_HASH);
-    if (!user || !valid) return c.json({ error: "E-posta veya şifre hatalı" }, 401);
+    if (!user || !valid) {
+      recordPanelEvent(ip, "panel_login", "/api/auth/login", c.req.header("user-agent"));
+      return c.json({ error: "E-posta veya şifre hatalı" }, 401);
+    }
+    if (user.totp_secret) {
+      if (!parsed.data.code) return c.json({ error: "Doğrulama kodu gerekli", needsCode: true }, 401);
+      if (!verifyTotp(decrypt(user.totp_secret), parsed.data.code)) {
+        recordPanelEvent(ip, "panel_login", "/api/auth/login (2FA)", c.req.header("user-agent"));
+        return c.json({ error: "Doğrulama kodu hatalı", needsCode: true }, 401);
+      }
+    }
 
     loginLimiter.reset(ip);
     startSession(c, user.id);

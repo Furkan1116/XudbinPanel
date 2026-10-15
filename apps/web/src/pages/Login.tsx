@@ -1,14 +1,18 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { AuthShell, Field, FormError } from "@/components/AuthShell";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 export function LoginPage() {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ email: "", password: "" });
+  const [form, setForm] = useState({ email: "", password: "", code: "" });
+  const [needsCode, setNeedsCode] = useState(false);
   const login = useMutation({
-    mutationFn: () => api.post("/auth/login", form),
+    mutationFn: () => api.post("/auth/login", needsCode ? form : { email: form.email, password: form.password }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["auth"] }),
+    onError: (err) => {
+      if (err instanceof ApiError && err.data.needsCode) setNeedsCode(true);
+    },
   });
 
   const submit = (e: FormEvent) => {
@@ -16,8 +20,10 @@ export function LoginPage() {
     login.mutate();
   };
 
+  const showError = login.error && !(needsCode && login.error instanceof ApiError && login.error.data.needsCode && !form.code);
+
   return (
-    <AuthShell title="Giriş yap" subtitle="Sunucunu yönetmek için hesabınla giriş yap.">
+    <AuthShell title="Giriş yap" subtitle="Sunucularını yönetmek için hesabınla giriş yap.">
       <form onSubmit={submit} className="space-y-4">
         <Field label="E-posta">
           <input className="input" type="email" required autoFocus autoComplete="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
@@ -25,7 +31,21 @@ export function LoginPage() {
         <Field label="Şifre">
           <input className="input" type="password" required autoComplete="current-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </Field>
-        <FormError message={login.error?.message} />
+        {needsCode && (
+          <Field label="Doğrulama kodu" hint="Kimlik doğrulama uygulamandaki 6 haneli kod.">
+            <input
+              className="input font-mono tracking-[0.3em]"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              maxLength={6}
+              required
+              value={form.code}
+              onChange={(e) => setForm({ ...form, code: e.target.value.replace(/\D/g, "") })}
+            />
+          </Field>
+        )}
+        <FormError message={showError ? login.error?.message : undefined} />
         <button className="btn-primary w-full" disabled={login.isPending}>
           {login.isPending ? "Giriş yapılıyor…" : "Giriş yap"}
         </button>

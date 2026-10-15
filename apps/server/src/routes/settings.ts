@@ -1,0 +1,176 @@
+import { createHash } from "node:crypto";
+import { Hono } from "hono";
+import { getCookie } from "hono/cookie";
+import QRCode from "qrcode";
+import { z } from "zod";
+import { SESSION_COOKIE } from "../auth/middleware.js";
+import { hashPassword, verifyPassword } from "../auth/password.js";
+import { generateTotpSecret, totpUri, verifyTotp } from "../auth/totp.js";
+import { db } from "../db.js";
+import { decrypt, encrypt } from "../lib/crypto.js";
+import { body, HttpError, idParam } from "../lib/http.js";
+import { getSettings, updateSettings } from "../lib/settings.js";
+import type { AppEnv } from "../lib/types.js";
+import { applyCaddyConfig } from "../services/caddy.js";
+import { NOTIFY_EVENTS, sendTo } from "../services/notify.js";
+import { listServers } from "../services/servers.js";
+
+const pendingTotp = new Map<number, string>();
+const sessionKey = (hash: string) => hash.slice(0, 16);
+
+export const settingsRoutes = new Hono<AppEnv>()
+  .get("/", (c) => {
+    const s = getSettings();
+    const local = listServers().find((x) => x.kind === "local");
+    return c.json({ panelDomain: s.panelDomain, panelHttps: s.panelHttps, localServerIp: local?.public_ip ?? null, version: "1.0.0" });
+  })
+
+  .put("/panel", async (c) => {
+    const input = await body(
+      c,
+      z.object({
+        panelDomain: z.union([z.string().trim().toLowerCase().regex(/^([a-z0-9-]+\.)+[a-z]{2,63}$/, "Geçerli bir alan adı gir"), z.literal("")]),
+        panelHttps: z.boolean(),
+      }),
+    );
+    updateSettings(input);
+    const local = listServers().find((x) => x.kind === "local");
+    if (local?.status === "ready") await applyCaddyConfig(local);
+    return c.json({ ok: true });
+  })
+
+  // --- Hesap ---------------------------------------------------------------
+  .get("/account", (c) => {
+    const user = c.get("user");
+    const row = db.prepare("SELECT totp_secret FROM users WHERE id = ?").get(user.id) as { totp_secret: string | null };
+    const current = createHash("sha256").update(getCookie(c, SESSION_COOKIE) ?? "").digest("hex");
+    const sessions = (
+      db.prepare("SELECT id, ip, user_agent, created_at, expires_at FROM sessions WHERE user_id = ? AND expires_at > ? ORDER BY created_at DESC").all(user.id, Date.now()) as {
+        id: string;
+        ip: string | null;
+        user_agent: string | null;
+        created_at: number;
+        expires_at: number;
+      }[]
+    ).map((s) => ({ id: sessionKey(s.id), ip: s.ip, userAgent: s.user_agent, createdAt: s.created_at, expiresAt: s.expires_at, current: s.id === current }));
+    return c.json({ user, totpEnabled: Boolean(row.totp_secret), sessions });
+  })
+
+  .put("/account/profile", async (c) => {
+    const user = c.get("user");
+    const input = await body(c, z.object({ name: z.string().trim().min(1).max(100), email: z.email().max(254) }));
+    try {
+      db.prepare("UPDATE users SET name = ?, email = ? WHERE id = ?").run(input.name, input.email, user.id);
+    } catch {
+      throw new HttpError(409, "Bu e-posta başka bir hesapta kullanılıyor");
+    }
+    return c.json({ ok: true });
+  })
+
+  .put("/account/password", async (c) => {
+    const user = c.get("user");
+    const input = await body(c, z.object({ current: z.string().min(1).max(256), next: z.string().min(10, "Yeni şifre en az 10 karakter olmalı").max(256) }));
+    const row = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(user.id) as { password_hash: string };
+    if (!(await verifyPassword(input.current, row.password_hash))) throw new HttpError(403, "Mevcut şifre hatalı");
+    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(await hashPassword(input.next), user.id);
+    // Diğer cihazlardaki oturumları kapat.
+    const current = createHash("sha256").update(getCookie(c, SESSION_COOKIE) ?? "").digest("hex");
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").run(user.id, current);
+    return c.json({ ok: true });
+  })
+
+  .post("/account/totp/setup", async (c) => {
+    const user = c.get("user");
+    const secret = generateTotpSecret();
+    pendingTotp.set(user.id, secret);
+    const uri = totpUri(secret, user.email);
+    return c.json({ secret, qr: await QRCode.toDataURL(uri, { margin: 1, width: 220 }) });
+  })
+
+  .post("/account/totp/enable", async (c) => {
+    const user = c.get("user");
+    const { code } = await body(c, z.object({ code: z.string().max(10) }));
+    const secret = pendingTotp.get(user.id);
+    if (!secret) throw new HttpError(409, "Önce kurulumu başlat");
+    if (!verifyTotp(secret, code)) throw new HttpError(400, "Kod hatalı. Uygulamadaki güncel kodu gir.");
+    db.prepare("UPDATE users SET totp_secret = ? WHERE id = ?").run(encrypt(secret), user.id);
+    pendingTotp.delete(user.id);
+    return c.json({ ok: true });
+  })
+
+  .post("/account/totp/disable", async (c) => {
+    const user = c.get("user");
+    const { code } = await body(c, z.object({ code: z.string().max(10) }));
+    const row = db.prepare("SELECT totp_secret FROM users WHERE id = ?").get(user.id) as { totp_secret: string | null };
+    if (!row.totp_secret) return c.json({ ok: true });
+    if (!verifyTotp(decrypt(row.totp_secret), code)) throw new HttpError(400, "Kod hatalı");
+    db.prepare("UPDATE users SET totp_secret = NULL WHERE id = ?").run(user.id);
+    return c.json({ ok: true });
+  })
+
+  .delete("/account/sessions/:key", (c) => {
+    const user = c.get("user");
+    const key = c.req.param("key");
+    const rows = db.prepare("SELECT id FROM sessions WHERE user_id = ?").all(user.id) as { id: string }[];
+    const match = rows.find((r) => sessionKey(r.id) === key);
+    if (match) db.prepare("DELETE FROM sessions WHERE id = ?").run(match.id);
+    return c.json({ ok: true });
+  })
+
+  // --- Bildirimler ---------------------------------------------------------
+  .get("/notifications", (c) => {
+    const rows = db.prepare("SELECT id, name, kind, events, enabled, created_at AS createdAt FROM notifications ORDER BY id").all() as {
+      events: string;
+      enabled: number;
+    }[];
+    return c.json({
+      notifications: rows.map((r) => ({ ...r, events: JSON.parse(r.events), enabled: Boolean(r.enabled) })),
+      events: NOTIFY_EVENTS,
+    });
+  })
+
+  .post("/notifications", async (c) => {
+    const input = await body(c, notificationSchema);
+    validateChannel(input.kind, input.config);
+    const res = db
+      .prepare("INSERT INTO notifications (name, kind, config, events, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)")
+      .run(input.name, input.kind, encrypt(JSON.stringify(input.config)), JSON.stringify(input.events), Date.now());
+    return c.json({ id: Number(res.lastInsertRowid) }, 201);
+  })
+
+  .patch("/notifications/:id", async (c) => {
+    const input = await body(c, z.object({ enabled: z.boolean().optional(), events: z.array(z.string()).optional() }));
+    const id = idParam(c);
+    if (input.enabled !== undefined) db.prepare("UPDATE notifications SET enabled = ? WHERE id = ?").run(input.enabled ? 1 : 0, id);
+    if (input.events) db.prepare("UPDATE notifications SET events = ? WHERE id = ?").run(JSON.stringify(input.events), id);
+    return c.json({ ok: true });
+  })
+
+  .delete("/notifications/:id", (c) => {
+    db.prepare("DELETE FROM notifications WHERE id = ?").run(idParam(c));
+    return c.json({ ok: true });
+  })
+
+  .post("/notifications/test", async (c) => {
+    const input = await body(c, notificationSchema.pick({ kind: true, config: true }));
+    validateChannel(input.kind, input.config);
+    try {
+      await sendTo(input.kind, input.config, "Xudbin test bildirimi", "Bu kanal Xudbin bildirimlerini alabiliyor.");
+    } catch (err) {
+      throw new HttpError(400, `Gönderilemedi: ${(err as Error).message}`);
+    }
+    return c.json({ ok: true });
+  });
+
+const notificationSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  kind: z.enum(["discord", "telegram", "slack", "webhook"]),
+  config: z.record(z.string(), z.string().max(500)),
+  events: z.array(z.enum(Object.keys(NOTIFY_EVENTS) as [string, ...string[]])).min(1, "En az bir olay seç"),
+});
+
+function validateChannel(kind: string, cfg: Record<string, string>) {
+  if (kind === "telegram") {
+    if (!cfg.botToken || !cfg.chatId) throw new HttpError(400, "Bot token ve chat ID gerekli");
+  } else if (!cfg.url || !/^https:\/\//.test(cfg.url)) throw new HttpError(400, "https:// ile başlayan bir adres gerekli");
+}

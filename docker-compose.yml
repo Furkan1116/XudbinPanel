@@ -1,43 +1,28 @@
-# Xudbin üretim kurulumu. install.sh bu dosyayı .env ile birlikte kullanır.
+# Xudbin paneli. Caddy (alan adları, HTTPS, WAF) panel tarafından her sunucuda ayrıca yönetilir.
 name: xudbin
 
 services:
   xudbin:
     build: .
     image: xudbin:local
+    container_name: xudbin
     restart: unless-stopped
     environment:
       TRUST_PROXY: "true"
-      SECURE_COOKIES: "true"
+      SECURE_COOKIES: ${SECURE_COOKIES:-true}
       DISK_PATH: /host
       HOST_HOSTNAME: ${HOST_HOSTNAME:-}
+      XUDBIN_DOMAIN: ${XUDBIN_DOMAIN:-}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      XUDBIN_HTTPS: ${XUDBIN_HTTPS:-1}
     volumes:
       - xudbin-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
       - /:/host:ro
     networks: [xudbin]
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    environment:
-      XUDBIN_DOMAIN: ${XUDBIN_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL:-}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on: [xudbin]
-    networks: [xudbin]
-
 volumes:
   xudbin-data:
-  caddy-data:
-  caddy-config:
 
 networks:
   xudbin:

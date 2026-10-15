@@ -1,0 +1,200 @@
+import { useQuery } from "@tanstack/react-query";
+import { Download } from "lucide-react";
+import { useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router";
+import { LogViewer } from "@/components/LogViewer";
+import { Button, ConfirmDialog, CopyField, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, Toggle, useAction } from "@/components/ui";
+import { api, type Backup, type Database } from "@/lib/api";
+import { dateTime, formatBytes, timeAgo } from "@/lib/format";
+
+type Tab = "connection" | "backups" | "logs" | "settings";
+
+export function DatabaseDetailPage() {
+  const id = Number(useParams().id);
+  const [params, setParams] = useSearchParams();
+  const tab = (params.get("tab") as Tab) || "connection";
+  const { data } = useQuery({
+    queryKey: ["database", id],
+    queryFn: () => api.get<{ database: Database; backups: Backup[] }>(`/databases/${id}`),
+    refetchInterval: (q) => (q.state.data?.database.status === "starting" ? 2000 : 10_000),
+  });
+  const act = useAction((a: "start" | "stop" | "restart") => api.post(`/databases/${id}/${a}`), { success: "İşlem tamamlandı", invalidate: [["database", id]] });
+  if (!data) return <PageLoading />;
+  const d = data.database;
+
+  return (
+    <>
+      <PageHeader
+        back={{ to: `/projects/${d.projectId}`, label: "Proje" }}
+        title={d.name}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+            <StatusBadge status={d.status} />
+            <span>{d.engineLabel} {d.version}</span>
+            <span>{d.server.name}</span>
+          </span>
+        }
+        actions={
+          d.status === "stopped" ? (
+            <Button onClick={() => act.mutate("start")} loading={act.isPending}>Başlat</Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => act.mutate("restart")} loading={act.isPending && act.variables === "restart"}>Yeniden başlat</Button>
+              <Button variant="ghost" onClick={() => act.mutate("stop")} loading={act.isPending && act.variables === "stop"}>Durdur</Button>
+            </>
+          )
+        }
+      />
+      <Tabs
+        value={tab}
+        onChange={(t) => setParams({ tab: t }, { replace: true })}
+        tabs={[
+          { id: "connection", label: "Bağlantı" },
+          { id: "backups", label: "Yedekler" },
+          { id: "logs", label: "Loglar" },
+          { id: "settings", label: "Ayarlar" },
+        ]}
+      />
+      {tab === "connection" && <Connection d={d} />}
+      {tab === "backups" && <Backups d={d} backups={data.backups} />}
+      {tab === "logs" && <LogViewer url={`/api/databases/${id}/logs/stream`} />}
+      {tab === "settings" && <Settings d={d} />}
+    </>
+  );
+}
+
+function Connection({ d }: { d: Database }) {
+  return (
+    <div className="space-y-8">
+      <Section title="Uygulamalardan bağlan" description="Aynı sunucudaki uygulamalar bu adresi kullanır. Uygulamanın ortam değişkenlerine ekle.">
+        <CopyField value={d.internalUrl} secret />
+      </Section>
+      {d.externalUrl ? (
+        <Section title="Dışarıdan bağlan" description={`Sunucunun ${d.externalPort} portu açık. Yalnız ihtiyaç varsa kullan; şifreyi kimseyle paylaşma.`}>
+          <CopyField value={d.externalUrl} secret />
+        </Section>
+      ) : (
+        <Notice tone="info" title="Dışarıya kapalı">Veritabanına internetten erişilemez. Gerekirse Ayarlar'dan bir port aç.</Notice>
+      )}
+      <dl className="grid gap-x-8 gap-y-3 text-[14px] sm:grid-cols-2">
+        {[
+          ["Sunucu adı", d.internalHost],
+          ["Port", String(d.internalPort)],
+          ["Veritabanı", d.dbName],
+          ["Kullanıcı", d.engine === "redis" ? "default" : d.dbUser],
+        ].map(([k, v]) => (
+          <div key={k} className="flex justify-between gap-4 border-b border-line pb-3">
+            <dt className="text-muted">{k}</dt>
+            <dd className="font-mono text-[13px]">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <Field label="Şifre">
+        <CopyField value={d.password} secret />
+      </Field>
+    </div>
+  );
+}
+
+function Backups({ d, backups }: { d: Database; backups: Backup[] }) {
+  const [restore, setRestore] = useState<Backup | null>(null);
+  const [schedule, setSchedule] = useState({ on: d.backupIntervalH > 0, hours: String(d.backupIntervalH || 24), keep: String(d.backupKeep) });
+  const create = useAction(() => api.post(`/databases/${d.id}/backups`), { success: "Yedek alındı", invalidate: [["database", d.id]] });
+  const doRestore = useAction((b: Backup) => api.post(`/databases/${d.id}/backups/${b.id}/restore`), { success: "Yedek geri yüklendi", onSuccess: () => setRestore(null) });
+  const del = useAction((b: Backup) => api.del(`/databases/${d.id}/backups/${b.id}`), { success: "Yedek silindi", invalidate: [["database", d.id]] });
+  const saveSchedule = useAction(
+    () => api.patch(`/databases/${d.id}`, { backupIntervalH: schedule.on ? Number(schedule.hours) || 24 : 0, backupKeep: Number(schedule.keep) || 7 }),
+    { success: "Yedekleme planı kaydedildi", invalidate: [["database", d.id]] },
+  );
+
+  return (
+    <div className="space-y-8">
+      <div className="panel space-y-4 p-5">
+        <Toggle checked={schedule.on} onChange={(v) => setSchedule({ ...schedule, on: v })} label="Otomatik yedekleme" description={d.lastBackupAt ? `Son yedek ${timeAgo(d.lastBackupAt)} alındı.` : "Henüz yedek alınmadı."} />
+        {schedule.on && (
+          <div className="ml-12 flex flex-wrap items-center gap-2 text-[14px]">
+            <input className="input w-20" inputMode="numeric" value={schedule.hours} onChange={(e) => setSchedule({ ...schedule, hours: e.target.value.replace(/\D/g, "") })} />
+            <span className="text-muted">saatte bir, son</span>
+            <input className="input w-20" inputMode="numeric" value={schedule.keep} onChange={(e) => setSchedule({ ...schedule, keep: e.target.value.replace(/\D/g, "") })} />
+            <span className="text-muted">yedek saklansın</span>
+          </div>
+        )}
+        <div className="flex justify-end">
+          <Button onClick={() => saveSchedule.mutate()} loading={saveSchedule.isPending}>Planı kaydet</Button>
+        </div>
+      </div>
+
+      <Section title="Yedekler" description="Yedekler panelin çalıştığı sunucuda saklanır." actions={<Button variant="primary" onClick={() => create.mutate()} loading={create.isPending} disabled={d.status !== "running"}>Şimdi yedekle</Button>}>
+        {backups.length === 0 ? (
+          <div className="panel px-5 py-6 text-[14px] text-muted">Henüz yedek yok.</div>
+        ) : (
+          <div className="panel divide-y divide-line">
+            {backups.map((b) => (
+              <div key={b.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-[13px]">{b.file}</div>
+                  <div className="text-[13px] text-faint">{dateTime(b.createdAt)}{b.status === "success" ? `, ${formatBytes(b.size)}` : ""}</div>
+                  {b.error && <div className="text-[13px] text-accent">{b.error}</div>}
+                </div>
+                <StatusBadge status={b.status} />
+                {b.status === "success" && (
+                  <div className="flex gap-1">
+                    <a href={`/api/databases/${d.id}/backups/${b.id}/download`} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg">
+                      <Download className="size-4" /> İndir
+                    </a>
+                    {d.engine !== "redis" && <Button size="sm" variant="ghost" onClick={() => setRestore(b)}>Geri yükle</Button>}
+                    <Button size="sm" variant="ghost" onClick={() => del.mutate(b)}>Sil</Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+      <ConfirmDialog
+        open={Boolean(restore)}
+        onClose={() => setRestore(null)}
+        title="Yedek geri yüklensin mi?"
+        description="Veritabanındaki mevcut veriler bu yedektekilerle değiştirilir. Önce şimdiki halin yedeğini almanı öneririz."
+        confirmLabel="Geri yükle"
+        loading={doRestore.isPending}
+        onConfirm={() => restore && doRestore.mutate(restore)}
+      />
+    </div>
+  );
+}
+
+function Settings({ d }: { d: Database }) {
+  const navigate = useNavigate();
+  const [port, setPort] = useState(d.externalPort ? String(d.externalPort) : "");
+  const [confirm, setConfirm] = useState(false);
+  const [withData, setWithData] = useState(false);
+  const save = useAction(() => api.patch(`/databases/${d.id}`, { externalPort: port ? Number(port) : null }), { success: "Kaydedildi, veritabanı yeniden başlatıldı", invalidate: [["database", d.id]] });
+  const del = useAction(() => api.del(`/databases/${d.id}${withData ? "?withData=1" : ""}`), { success: "Veritabanı silindi", onSuccess: () => navigate(`/projects/${d.projectId}`) });
+  return (
+    <>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+        className="panel space-y-4 p-5"
+      >
+        <Field label="Dışarıya açık port" hint="Boş bırakırsan veritabanı yalnız sunucu içinden erişilebilir. Değiştirmek konteyneri yeniden başlatır.">
+          <input className="input max-w-40" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} />
+        </Field>
+        <div className="flex justify-end">
+          <Button type="submit" variant="primary" loading={save.isPending}>Kaydet</Button>
+        </div>
+      </form>
+      <Section title="Veritabanını sil">
+        <Button variant="danger" onClick={() => setConfirm(true)}>Veritabanını sil</Button>
+      </Section>
+      <ConfirmDialog open={confirm} onClose={() => setConfirm(false)} title="Veritabanı silinsin mi?" description="Konteyner ve paneldeki yedekler silinir." typeToConfirm={d.name} confirmLabel="Sil" loading={del.isPending} onConfirm={() => del.mutate()}>
+        <div className="mb-5">
+          <Toggle checked={withData} onChange={setWithData} label="Verileri de sil" description="Kapalıysa veri volume'u sunucuda kalır; aynı adla yeniden oluşturmak veriyi geri getirmez ama elle kurtarılabilir." />
+        </div>
+      </ConfirmDialog>
+    </>
+  );
+}
