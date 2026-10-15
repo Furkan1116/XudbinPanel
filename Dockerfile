@@ -23,6 +23,8 @@ COPY apps/web/package.json /app/apps/web/
 # Yalnızca sunucunun çalışma bağımlılıkları; /app/server/dist içinden /app/node_modules'a çözümlenir.
 RUN cd /app && npm ci --omit=dev -w @xudbin/server && npm cache clean --force
 COPY --from=build /src/apps/server/dist ./dist
+# dist/ ES modülü olarak yüklensin (aksi halde Node her açılışta uyarı verir).
+COPY apps/server/package.json ./package.json
 COPY --from=build /src/apps/web/dist /app/web
 VOLUME /data
 EXPOSE 3000

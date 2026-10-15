@@ -22,6 +22,10 @@ const ADMIN_WRITE = [/^\/api\/servers/, /^\/api\/security/];
 
 export const enforceRoles = createMiddleware<AppEnv>(async (c, next) => {
   const user = c.get("user");
+  // Geçici şifreyle giren kullanıcı, şifresini değiştirene kadar başka bir şey yapamaz.
+  if (user.mustChangePassword && !/^\/api\/settings\/account(\/password)?$/.test(c.req.path)) {
+    return c.json({ error: "Önce şifreni değiştirmen gerekiyor", mustChangePassword: true }, 403);
+  }
   if (user.role !== "admin") {
     const p = c.req.path;
     const write = c.req.method !== "GET";
