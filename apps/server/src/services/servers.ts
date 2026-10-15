@@ -259,22 +259,34 @@ export async function hardenServer(server: ServerRow) {
   if (server.kind !== "ssh") throw new HttpError(422, "Panelin kendi sunucusu kurulum scriptiyle sıkılaştırılır.");
   const sudo = server.username === "root" ? "" : "sudo -n ";
   const log = setupLogger(server.id);
+  // Debian/Ubuntu'da UFW, AlmaLinux/Rocky/RHEL'de firewalld; fail2ban ikisinde de.
   const script = `
 set -e
-export DEBIAN_FRONTEND=noninteractive
-command -v apt-get >/dev/null || { echo "Yalnızca Debian/Ubuntu destekleniyor"; exit 3; }
-SSH_PORT=$(${sudo}sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
+SSH_PORT=$(${sudo}sshd -T 2>/dev/null | awk '/^port /{print $2; exit}' || true)
 SSH_PORT=\${SSH_PORT:-${server.port}}
 echo "SSH portu: $SSH_PORT"
-${sudo}apt-get update -qq
-${sudo}apt-get install -y -qq ufw fail2ban >/dev/null
-${sudo}ufw allow "$SSH_PORT"/tcp >/dev/null
-${sudo}ufw allow 80/tcp >/dev/null
-${sudo}ufw allow 443/tcp >/dev/null
-${sudo}ufw allow 443/udp >/dev/null
-${sudo}ufw --force enable >/dev/null
+if command -v apt-get >/dev/null; then
+  export DEBIAN_FRONTEND=noninteractive
+  ${sudo}apt-get update -qq
+  ${sudo}apt-get install -y -qq ufw fail2ban >/dev/null
+  ${sudo}ufw allow "$SSH_PORT"/tcp >/dev/null
+  ${sudo}ufw allow 80/tcp >/dev/null
+  ${sudo}ufw allow 443/tcp >/dev/null
+  ${sudo}ufw allow 443/udp >/dev/null
+  ${sudo}ufw --force enable >/dev/null
+  BACKEND=auto
+elif command -v dnf >/dev/null; then
+  ${sudo}dnf install -y -q epel-release >/dev/null
+  ${sudo}dnf install -y -q firewalld fail2ban >/dev/null
+  ${sudo}systemctl enable --now firewalld >/dev/null 2>&1
+  for p in "$SSH_PORT/tcp" 80/tcp 443/tcp 443/udp; do ${sudo}firewall-cmd -q --permanent --add-port="$p"; done
+  ${sudo}firewall-cmd -q --reload
+  BACKEND=systemd
+else
+  echo "Desteklenmeyen dağıtım: apt-get veya dnf bulunamadı"; exit 3
+fi
 echo "Güvenlik duvarı açık: $SSH_PORT, 80, 443"
-printf '[sshd]\\nenabled = true\\nport = %s\\nmaxretry = 5\\nfindtime = 10m\\nbantime = 1h\\n' "$SSH_PORT" | ${sudo}tee /etc/fail2ban/jail.d/xudbin.local >/dev/null
+printf '[sshd]\\nenabled = true\\nport = %s\\nbackend = %s\\nmaxretry = 5\\nfindtime = 10m\\nbantime = 1h\\n' "$SSH_PORT" "$BACKEND" | ${sudo}tee /etc/fail2ban/jail.d/xudbin.local >/dev/null
 ${sudo}systemctl enable --now fail2ban >/dev/null 2>&1
 ${sudo}systemctl restart fail2ban
 echo "fail2ban SSH korumasıyla çalışıyor"
@@ -291,7 +303,7 @@ export async function getServerSecurity(server: ServerRow) {
   const sudo = server.username === "root" ? "" : "sudo -n ";
   const res = await sshExec(
     sshTargetFor(server),
-    `echo "ufw $(${sudo}ufw status 2>/dev/null | head -1 | awk '{print $2}')"
+    `if command -v ufw >/dev/null; then echo "ufw $(${sudo}ufw status 2>/dev/null | head -1 | awk '{print $2}')"; else echo "ufw $(${sudo}firewall-cmd --state 2>/dev/null | sed 's/running/active/')"; fi
      echo "f2b $(systemctl is-active fail2ban 2>/dev/null)"
      echo "banned $(${sudo}fail2ban-client status sshd 2>/dev/null | awk -F: '/Total banned/{gsub(/ /,"",$2); print $2}')"
      echo "pwauth $(${sudo}sshd -T 2>/dev/null | awk '/^passwordauthentication /{print $2}')"

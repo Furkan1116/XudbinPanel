@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Xudbin kurulum scripti — Ubuntu/Debian sunucular için.
+# Xudbin kurulum scripti — Ubuntu/Debian ve AlmaLinux/Rocky/RHEL sunucular için.
 #
 #   sudo ./install.sh
 #
@@ -55,7 +55,7 @@ if [[ -n $SCRIPT_DIR && -f $SCRIPT_DIR/install.sh && -d $SCRIPT_DIR/apps/server 
   tar -C "$SCRIPT_DIR" --exclude=node_modules --exclude=dist --exclude=data --exclude=.git -cf - . | tar -C "$INSTALL_DIR" -xf -
 elif [[ ! -f $INSTALL_DIR/docker-compose.yml ]]; then
   [[ -n ${XUDBIN_REPO:-} ]] || fail "Kaynak kod bulunamadı. XUDBIN_REPO=<git adresi> ile çalıştır."
-  command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git; }
+  command -v git >/dev/null || { command -v apt-get >/dev/null && { apt-get update -qq && apt-get install -y -qq git; } || dnf install -y -q git; }
   step "Kaynak kod indiriliyor: $XUDBIN_REPO"
   git clone --depth 1 "$XUDBIN_REPO" "$INSTALL_DIR"
 fi
@@ -92,20 +92,37 @@ ENV
 chmod 600 .env
 
 # --- Sunucu güvenliği: güvenlik duvarı + SSH kaba kuvvet koruması ---
-if [[ ${XUDBIN_HARDEN:-1} == 1 ]] && command -v apt-get >/dev/null; then
-  step "Güvenlik duvarı (UFW) ve fail2ban kuruluyor..."
+# Debian/Ubuntu'da UFW, AlmaLinux/Rocky/RHEL'de firewalld kullanılır; fail2ban ikisinde de var.
+if [[ ${XUDBIN_HARDEN:-1} == 1 ]]; then
   SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}' || true)
   SSH_PORT=${SSH_PORT:-22}
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw fail2ban >/dev/null
-  ufw allow "$SSH_PORT"/tcp >/dev/null
-  ufw allow 80/tcp >/dev/null
-  ufw allow 443/tcp >/dev/null
-  ufw allow 443/udp >/dev/null
-  ufw --force enable >/dev/null
-  printf '[sshd]\nenabled = true\nport = %s\nmaxretry = 5\nfindtime = 10m\nbantime = 1h\n' "$SSH_PORT" > /etc/fail2ban/jail.d/xudbin.local
-  systemctl enable --now fail2ban >/dev/null 2>&1 || true
-  systemctl restart fail2ban || true
-  echo "   Açık portlar: $SSH_PORT (SSH), 80, 443"
+  if command -v apt-get >/dev/null; then
+    step "Güvenlik duvarı (UFW) ve fail2ban kuruluyor..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw fail2ban >/dev/null
+    ufw allow "$SSH_PORT"/tcp >/dev/null
+    ufw allow 80/tcp >/dev/null
+    ufw allow 443/tcp >/dev/null
+    ufw allow 443/udp >/dev/null
+    ufw --force enable >/dev/null
+    F2B_BACKEND=auto
+  elif command -v dnf >/dev/null; then
+    step "Güvenlik duvarı (firewalld) ve fail2ban kuruluyor..."
+    dnf install -y -q epel-release >/dev/null
+    dnf install -y -q firewalld fail2ban >/dev/null
+    systemctl enable --now firewalld >/dev/null 2>&1
+    firewall-cmd -q --permanent --add-port="$SSH_PORT"/tcp
+    firewall-cmd -q --permanent --add-port=80/tcp
+    firewall-cmd -q --permanent --add-port=443/tcp
+    firewall-cmd -q --permanent --add-port=443/udp
+    firewall-cmd -q --reload
+    F2B_BACKEND=systemd
+  fi
+  if [[ -d /etc/fail2ban ]]; then
+    printf '[sshd]\nenabled = true\nport = %s\nbackend = %s\nmaxretry = 5\nfindtime = 10m\nbantime = 1h\n' "$SSH_PORT" "$F2B_BACKEND" > /etc/fail2ban/jail.d/xudbin.local
+    systemctl enable --now fail2ban >/dev/null 2>&1 || true
+    systemctl restart fail2ban || true
+    echo "   Açık portlar: $SSH_PORT (SSH), 80, 443"
+  fi
 fi
 
 # --- Başlat ---
