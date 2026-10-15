@@ -180,8 +180,8 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
             {(source === "git" || source === "compose") && (
               <>
                 <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
-                  <Field label={t("Repo adresi")} hint={source === "compose" ? t("Boş bırakırsan compose dosyasını sonraki adımda yapıştırırsın.") : "https:// ile başlamalı."}>
-                    <input className="input" required={source === "git"} value={git.url} onChange={(e) => setGit({ ...git, url: e.target.value.trim() })} placeholder="https://github.com/kullanici/repo" />
+                  <Field label={t("Repo adresi")} hint={source === "compose" ? t("Boş bırakırsan compose dosyasını sonraki adımda yapıştırırsın.") : t("https:// ile başlamalı.")}>
+                    <input className="input" required={source === "git"} value={git.url} onChange={(e) => setGit({ ...git, url: e.target.value.trim() })} placeholder={t("https://github.com/kullanici/repo")} />
                   </Field>
                   <Field label={t("Dal")}>
                     <input className="input" value={git.branch} onChange={(e) => setGit({ ...git, branch: e.target.value.trim() })} />
@@ -258,7 +258,7 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
         <div className="flex items-center justify-between gap-2 pt-1">
           {step !== "source" ? (
             <Button type="button" variant="ghost" onClick={() => setStep(step === "settings" && stepsShown.includes("framework") ? "framework" : "source")}>
-              <ArrowLeft className="size-4" /> Geri
+              <ArrowLeft className="size-4" /> {t("Geri")}
             </Button>
           ) : (
             <span />

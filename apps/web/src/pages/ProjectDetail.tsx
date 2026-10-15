@@ -72,7 +72,7 @@ export function ProjectDetailPage() {
 
       <Section title={t("Veritabanları")}>
         {databases.length === 0 ? (
-          <Empty action={<Button onClick={() => setDialog("db")}>{t("Veritabanı ekle")}</Button>}>PostgreSQL, MySQL, MariaDB, MongoDB veya Redis; tek tıkla kurulur, otomatik yedeklenebilir.</Empty>
+          <Empty action={<Button onClick={() => setDialog("db")}>{t("Veritabanı ekle")}</Button>}>{t("PostgreSQL, MySQL, MariaDB, MongoDB veya Redis; tek tıkla kurulur, otomatik yedeklenebilir.")}</Empty>
         ) : (
           <div className="panel divide-y divide-line">
             {databases.map((d) => (

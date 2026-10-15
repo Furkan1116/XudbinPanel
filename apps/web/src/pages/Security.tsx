@@ -118,7 +118,7 @@ function Timeline({ data, hours, bucketMs }: { data: { t: number; n: number }[];
   return (
     <div>
       <div className="mb-3 flex justify-between text-[13px]">
-        <span className="text-muted">{bucketMs === 3_600_000 ? t("Saatlik") : t("Günlük")} engellenen istek</span>
+        <span className="text-muted">{bucketMs === 3_600_000 ? t("Saatlik engellenen istek") : t("Günlük engellenen istek")}</span>
         <span className="text-faint tabular-nums">{h ? `${new Date(h.t).toLocaleString(locale(), bucketMs === 3_600_000 ? { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" } : { day: "numeric", month: "short" })}: ${h.n}` : t("en yüksek {n}", { n: max === 1 && !bars.some((b) => b.n) ? 0 : max })}</span>
       </div>
       <div className="flex h-28 items-end gap-[2px]" onMouseLeave={() => setHover(null)}>

@@ -215,7 +215,7 @@ function Sessions({ sessions }: { sessions: AccountData["sessions"] }) {
           <div key={s.id} className="flex items-center gap-3 px-5 py-3">
             <div className="min-w-0 flex-1">
               <div className="truncate text-[14px]">{describeAgent(s.userAgent)}</div>
-              <div className="text-[13px] text-faint">{s.ip ?? t("IP bilinmiyor")}, {timeAgo(s.createdAt)} açıldı</div>
+              <div className="text-[13px] text-faint">{s.ip ?? t("IP bilinmiyor")}, {t("{ago} açıldı", { ago: timeAgo(s.createdAt) })}</div>
             </div>
             {s.current ? <span className="text-[13px] text-ok">{t("Bu cihaz")}</span> : <Button size="sm" variant="ghost" onClick={() => end.mutate(s.id)}>{t("Kapat")}</Button>}
           </div>
@@ -310,7 +310,7 @@ function AddChannel({ open, onClose, events }: { open: boolean; onClose: () => v
             </Field>
           </div>
         ) : (
-          <Field label={t("Webhook adresi")} hint={form.kind === "discord" ? "Kanal ayarları > Entegrasyonlar > Webhook'lar" : form.kind === "slack" ? t("Slack Incoming Webhook adresi") : t("JSON POST isteği gönderilir.")}>
+          <Field label={t("Webhook adresi")} hint={form.kind === "discord" ? t("Kanal ayarları > Entegrasyonlar > Webhook'lar") : form.kind === "slack" ? t("Slack Incoming Webhook adresi") : t("JSON POST isteği gönderilir.")}>
             <input className="input font-mono text-[13px]" required value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value.trim() })} placeholder="https://" />
           </Field>
         )}

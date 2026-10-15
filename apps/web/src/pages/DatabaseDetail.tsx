@@ -75,7 +75,7 @@ function Connection({ d }: { d: Database }) {
           <CopyField value={d.externalUrl} secret />
         </Section>
       ) : (
-        <Notice tone="info" title={t("Dışarıya kapalı")}>Veritabanına internetten erişilemez. Gerekirse Ayarlar'dan bir port aç.</Notice>
+        <Notice tone="info" title={t("Dışarıya kapalı")}>{t("Veritabanına internetten erişilemez. Gerekirse Ayarlar'dan bir port aç.")}</Notice>
       )}
       <dl className="grid gap-x-8 gap-y-3 text-[14px] sm:grid-cols-2">
         {[

@@ -31,8 +31,15 @@ export function setLang(next: Lang) {
 
 export const getLang = () => lang;
 
+/** Sözlükte birebir karşılığı olmayan, kalıplı sunucu metinleri (ör. "Frontend/App.csproj bulundu"). */
+const EN_PATTERNS: [RegExp, string][] = [[/^(\S+) bulundu$/, "found $1"]];
+
 export function t(text: string, vars?: Record<string, string | number>) {
-  let out = lang === "en" ? (en[text] ?? text) : text;
+  let out = text;
+  if (lang === "en") {
+    out = en[text] ?? text;
+    if (out === text) for (const [re, rep] of EN_PATTERNS) if (re.test(text)) out = text.replace(re, rep);
+  }
   if (vars) for (const [k, v] of Object.entries(vars)) out = out.split(`{${k}}`).join(String(v));
   return out;
 }

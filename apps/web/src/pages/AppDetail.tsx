@@ -199,7 +199,7 @@ function Deployments({ data }: { data: AppData }) {
   });
   const cancel = useAction((depId: number) => api.post(`/deployments/${depId}/cancel`), { success: t("Deploy iptal edildi"), invalidate: [["app", app.id]] });
 
-  if (!deployments.length) return <Notice tone="info" title={t("Henüz deploy yok")}>Sağ üstteki "Deploy et" ile ilk sürümü yayınla.</Notice>;
+  if (!deployments.length) return <Notice tone="info" title={t("Henüz deploy yok")}>{t("Sağ üstteki \"Deploy et\" ile ilk sürümü yayınla.")}</Notice>;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[17rem_1fr]">
@@ -255,7 +255,7 @@ function Env({ data }: { data: AppData }) {
       }}
     >
       <p className="mb-3 max-w-2xl text-[14px] text-muted">
-        Her satıra bir değişken: <code className="font-mono text-fg">ANAHTAR=değer</code>{t(". Değerler şifrelenerek saklanır.")} <code className="font-mono text-fg">{t("PORT")}</code> otomatik eklenir.
+        {t("Her satıra bir değişken:")} <code className="font-mono text-fg">{t("ANAHTAR=değer")}</code>{t(". Değerler şifrelenerek saklanır.")} {t("PORT otomatik eklenir.")}
       </p>
       <textarea
         className="input h-80 font-mono text-[13px] leading-relaxed"
@@ -270,7 +270,7 @@ function Env({ data }: { data: AppData }) {
         </div>
       )}
       <p className="mt-3 text-[13px] text-faint">
-        <code className="font-mono">{"{{XUDBIN_URL}}"}</code>, <code className="font-mono">{"{{XUDBIN_DOMAINS}}"}</code> {t("ve")} <code className="font-mono">{"{{XUDBIN_ORIGINS}}"}</code> deploy sırasında uygulamanın güncel alan adlarıyla doldurulur.
+        <code className="font-mono">{"{{XUDBIN_URL}}"}</code>, <code className="font-mono">{"{{XUDBIN_DOMAINS}}"}</code> {t("ve")} <code className="font-mono">{"{{XUDBIN_ORIGINS}}"}</code> {t("deploy sırasında uygulamanın güncel alan adlarıyla doldurulur.")}
       </p>
       <div className="mt-3 flex justify-end">
         <Button type="submit" variant="primary" loading={save.isPending} disabled={env === data.env}>{t("Kaydet")}</Button>
