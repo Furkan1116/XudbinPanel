@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
+import { DeployDoctor } from "@/components/DeployDoctor";
 import { DropZone, uploadZip } from "@/components/DropZone";
 import { FrameworkLogo } from "@/components/FrameworkLogo";
 import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frameworkById, useFrameworks } from "@/components/FrameworkSetup";
@@ -164,6 +165,8 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
         {stats.data?.stats && <Row label={t("Bellek")} value={formatBytes(stats.data.stats.memory)} />}
         <Row label={t("İç adres")} value={`${app.internalHost}:${app.port}`} hint={t("Aynı sunucudaki diğer uygulamalar bu adresle ulaşır.")} mono />
       </dl>
+
+      <DeployDoctor app={app} last={last} />
 
       {app.sourceType === "upload" && <UploadNewVersion app={app} />}
 
@@ -456,6 +459,8 @@ function Settings({ app }: { app: App }) {
     webhookSigned: app.webhookSigned,
     cpuLimit: app.cpuLimit ? String(app.cpuLimit) : "",
     memoryLimit: app.memoryLimit ? String(app.memoryLimit) : "",
+    httpCheck: app.httpCheck,
+    healthPath: app.healthPath ?? "",
     volumes: app.volumes,
   });
   const isAdmin = useAuthStatus().data?.user?.role === "admin";
@@ -481,6 +486,8 @@ function Settings({ app }: { app: App }) {
         webhookSigned: form.webhookSigned,
         cpuLimit: Number(form.cpuLimit) || null,
         memoryLimit: Number(form.memoryLimit) || null,
+        httpCheck: form.httpCheck,
+        healthPath: form.healthPath.trim() || null,
         volumes: form.volumes.filter((v) => v.name && v.path),
       }),
     { success: t("Ayarlar kaydedildi"), invalidate: [["app", app.id]] },
@@ -567,6 +574,16 @@ function Settings({ app }: { app: App }) {
           {app.sourceType !== "image" && <Toggle checked={form.autoDeploy} onChange={(v) => setForm({ ...form, autoDeploy: v })} label={t("Push'ta otomatik deploy")} description={t("Webhook çağrıldığında yeni sürüm otomatik yayınlanır.")} />}
           {app.sourceType !== "image" && (
             <Toggle checked={form.webhookSigned} onChange={(v) => setForm({ ...form, webhookSigned: v })} label={t("Webhook imzası zorunlu")} description={t("Yalnız gizli anahtarla imzalanmış istekler deploy başlatır; webhook adresi sızsa bile başkası deploy tetikleyemez.")} />
+          )}
+          {app.sourceType !== "compose" && (
+            <>
+              <Toggle checked={form.httpCheck} onChange={(v) => setForm({ ...form, httpCheck: v })} label={t("Deploy'da HTTP kontrolü")} description={t("Yeni sürüme trafik geçmeden önce alan adıyla istek atılır; 400 veya 5xx dönerse eski sürüm yayında kalır ve Deploy Doktoru sebebi gösterir.")} />
+              {form.httpCheck && (
+                <Field label={t("Sağlık kontrolü yolu")} hint={t("Boşsa / kullanılır ve 404 de kabul edilir. Verilirse 2xx/3xx dönmeli, ör. /health.")}>
+                  <input className="input font-mono text-[13px]" placeholder="/" value={form.healthPath} onChange={set("healthPath")} />
+                </Field>
+              )}
+            </>
           )}
           {app.sourceType !== "compose" && (
             <div className="grid gap-3 sm:grid-cols-2">

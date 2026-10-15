@@ -240,6 +240,12 @@ const migrations: string[] = [
   ALTER TABLE apps ADD COLUMN memory_limit INTEGER;
   UPDATE apps SET webhook_secret = lower(hex(randomblob(24)));
   `,
+  // Deploy Doktoru: deploy sonrası HTTP kontrolü ve başarısız deploy'ların teşhisi.
+  `
+  ALTER TABLE apps ADD COLUMN http_check INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE apps ADD COLUMN health_path TEXT;
+  ALTER TABLE deployments ADD COLUMN diagnosis TEXT;
+  `,
 ];
 
 function migrate() {

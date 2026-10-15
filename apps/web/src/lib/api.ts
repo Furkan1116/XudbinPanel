@@ -117,6 +117,8 @@ export type App = {
   webhookSigned: boolean;
   cpuLimit: number | null;
   memoryLimit: number | null;
+  httpCheck: boolean;
+  healthPath: string | null;
   status: "idle" | "deploying" | "running" | "stopped" | "failed";
   container: string | null;
   currentImage: string | null;
@@ -136,7 +138,10 @@ export type Deployment = {
   image: string | null;
   startedAt: number;
   finishedAt: number | null;
+  diagnosis?: Finding[] | null;
 };
+
+export type Finding = { id: string; title: string; detail: string; fix?: { label: string; env: Record<string, string> } };
 
 export type Database = {
   id: number;

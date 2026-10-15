@@ -12,6 +12,7 @@ import { resolveInside } from "../lib/paths.js";
 import { detectFrameworks, getFramework, missingDefaultEnv, openRepo, type Framework, type Options } from "./frameworks/index.js";
 import { applyCaddyConfig, CADDY_CONTAINER } from "./caddy.js";
 import { composeHostAccessIssues } from "./compose-policy.js";
+import { diagnose, isHealthy, probeHttp, type Finding } from "./doctor.js";
 import { buildImage, containerState, dockerFor, execIn, pullImage, removeContainer, type ServerRow } from "./docker.js";
 import { notify } from "./notify.js";
 import { getServer } from "./servers.js";
@@ -51,6 +52,8 @@ export type AppRow = {
   webhook_signed: number;
   cpu_limit: number | null;
   memory_limit: number | null;
+  http_check: number;
+  health_path: string | null;
   created_at: number;
 };
 
@@ -71,6 +74,23 @@ export function fillPlaceholders(env: Record<string, string>, appId: number, htt
   };
   for (const k of Object.keys(env)) env[k] = env[k]!.replace(/\{\{(XUDBIN_URL|XUDBIN_DOMAINS|XUDBIN_ORIGINS)\}\}/g, (_, n: string) => values[n] ?? "");
   return { env, values };
+}
+
+/** Env metninde verilen anahtarların değerini günceller, olmayanları sona ekler; yorum ve sıra korunur. */
+export function mergeEnvText(raw: string, set: Record<string, string>): string {
+  const left = { ...set };
+  const lines = raw.split(/\r?\n/).map((line) => {
+    const t = line.trim();
+    const i = t.indexOf("=");
+    if (!t || t.startsWith("#") || i <= 0) return line;
+    const key = t.slice(0, i).trim();
+    if (!(key in left)) return line;
+    const v = left[key]!;
+    delete left[key];
+    return `${key}=${v}`;
+  });
+  while (lines.length && !lines[lines.length - 1]!.trim()) lines.pop();
+  return [...lines, ...Object.entries(left).map(([k, v]) => `${k}=${v}`)].join("\n") + "\n";
 }
 
 export function parseEnv(raw: string): Record<string, string> {
@@ -220,6 +240,12 @@ async function runDeployment(deploymentId: number) {
   } catch (err) {
     const message = signal.aborted ? String(signal.reason) : (err as Error).message;
     log(`Hata: ${message}`);
+    // Konteyner aşamasına gelmeden (ör. derlemede) düşen deploy'lar da deploy loguna bakılarak teşhis edilir.
+    if (app && !signal.aborted) {
+      flush();
+      const row = db.prepare("SELECT log, diagnosis FROM deployments WHERE id = ?").get(deploymentId) as { log: string; diagnosis: string | null };
+      if (!row.diagnosis) recordDiagnosis(deploymentId, diagnose(row.log.split("\n"), { framework: app.framework, env: parseEnv(decrypt(app.env)), hosts: [] }), log);
+    }
     db.prepare("UPDATE deployments SET status = ?, finished_at = ? WHERE id = ?").run(signal.aborted && String(signal.reason).includes("iptal") ? "cancelled" : "failed", Date.now(), deploymentId);
     if (app) {
       db.prepare("UPDATE apps SET status = CASE WHEN container IS NULL THEN 'failed' ELSE 'running' END WHERE id = ?").run(app.id);
@@ -405,13 +431,16 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
 
   // Sağlık kontrolü: trafik, yeni konteyner portunu gerçekten dinlemeye başlayana kadar eski sürümde kalır.
   // Kontrol, ortak ağdaki Caddy konteynerinden yapılır (uygulama imajında araç olması gerekmez).
-  const failWithLogs = async (message: string) => {
-    const logs = await container.logs({ stdout: true, stderr: true, tail: 30 }).catch(() => Buffer.from(""));
+  const hosts = (db.prepare("SELECT host FROM domains WHERE app_id = ? ORDER BY generated, id").all(app.id) as { host: string }[]).map((d) => d.host);
+  const failWithLogs = async (message: string, extra: { status?: number | null } = {}): Promise<never> => {
+    const logs = await container.logs({ stdout: true, stderr: true, tail: 300 }).catch(() => Buffer.from(""));
     const lines = demuxLogs(logs);
     if (lines.length) {
       log("Uygulamanın son çıktısı:");
-      lines.forEach((l) => log(`  ${l}`));
+      lines.slice(-30).forEach((l) => log(`  ${l}`));
     }
+    const state = await containerState(docker, name);
+    recordDiagnosis(deploymentId, diagnose(lines, { framework: app.framework, env: filled.env, hosts, status: extra.status, exitCode: state.running ? null : state.exitCode }), log);
     await removeContainer(docker, name);
     throw new Error(`${message} Eski sürüm yayında kalmaya devam ediyor.`);
   };
@@ -452,6 +481,33 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   }
   log(`Konteyner çalışıyor, ${fresh.port} portu ${Math.round((Date.now() - started) / 1000)} sn içinde yanıt verdi.`);
 
+  // Port açık olması uygulamanın çalıştığı anlamına gelmez (ör. Django alan adını tanımayıp 400 döndürür).
+  // Trafik yeni sürüme geçmeden önce gerçek alan adıyla bir HTTP isteği atılır.
+  if (fresh.http_check && fresh.source_type !== "compose") {
+    const host = hosts[0] ?? `xb-${app.slug}`;
+    const pathToCheck = fresh.health_path || "/";
+    const strict = Boolean(fresh.health_path);
+    log(`HTTP kontrolü: GET ${pathToCheck} (Host: ${host})`);
+    const deadline = Date.now() + 45_000;
+    for (;;) {
+      if (signal.aborted) await failWithLogs(String(signal.reason));
+      const probe = await probeHttp(docker, name, fresh.port, host, pathToCheck);
+      if (probe.status !== null && isHealthy(probe.status, strict)) {
+        log(`HTTP kontrolü geçti: ${probe.statusLine}`);
+        break;
+      }
+      if (Date.now() > deadline) {
+        await failWithLogs(
+          probe.status !== null
+            ? `Uygulama çalışıyor ama ${pathToCheck} isteğine ${probe.status} döndürüyor (${probe.statusLine}).`
+            : `Uygulama HTTP isteğine yanıt vermedi (${probe.error}).`,
+          { status: probe.status },
+        );
+      }
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+  }
+
   const previous = fresh.container;
   db.prepare("UPDATE apps SET container = ?, current_image = ? WHERE id = ?").run(name, image, app.id);
   log("Trafik yeni sürüme yönlendiriliyor...");
@@ -460,6 +516,16 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   if (previous && previous !== name) {
     log(`Eski konteyner kaldırılıyor: ${previous}`);
     await removeContainer(docker, previous);
+  }
+}
+
+function recordDiagnosis(deploymentId: number, findings: Finding[], log: (l: string) => void) {
+  db.prepare("UPDATE deployments SET diagnosis = ? WHERE id = ?").run(findings.length ? JSON.stringify(findings) : null, deploymentId);
+  if (!findings.length) return;
+  log("Deploy Doktoru:");
+  for (const f of findings) {
+    log(`  • ${f.title}`);
+    log(`    ${f.detail}`);
   }
 }
 

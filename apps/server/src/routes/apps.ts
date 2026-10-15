@@ -17,6 +17,8 @@ import {
   demuxLogs,
   enqueueDeploy,
   getApp,
+  mergeEnvText,
+  parseEnv,
   shallowClone,
   type AppRow,
 } from "../services/deploy.js";
@@ -27,6 +29,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { extractZip, newTempUpload, saveUpload, storeAppUpload, tempUploadFile } from "../services/uploads.js";
 import { getServer } from "../services/servers.js";
+import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor.js";
 
 const HOST_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
@@ -76,6 +79,8 @@ function publicApp(a: AppRow) {
     webhookSecret: a.webhook_secret,
     webhookSigned: Boolean(a.webhook_signed),
     cpuLimit: a.cpu_limit,
+    httpCheck: Boolean(a.http_check),
+    healthPath: a.health_path,
     memoryLimit: a.memory_limit,
     domains: domains.map((d) => ({ ...d, https: Boolean(d.https) && httpsActive, generated: Boolean(d.generated), url: `${d.https && httpsActive ? "https" : "http"}://${d.host}` })),
     security: { ...sec, basicAuth: sec.basicAuth ? { username: sec.basicAuth.username } : null },
@@ -169,8 +174,12 @@ export const appRoutes = new Hono<AppEnv>()
   .get("/:id", (c) => {
     const app = loadApp(idParam(c));
     const deployments = db
-      .prepare("SELECT id, status, trigger, title, commit_sha AS commitSha, image, started_at AS startedAt, finished_at AS finishedAt FROM deployments WHERE app_id = ? ORDER BY id DESC LIMIT 30")
-      .all(app.id);
+      .prepare("SELECT id, status, trigger, title, commit_sha AS commitSha, image, started_at AS startedAt, finished_at AS finishedAt, diagnosis FROM deployments WHERE app_id = ? ORDER BY id DESC LIMIT 30")
+      .all(app.id)
+      .map((d) => {
+        const row = d as { diagnosis: string | null };
+        return { ...row, diagnosis: row.diagnosis ? (JSON.parse(row.diagnosis) as Finding[]) : null };
+      });
     return c.json({ app: publicApp(app), env: decrypt(app.env), deployments });
   })
 
@@ -197,6 +206,8 @@ export const appRoutes = new Hono<AppEnv>()
         hostAccess: z.boolean().optional(),
         webhookSigned: z.boolean().optional(),
         cpuLimit: z.number().min(0.1).max(256).nullable().optional(),
+        httpCheck: z.boolean().optional(),
+        healthPath: z.string().trim().max(200).regex(/^\/[\w\-./?=&%~]*$/, "Sağlık yolu / ile başlamalı, ör. /health").nullable().optional(),
         memoryLimit: z.number().int().min(32).max(1024 * 1024).nullable().optional(),
         volumes: z
           .array(z.object({ name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,40}$/i, "Volume adı yalnız harf, rakam, - ve _ içerebilir"), path: z.string().startsWith("/", "Yol / ile başlamalı").max(300) }))
@@ -234,6 +245,8 @@ export const appRoutes = new Hono<AppEnv>()
       host_access: input.hostAccess === undefined ? undefined : input.hostAccess ? 1 : 0,
       webhook_signed: input.webhookSigned === undefined ? undefined : input.webhookSigned ? 1 : 0,
       cpu_limit: input.cpuLimit,
+      http_check: input.httpCheck === undefined ? undefined : input.httpCheck ? 1 : 0,
+      health_path: input.healthPath,
       memory_limit: input.memoryLimit,
       volumes: input.volumes ? JSON.stringify(input.volumes) : undefined,
     };
@@ -256,6 +269,34 @@ export const appRoutes = new Hono<AppEnv>()
     const { env } = await body(c, z.object({ env: z.string().max(200_000) }));
     db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(env.trim() ? encrypt(env) : null, app.id);
     return c.json({ ok: true, note: "Değişikliklerin geçerli olması için yeniden deploy et." });
+  })
+
+  // Deploy Doktoru'nun önerdiği değişkenleri ekler/günceller; istenirse yeniden deploy eder.
+  .post("/:id/env/merge", async (c) => {
+    const app = loadApp(idParam(c));
+    const input = await body(c, z.object({ env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().max(10_000)), deploy: z.boolean().default(true) }));
+    const resolved = Object.fromEntries(
+      Object.entries(input.env).map(([k, v]) => [
+        k,
+        v.replace("{{XUDBIN_SECRET}}", () => randomAlnum(50)).replace("{{XUDBIN_LARAVEL_KEY}}", () => `base64:${Buffer.from(randomAlnum(32)).toString("base64")}`),
+      ]),
+    );
+    db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(encrypt(mergeEnvText(decrypt(app.env), resolved)), app.id);
+    const deploymentId = input.deploy ? enqueueDeploy(app.id, "manual", { title: "Deploy Doktoru düzeltmesi" }) : null;
+    return c.json({ ok: true, deploymentId });
+  })
+
+  // Çalışan uygulamayı teşhis eder: gerçek alan adıyla HTTP isteği + son loglar.
+  .get("/:id/diagnose", async (c) => {
+    const app = loadApp(idParam(c));
+    const server = getServer(app.server_id);
+    if (!app.container || app.source_type === "compose") return c.json({ probe: null, findings: [] });
+    const docker = dockerFor(server);
+    const hosts = (db.prepare("SELECT host FROM domains WHERE app_id = ? ORDER BY generated, id").all(app.id) as { host: string }[]).map((d) => d.host);
+    const probe = await probeHttp(docker, app.container, app.port, hosts[0] ?? `xb-${app.slug}`, app.health_path || "/");
+    const logs = await docker.getContainer(app.container).logs({ stdout: true, stderr: true, tail: 400 }).catch(() => Buffer.from(""));
+    const findings = diagnose(demuxLogs(logs as Buffer), { framework: app.framework, env: parseEnv(decrypt(app.env)), hosts, status: probe.status });
+    return c.json({ probe, healthy: probe.status !== null && isHealthy(probe.status, Boolean(app.health_path)), findings });
   })
 
   .put("/:id/security", async (c) => {
