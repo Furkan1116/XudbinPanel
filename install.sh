@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Xudbin kurulum betiği — Ubuntu/Debian ve AlmaLinux/Rocky/RHEL sunucular için.
 #
-#   curl -fsSL https://raw.githubusercontent.com/furkan1116/xudbin/main/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/Furkan1116/XudbinPanel/main/install.sh | sudo bash
 #   (veya repo içinden)  sudo ./install.sh
 #   Güncelleme:          sudo xudbin update
 #
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 INSTALL_DIR=/opt/xudbin
-DEFAULT_REPO=https://github.com/furkan1116/xudbin
+DEFAULT_REPO=https://github.com/Furkan1116/XudbinPanel
 DEFAULT_IMAGE=ghcr.io/furkan1116/xudbin:latest
 MODE=install
 [[ ${1:-} == --update ]] && MODE=update

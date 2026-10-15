@@ -73,7 +73,7 @@ Bunlar dışındaki projeler repodaki Dockerfile ile deploy edilir.
 Ubuntu, Debian veya AlmaLinux/Rocky bir sunucuda, 80 ve 443 portları boşken tek komut:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/furkan1116/xudbin/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/Furkan1116/XudbinPanel/main/install.sh | sudo bash
 ```
 
 Betik şunları yapar ve her adımı terminalde gösterir:
