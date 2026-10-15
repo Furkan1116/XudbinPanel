@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -6,6 +7,8 @@ import { db } from "../db.js";
 import { decrypt, encrypt, randomAlnum, randomToken } from "../lib/crypto.js";
 import { bus } from "../lib/events.js";
 import { body, HttpError, idParam, must } from "../lib/http.js";
+import { resolveInside } from "../lib/paths.js";
+import type { AppEnv } from "../lib/types.js";
 import { makeSlug } from "../lib/slug.js";
 import { applyCaddyConfig, parseSecurity } from "../services/caddy.js";
 import {
@@ -64,11 +67,16 @@ function publicApp(a: AppRow) {
     command: a.command,
     volumes: JSON.parse(a.volumes || "[]"),
     autoDeploy: Boolean(a.auto_deploy),
+    hostAccess: Boolean(a.host_access),
     status: a.status,
     container: a.container,
     currentImage: a.current_image,
     internalHost: `xb-${a.slug}`,
     webhookPath: `/api/webhooks/deploy/${a.webhook_token}`,
+    webhookSecret: a.webhook_secret,
+    webhookSigned: Boolean(a.webhook_signed),
+    cpuLimit: a.cpu_limit,
+    memoryLimit: a.memory_limit,
     domains: domains.map((d) => ({ ...d, https: Boolean(d.https) && httpsActive, generated: Boolean(d.generated), url: `${d.https && httpsActive ? "https" : "http"}://${d.host}` })),
     security: { ...sec, basicAuth: sec.basicAuth ? { username: sec.basicAuth.username } : null },
     createdAt: a.created_at,
@@ -106,7 +114,7 @@ function loadApp(id: number) {
   return must(getApp(id), "Uygulama bulunamadı");
 }
 
-export const appRoutes = new Hono()
+export const appRoutes = new Hono<AppEnv>()
   .post("/", async (c) => {
     const input = await body(c, appInput);
     must(db.prepare("SELECT id FROM projects WHERE id = ?").get(input.projectId), "Proje bulunamadı");
@@ -117,8 +125,9 @@ export const appRoutes = new Hono()
     const res = db
       .prepare(
         `INSERT INTO apps (project_id, server_id, name, slug, source_type, git_url, git_branch, git_token, build_type,
-                           image, compose_file, port, webhook_token, created_at, framework, build_options, build_context, env)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           image, compose_file, port, webhook_token, created_at, framework, build_options, build_context, env,
+                           webhook_secret, webhook_signed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       )
       .run(
         input.projectId,
@@ -139,6 +148,7 @@ export const appRoutes = new Hono()
         JSON.stringify(input.buildOptions ?? {}),
         input.buildContext || ".",
         input.env?.trim() ? encrypt(input.env) : null,
+        randomToken(24),
       );
     const id = Number(res.lastInsertRowid);
     if (input.sourceType === "upload" && input.uploadId) storeAppUpload(slug, tempUploadFile(input.uploadId)!);
@@ -184,12 +194,19 @@ export const appRoutes = new Hono()
         port: z.number().int().min(1).max(65535).optional(),
         command: z.string().max(2000).nullable().optional(),
         autoDeploy: z.boolean().optional(),
+        hostAccess: z.boolean().optional(),
+        webhookSigned: z.boolean().optional(),
+        cpuLimit: z.number().min(0.1).max(256).nullable().optional(),
+        memoryLimit: z.number().int().min(32).max(1024 * 1024).nullable().optional(),
         volumes: z
           .array(z.object({ name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,40}$/i, "Volume adı yalnız harf, rakam, - ve _ içerebilir"), path: z.string().startsWith("/", "Yol / ile başlamalı").max(300) }))
           .max(20)
           .optional(),
       }),
     );
+    if (input.hostAccess !== undefined && input.hostAccess !== Boolean(app.host_access) && c.get("user").role !== "admin") {
+      throw new HttpError(403, "Sunucu erişimi iznini yalnız yönetici değiştirebilir");
+    }
     const next = {
       sourceType: app.source_type,
       gitUrl: input.gitUrl === undefined ? app.git_url : input.gitUrl,
@@ -214,6 +231,10 @@ export const appRoutes = new Hono()
       port: input.port,
       command: input.command,
       auto_deploy: input.autoDeploy === undefined ? undefined : input.autoDeploy ? 1 : 0,
+      host_access: input.hostAccess === undefined ? undefined : input.hostAccess ? 1 : 0,
+      webhook_signed: input.webhookSigned === undefined ? undefined : input.webhookSigned ? 1 : 0,
+      cpu_limit: input.cpuLimit,
+      memory_limit: input.memoryLimit,
       volumes: input.volumes ? JSON.stringify(input.volumes) : undefined,
     };
     const entries = Object.entries(map).filter(([, v]) => v !== undefined);
@@ -374,7 +395,7 @@ export const appRoutes = new Hono()
 
   .post("/:id/webhook/regenerate", (c) => {
     const app = loadApp(idParam(c));
-    db.prepare("UPDATE apps SET webhook_token = ? WHERE id = ?").run(randomToken(24), app.id);
+    db.prepare("UPDATE apps SET webhook_token = ?, webhook_secret = ? WHERE id = ?").run(randomToken(24), randomToken(24), app.id);
     return c.json({ app: publicApp(loadApp(app.id)) });
   })
 
@@ -444,7 +465,7 @@ export const deploymentRoutes = new Hono()
     return c.json({ deployment: dep });
   })
   .post("/:id/cancel", (c) => {
-    if (!cancelDeployment(idParam(c))) throw new HttpError(409, "Yalnızca sıradaki deploylar iptal edilebilir");
+    if (!cancelDeployment(idParam(c))) throw new HttpError(409, "Bu deploy zaten bitmiş");
     return c.json({ ok: true });
   })
   .get("/:id/stream", (c) => {
@@ -520,12 +541,34 @@ export const projectRoutes = new Hono()
     return c.json({ ok: true });
   });
 
+/**
+ * GitHub/Gitea/Forgejo/Bitbucket gövdeyi HMAC-SHA256 ile imzalar; GitLab gizli anahtarı başlıkta düz gönderir.
+ * Başlık varsa her zaman doğrulanır; imzasız istek yalnız imza zorunlu değilse kabul edilir.
+ */
+export function verifyWebhook(app: Pick<AppRow, "webhook_secret" | "webhook_signed">, raw: string, header: (name: string) => string | undefined) {
+  const secret = app.webhook_secret ?? "";
+  const equal = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  const hmac = () => createHmac("sha256", secret).update(raw).digest("hex");
+  const sig = header("x-hub-signature-256") ?? header("x-gitea-signature") ?? header("x-forgejo-signature") ?? header("x-gogs-signature");
+  if (sig) return Boolean(secret) && equal(sig.replace(/^sha256=/, ""), hmac());
+  const gitlab = header("x-gitlab-token");
+  if (gitlab !== undefined) return Boolean(secret) && equal(gitlab, secret);
+  return !app.webhook_signed;
+}
+
 /** Git sağlayıcısının (GitHub, GitLab, Gitea...) push olayında çağırdığı adres. */
 export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
   const app = db.prepare("SELECT * FROM apps WHERE webhook_token = ?").get(c.req.param("token")) as AppRow | undefined;
   if (!app) return c.json({ error: "Geçersiz webhook" }, 404);
+  const raw = await c.req.text();
+  if (!verifyWebhook(app, raw, (h) => c.req.header(h))) {
+    return c.json({ error: "Webhook imzası doğrulanamadı. Git sağlayıcısındaki Secret alanına uygulamanın webhook gizli anahtarını gir." }, 401);
+  }
   if (!app.auto_deploy) return c.json({ ok: false, reason: "Otomatik deploy kapalı" });
-  const payload = (await c.req.json().catch(() => ({}))) as { ref?: string; head_commit?: { message?: string } };
+  let payload: { ref?: string; head_commit?: { message?: string } } = {};
+  try {
+    payload = JSON.parse(raw);
+  } catch {}
   if (payload.ref && payload.ref !== `refs/heads/${app.git_branch}`) {
     return c.json({ ok: false, reason: `Yalnızca ${app.git_branch} dalı deploy edilir` });
   }
@@ -566,8 +609,8 @@ export const frameworkRoutes = new Hono()
       throw new HttpError(422, token ? "Repo klonlanamadı. Adres, dal ve token'ı kontrol et." : "Repo klonlanamadı. Özel bir repoysa erişim token'ı gir; adres ve dalı kontrol et.");
     }
     try {
-      const dir = path.resolve(dest, context || ".");
-      if (!dir.startsWith(dest) || !fs.existsSync(dir)) throw new HttpError(422, `Derleme klasörü bulunamadı: ${context}`);
+      const dir = resolveInside(dest, context || ".");
+      if (!dir || !fs.existsSync(dir)) throw new HttpError(422, `Derleme klasörü bulunamadı: ${context}`);
       return c.json(detectFrameworks(dir));
     } finally {
       fs.rmSync(dest, { recursive: true, force: true });

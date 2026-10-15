@@ -128,7 +128,7 @@ export async function pullImage(docker: Docker, image: string, log: (line: strin
 export async function buildImage(
   docker: Docker,
   context: Readable,
-  opts: { tag: string; dockerfile?: string; buildargs?: Record<string, string> },
+  opts: { tag: string; dockerfile?: string; buildargs?: Record<string, string>; signal?: AbortSignal },
   log: (line: string) => void,
 ) {
   const stream = await docker.buildImage(context, {
@@ -141,6 +141,13 @@ export async function buildImage(
   });
   let failure: string | null = null;
   await new Promise<void>((resolve, reject) => {
+    // Bağlantı kapanınca Docker derlemeyi durdurur (iptal ve zaman aşımı için).
+    const abort = () => {
+      (stream as unknown as { destroy: () => void }).destroy();
+      reject(new Error(String(opts.signal?.reason ?? "Derleme durduruldu")));
+    };
+    if (opts.signal?.aborted) return abort();
+    opts.signal?.addEventListener("abort", abort, { once: true });
     docker.modem.followProgress(
       stream,
       (err) => (err ? reject(err) : resolve()),

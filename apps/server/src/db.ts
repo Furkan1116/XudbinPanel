@@ -225,6 +225,21 @@ const migrations: string[] = [
   ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin';
   ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;
   `,
+  // Compose'ta sunucuya erişim (privileged, sunucu klasörü bağlama...) yalnız yöneticinin verdiği bir izin.
+  // Mevcut compose uygulamaları bozulmasın diye izinli başlar.
+  `
+  ALTER TABLE apps ADD COLUMN host_access INTEGER NOT NULL DEFAULT 0;
+  UPDATE apps SET host_access = 1 WHERE source_type = 'compose';
+  `,
+  // Webhook imzası (GitHub/Gitea HMAC, GitLab token) ve konteyner kaynak sınırları.
+  // Mevcut webhook'lar bozulmasın diye imza yalnız yeni uygulamalarda zorunlu başlar.
+  `
+  ALTER TABLE apps ADD COLUMN webhook_secret TEXT;
+  ALTER TABLE apps ADD COLUMN webhook_signed INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE apps ADD COLUMN cpu_limit REAL;
+  ALTER TABLE apps ADD COLUMN memory_limit INTEGER;
+  UPDATE apps SET webhook_secret = lower(hex(randomblob(24)));
+  `,
 ];
 
 function migrate() {

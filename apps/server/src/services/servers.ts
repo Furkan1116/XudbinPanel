@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { db } from "../db.js";
 import { bus } from "../lib/events.js";
 import { HttpError } from "../lib/http.js";
+import { applyDockerFirewall, dockerFirewallEnabled } from "./firewall.js";
 import { applyCaddyConfig, ensureCaddy } from "./caddy.js";
 import { dockerFor, forgetDockerClient, getDockerInfo, type ServerRow } from "./docker.js";
 import { getPrivateKey, sshExec, type SshTarget } from "./ssh.js";
@@ -236,6 +237,9 @@ export function startServerSetup(serverId: number) {
       log("Caddy yapılandırması uygulandı.");
 
       updateServer(serverId, { status: "ready", status_detail: null });
+      await applyDockerFirewall(getServer(serverId), { force: true })
+        .then(() => dockerFirewallEnabled() && log("Docker portları güvenlik duvarına bağlandı: dışarıdan yalnız 80 ve 443 açık."))
+        .catch((err) => log(`Uyarı: ${(err as Error).message}`));
       log("Sunucu hazır.");
       bus.emit(`server-setup:${serverId}`, "__done__");
     } catch (err) {

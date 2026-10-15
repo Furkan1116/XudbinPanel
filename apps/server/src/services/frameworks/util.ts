@@ -1,15 +1,23 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resolveInside } from "../../lib/paths.js";
 import type { Repo } from "./types.js";
 
 export function openRepo(root: string): Repo {
+  // Repo dışını gösteren yollar ve kısayollar yokmuş gibi davranır (ör. .env.example -> /proc/self/environ).
   const abs = (f: string) => {
-    const p = path.resolve(root, f);
-    if (!p.startsWith(root)) throw new Error("Repo dışına erişim");
+    const p = resolveInside(root, f);
+    if (!p) throw new Error("Repo dışına erişim");
     return p;
   };
   return {
-    has: (f) => fs.existsSync(abs(f)),
+    has: (f) => {
+      try {
+        return fs.existsSync(abs(f));
+      } catch {
+        return false;
+      }
+    },
     read: (f) => {
       try {
         return fs.readFileSync(abs(f), "utf8");

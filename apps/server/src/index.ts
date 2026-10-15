@@ -24,6 +24,7 @@ import { userRoutes } from "./routes/users.js";
 import { applyCaddyConfig, ensureCaddy } from "./services/caddy.js";
 import { startBackupScheduler } from "./services/databases.js";
 import { recoverInterruptedDeployments } from "./services/deploy.js";
+import { startFirewallKeeper } from "./services/firewall.js";
 import { getSettings, updateSettings } from "./lib/settings.js";
 import { notify } from "./services/notify.js";
 import { isBlocked, startSecurityMonitor } from "./services/security.js";
@@ -88,6 +89,7 @@ if (process.env.ACME_EMAIL) {
 recoverInterruptedDeployments();
 startBackupScheduler();
 startSecurityMonitor();
+startFirewallKeeper();
 startServerMonitor((s, ok) =>
   ok ? notify("server_down", `${s.name} yeniden erişilebilir`, "Sunucuyla bağlantı geri geldi.") : notify("server_down", `${s.name} sunucusuna ulaşılamıyor`, "SSH bağlantısı 20 saniye içinde kurulamadı."),
 );

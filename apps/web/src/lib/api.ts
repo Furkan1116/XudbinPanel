@@ -112,6 +112,11 @@ export type App = {
   command: string | null;
   volumes: { name: string; path: string }[];
   autoDeploy: boolean;
+  hostAccess: boolean;
+  webhookSecret: string | null;
+  webhookSigned: boolean;
+  cpuLimit: number | null;
+  memoryLimit: number | null;
   status: "idle" | "deploying" | "running" | "stopped" | "failed";
   container: string | null;
   currentImage: string | null;

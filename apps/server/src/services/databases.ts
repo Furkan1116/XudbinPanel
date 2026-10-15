@@ -7,6 +7,7 @@ import { db } from "../db.js";
 import { decrypt } from "../lib/crypto.js";
 import { containerState, dockerFor, execIn, pullImage, removeContainer } from "./docker.js";
 import { notify } from "./notify.js";
+import { applyDockerFirewall } from "./firewall.js";
 import { getServer } from "./servers.js";
 
 export type Engine = "postgres" | "mysql" | "mariadb" | "mongo" | "redis";
@@ -87,6 +88,8 @@ export async function startDatabase(d: DatabaseRow, log: (l: string) => void = (
   db.prepare("UPDATE databases SET status = 'starting' WHERE id = ?").run(d.id);
   try {
     await pullImage(docker, image, log);
+    // Dışarı açılan port Docker güvenlik duvarında izinli olmalı; konteyner açılmadan önce güncellenir.
+    await applyDockerFirewall(server).catch((err) => log(`Uyarı: ${(err as Error).message}`));
     await removeContainer(docker, name);
     await docker.createContainer({
       name,
@@ -132,6 +135,7 @@ export async function deleteDatabase(d: DatabaseRow, withData: boolean) {
   }
   fs.rmSync(backupDir(d), { recursive: true, force: true });
   db.prepare("DELETE FROM databases WHERE id = ?").run(d.id);
+  if (d.external_port) await applyDockerFirewall(getServer(d.server_id)).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------

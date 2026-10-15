@@ -8,6 +8,7 @@ import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frame
 import { LogViewer } from "@/components/LogViewer";
 import { Button, ConfirmDialog, CopyField, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, Toggle, useAction } from "@/components/ui";
 import { api, type App, type DetectResult, type Deployment } from "@/lib/api";
+import { useAuthStatus } from "@/lib/auth";
 import { dateTime, duration, formatBytes, timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
@@ -168,7 +169,17 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
 
       {(app.sourceType === "git" || app.sourceType === "compose") && (
         <Section title={t("Otomatik deploy")} description={t("Git sağlayıcında bu adresi push webhook'u olarak ekle; her push'ta uygulama yeniden deploy edilir.")}>
-          <CopyField value={webhook} secret />
+          <div className="space-y-3">
+            <Field label={t("Webhook adresi")}>
+              <CopyField value={webhook} secret />
+            </Field>
+            {app.webhookSecret && (
+              <Field label={t("Gizli anahtar (Secret)")} hint={t("GitHub, Gitea ve GitLab'de webhook'un Secret / Secret token alanına yaz. İstek bu anahtarla imzalanmadıysa deploy başlamaz.")}>
+                <CopyField value={app.webhookSecret} secret />
+              </Field>
+            )}
+            {!app.webhookSigned && <Notice tone="warn" title={t("Bu uygulamada imzasız webhook istekleri de kabul ediliyor. Secret'ı git sağlayıcına ekledikten sonra ayarlardan imzayı zorunlu yap.")} />}
+          </div>
         </Section>
       )}
     </div>
@@ -227,7 +238,7 @@ function Deployments({ data }: { data: AppData }) {
               {dep.image && <span className="font-mono text-[13px]">{dep.image}</span>}
             </div>
             <div className="flex gap-2">
-              {dep.status === "queued" && <Button size="sm" variant="ghost" onClick={() => cancel.mutate(dep.id)}>{t("İptal et")}</Button>}
+              {(dep.status === "queued" || dep.status === "running") && <Button size="sm" variant="ghost" onClick={() => cancel.mutate(dep.id)}>{t("İptal et")}</Button>}
               {dep.status === "success" && dep.image && dep.image !== app.currentImage && app.sourceType !== "compose" && (
                 <Button size="sm" onClick={() => rollback.mutate(dep.id)} loading={rollback.isPending}>{t("Bu sürüme dön")}</Button>
               )}
@@ -441,8 +452,13 @@ function Settings({ app }: { app: App }) {
     port: String(app.port),
     command: app.command ?? "",
     autoDeploy: app.autoDeploy,
+    hostAccess: app.hostAccess,
+    webhookSigned: app.webhookSigned,
+    cpuLimit: app.cpuLimit ? String(app.cpuLimit) : "",
+    memoryLimit: app.memoryLimit ? String(app.memoryLimit) : "",
     volumes: app.volumes,
   });
+  const isAdmin = useAuthStatus().data?.user?.role === "admin";
   const [confirm, setConfirm] = useState(false);
   const save = useAction(
     () =>
@@ -461,6 +477,10 @@ function Settings({ app }: { app: App }) {
         port: Number(form.port) || app.port,
         command: form.command || null,
         autoDeploy: form.autoDeploy,
+        ...(isAdmin ? { hostAccess: form.hostAccess } : {}),
+        webhookSigned: form.webhookSigned,
+        cpuLimit: Number(form.cpuLimit) || null,
+        memoryLimit: Number(form.memoryLimit) || null,
         volumes: form.volumes.filter((v) => v.name && v.path),
       }),
     { success: t("Ayarlar kaydedildi"), invalidate: [["app", app.id]] },
@@ -525,6 +545,13 @@ function Settings({ app }: { app: App }) {
               <Field label={t("Alan adının yönleneceği servis")} hint={t("Compose dosyasındaki servis adı, ör. web.")}>
                 <input className="input" value={form.composeService} onChange={set("composeService")} />
               </Field>
+              <Toggle
+                checked={form.hostAccess}
+                disabled={!isAdmin}
+                onChange={(v) => setForm({ ...form, hostAccess: v })}
+                label={t("Sunucu erişimi")}
+                description={t("privileged, cap_add, sunucu klasörü bağlama, network_mode: host gibi ayarlara izin verir. Bu ayarlar konteynere sunucuda root yetkisi verebilir; yalnız yönetici açabilir.")}
+              />
             </>
           )}
           <div className="grid gap-3 sm:grid-cols-[8rem_1fr]">
@@ -538,6 +565,19 @@ function Settings({ app }: { app: App }) {
             )}
           </div>
           {app.sourceType !== "image" && <Toggle checked={form.autoDeploy} onChange={(v) => setForm({ ...form, autoDeploy: v })} label={t("Push'ta otomatik deploy")} description={t("Webhook çağrıldığında yeni sürüm otomatik yayınlanır.")} />}
+          {app.sourceType !== "image" && (
+            <Toggle checked={form.webhookSigned} onChange={(v) => setForm({ ...form, webhookSigned: v })} label={t("Webhook imzası zorunlu")} description={t("Yalnız gizli anahtarla imzalanmış istekler deploy başlatır; webhook adresi sızsa bile başkası deploy tetikleyemez.")} />
+          )}
+          {app.sourceType !== "compose" && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t("Bellek sınırı (MB)")} hint={t("Boşsa sınırsız. Aşılırsa uygulama yeniden başlatılır, sunucunun geri kalanı etkilenmez.")}>
+                <input className="input" inputMode="numeric" placeholder="1024" value={form.memoryLimit} onChange={(e) => setForm({ ...form, memoryLimit: e.target.value.replace(/\D/g, "") })} />
+              </Field>
+              <Field label={t("CPU sınırı (çekirdek)")} hint={t("Boşsa sınırsız. Ör. 0.5 yarım çekirdek. Bir sonraki deploy'da geçerli olur.")}>
+                <input className="input" inputMode="decimal" placeholder="1" value={form.cpuLimit} onChange={(e) => setForm({ ...form, cpuLimit: e.target.value.replace(/[^\d.]/g, "") })} />
+              </Field>
+            </div>
+          )}
         </div>
 
         {app.sourceType !== "compose" && (

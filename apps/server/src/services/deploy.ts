@@ -8,8 +8,10 @@ import { config } from "../config.js";
 import { db } from "../db.js";
 import { decrypt, encrypt, randomAlnum } from "../lib/crypto.js";
 import { bus } from "../lib/events.js";
+import { resolveInside } from "../lib/paths.js";
 import { detectFrameworks, getFramework, missingDefaultEnv, openRepo, type Framework, type Options } from "./frameworks/index.js";
 import { applyCaddyConfig, CADDY_CONTAINER } from "./caddy.js";
+import { composeHostAccessIssues } from "./compose-policy.js";
 import { buildImage, containerState, dockerFor, execIn, pullImage, removeContainer, type ServerRow } from "./docker.js";
 import { notify } from "./notify.js";
 import { getServer } from "./servers.js";
@@ -44,6 +46,11 @@ export type AppRow = {
   status: string;
   container: string | null;
   current_image: string | null;
+  host_access: number;
+  webhook_secret: string | null;
+  webhook_signed: number;
+  cpu_limit: number | null;
+  memory_limit: number | null;
   created_at: number;
 };
 
@@ -88,6 +95,9 @@ const queue: number[] = [];
 const active = new Set<number>(); // deployment id
 const activeApps = new Set<number>();
 const MAX_CONCURRENT = 2;
+/** Bir deploy en fazla bu kadar sürebilir; aşarsa durdurulur, eski sürüm yayında kalır. */
+const DEPLOY_TIMEOUT_MS = 30 * 60_000;
+const controllers = new Map<number, AbortController>();
 
 export function enqueueDeploy(appId: number, trigger: "manual" | "webhook" | "rollback", opts: { title?: string; image?: string } = {}) {
   const res = db
@@ -123,7 +133,13 @@ function pump() {
   }
 }
 
+/** Sıradaki deploy'u siler, çalışan deploy'u durdurur (eski sürüm yayında kalır). */
 export function cancelDeployment(id: number) {
+  const running = controllers.get(id);
+  if (running) {
+    running.abort("Deploy iptal edildi.");
+    return true;
+  }
   const r = db.prepare("UPDATE deployments SET status = 'cancelled', finished_at = ? WHERE id = ? AND status = 'queued'").run(Date.now(), id);
   return r.changes > 0;
 }
@@ -166,6 +182,10 @@ async function runDeployment(deploymentId: number) {
   db.prepare("UPDATE deployments SET status = 'running', started_at = ? WHERE id = ?").run(Date.now(), deploymentId);
   const workdir = path.join(BUILD_ROOT, String(deploymentId));
   const started = Date.now();
+  const controller = new AbortController();
+  controllers.set(deploymentId, controller);
+  const timeout = setTimeout(() => controller.abort(`Deploy ${DEPLOY_TIMEOUT_MS / 60_000} dakikada tamamlanmadı ve durduruldu.`), DEPLOY_TIMEOUT_MS);
+  const signal = controller.signal;
 
   try {
     if (!app) throw new Error("Uygulama silinmiş");
@@ -174,7 +194,7 @@ async function runDeployment(deploymentId: number) {
     log(`${app.name} → ${server.name}`);
 
     if (app.source_type === "compose") {
-      await deployCompose(app, server, workdir, log);
+      await deployCompose(app, server, workdir, log, signal);
     } else {
       let image: string;
       if (dep.image) {
@@ -185,10 +205,10 @@ async function runDeployment(deploymentId: number) {
         log(`İmaj çekiliyor: ${image}`);
         await pullImage(dockerFor(server), image, log);
       } else {
-        image = await buildFromSource(app, server, deploymentId, workdir, log);
+        image = await buildFromSource(app, server, deploymentId, workdir, log, signal);
       }
       db.prepare("UPDATE deployments SET image = ? WHERE id = ?").run(image, deploymentId);
-      await runContainer(app, server, image, deploymentId, log);
+      await runContainer(app, server, image, deploymentId, log, signal);
       if ((app.source_type === "git" || app.source_type === "upload") && !dep.image) pruneImages(app, server).catch(() => {});
     }
 
@@ -198,14 +218,16 @@ async function runDeployment(deploymentId: number) {
     db.prepare("UPDATE apps SET status = 'running' WHERE id = ?").run(app.id);
     notify("deploy_success", `${app.name} yayında`, `Deploy #${deploymentId} ${seconds} saniyede tamamlandı.`);
   } catch (err) {
-    const message = (err as Error).message;
+    const message = signal.aborted ? String(signal.reason) : (err as Error).message;
     log(`Hata: ${message}`);
-    db.prepare("UPDATE deployments SET status = 'failed', finished_at = ? WHERE id = ?").run(Date.now(), deploymentId);
+    db.prepare("UPDATE deployments SET status = ?, finished_at = ? WHERE id = ?").run(signal.aborted && String(signal.reason).includes("iptal") ? "cancelled" : "failed", Date.now(), deploymentId);
     if (app) {
       db.prepare("UPDATE apps SET status = CASE WHEN container IS NULL THEN 'failed' ELSE 'running' END WHERE id = ?").run(app.id);
       notify("deploy_failed", `${app.name} deploy edilemedi`, message);
     }
   } finally {
+    clearTimeout(timeout);
+    controllers.delete(deploymentId);
     flush();
     bus.emit(`deploy:${deploymentId}`, "__done__");
     fs.rm(workdir, { recursive: true, force: true }, () => {});
@@ -220,9 +242,9 @@ function gitUrlWithToken(url: string, token: string) {
   return u.toString();
 }
 
-function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; log: (l: string) => void; redact?: string[] }) {
+function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; log: (l: string) => void; redact?: string[]; signal?: AbortSignal }) {
   return new Promise<string>((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env } });
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, signal: opts.signal });
     let out = "";
     const onData = (d: Buffer) => {
       let text = d.toString();
@@ -232,22 +254,23 @@ function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.Pro
     };
     child.stdout.on("data", onData);
     child.stderr.on("data", onData);
-    child.on("error", (e) => reject(new Error(`${cmd} çalıştırılamadı: ${e.message}`)));
+    child.on("error", (e) => reject(opts.signal?.aborted ? new Error(String(opts.signal.reason)) : new Error(`${cmd} çalıştırılamadı: ${e.message}`)));
     child.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(`${cmd} ${code} koduyla çıktı`))));
   });
 }
 
 /** Repoyu yalnız son commit'iyle klonlar (algılama ve derleme için). */
 // git'in "could not read Username" gibi hatalarını kullanıcının anlayacağı bir mesaja çevirir.
-async function gitClone(args: string[], opts: { cwd?: string; token: string; log: (l: string) => void }) {
+async function gitClone(args: string[], opts: { cwd?: string; token: string; log: (l: string) => void; signal?: AbortSignal }) {
   let output = "";
   const log = (l: string) => {
     output += l + "\n";
     opts.log(l);
   };
   try {
-    await run("git", args, { cwd: opts.cwd, env: { GIT_TERMINAL_PROMPT: "0" }, log, redact: [opts.token] });
+    await run("git", args, { cwd: opts.cwd, env: { GIT_TERMINAL_PROMPT: "0" }, log, redact: [opts.token], signal: opts.signal });
   } catch (e) {
+    if (opts.signal?.aborted) throw e;
     if (/Remote branch .* not found/i.test(output)) throw new Error("Repo klonlanamadı: bu isimde bir dal yok.");
     if (/could not read Username|Authentication failed|Repository not found|returned error: 40[134]/i.test(output)) {
       throw new Error(
@@ -266,20 +289,20 @@ export async function shallowClone(url: string, branch: string, token: string, d
   await gitClone(["clone", "--depth", "1", "--branch", branch, gitUrlWithToken(url, token), dest], { token, log });
 }
 
-async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void) {
+async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void, signal?: AbortSignal) {
   if (!app.git_url) throw new Error("Git adresi tanımlı değil");
   fs.rmSync(workdir, { recursive: true, force: true });
   fs.mkdirSync(workdir, { recursive: true });
   const token = decrypt(app.git_token);
   log(`Klonlanıyor: ${app.git_url} (${app.git_branch})`);
-  await gitClone(["clone", "--depth", "1", "--branch", app.git_branch, gitUrlWithToken(app.git_url, token), "src"], { cwd: workdir, token, log });
+  await gitClone(["clone", "--depth", "1", "--branch", app.git_branch, gitUrlWithToken(app.git_url, token), "src"], { cwd: workdir, token, log, signal });
   const sha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   const msg = (await run("git", ["log", "-1", "--pretty=%s"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   log(`Commit ${sha}: ${msg}`);
   return { dir: path.join(workdir, "src"), sha, msg };
 }
 
-async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: number, workdir: string, log: (l: string) => void) {
+async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: number, workdir: string, log: (l: string) => void, signal: AbortSignal) {
   let dir: string;
   if (app.source_type === "upload") {
     const zip = latestAppUpload(app.slug);
@@ -288,13 +311,13 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
     dir = await extractZip(zip, path.join(workdir, "src"));
     db.prepare("UPDATE deployments SET title = CASE WHEN title = '' THEN 'Dosya yüklemesi' ELSE title END WHERE id = ?").run(deploymentId);
   } else {
-    const cloned = await cloneRepo(app, workdir, log);
+    const cloned = await cloneRepo(app, workdir, log, signal);
     dir = cloned.dir;
     db.prepare("UPDATE deployments SET commit_sha = ?, title = CASE WHEN title = '' THEN ? ELSE title END WHERE id = ?").run(cloned.sha, cloned.msg, deploymentId);
   }
 
-  const contextDir = path.resolve(dir, app.build_context || ".");
-  if (!contextDir.startsWith(dir)) throw new Error("Derleme klasörü repo dışında olamaz");
+  const contextDir = resolveInside(dir, app.build_context || ".");
+  if (!contextDir) throw new Error("Derleme klasörü repo dışında olamaz");
   if (!fs.existsSync(contextDir)) throw new Error(`Derleme klasörü bulunamadı: ${app.build_context}`);
 
   const opts = JSON.parse(app.build_options || "{}") as Options;
@@ -309,7 +332,8 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
 
   let dockerfile = (typeof opts.dockerfilePath === "string" && opts.dockerfilePath) || app.dockerfile_path || "Dockerfile";
   if (frameworkId === "dockerfile") {
-    if (!fs.existsSync(path.join(contextDir, dockerfile))) throw new Error(`${dockerfile} bulunamadı`);
+    const found = resolveInside(contextDir, dockerfile);
+    if (!found || !fs.existsSync(found)) throw new Error(`${dockerfile} bulunamadı`);
     log(`Repodaki ${dockerfile} kullanılıyor.`);
   } else {
     const fw = getFramework(frameworkId);
@@ -334,7 +358,7 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
   const tag = `xudbin/${app.slug}:${deploymentId}`;
   log(`İmaj derleniyor: ${tag}`);
   const context = tarFs.pack(contextDir, { ignore: (name) => name.split(path.sep).includes(".git") });
-  await buildImage(dockerFor(server), context, { tag, dockerfile }, log);
+  await buildImage(dockerFor(server), context, { tag, dockerfile, signal }, log);
   return tag;
 }
 
@@ -351,7 +375,7 @@ function addDefaultEnv(app: AppRow, fw: Framework, log: (l: string) => void) {
 
 type Volume = { name: string; path: string };
 
-async function runContainer(app: AppRow, server: ServerRow, image: string, deploymentId: number, log: (l: string) => void) {
+async function runContainer(app: AppRow, server: ServerRow, image: string, deploymentId: number, log: (l: string) => void, signal: AbortSignal) {
   const docker = dockerFor(server);
   const fresh = getApp(app.id)!;
   const filled = fillPlaceholders(parseEnv(decrypt(fresh.env)), app.id, server.https_mode !== "off");
@@ -370,6 +394,9 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
       NetworkMode: config.network,
       RestartPolicy: { Name: "unless-stopped" },
       Binds: volumes.map((v) => `xb-${app.slug}-${v.name}:${v.path}`),
+      // Sınır yoksa tek bir uygulama tüm sunucuyu (panel dahil) belleksiz bırakabilir.
+      ...(fresh.memory_limit ? { Memory: fresh.memory_limit * 1024 * 1024, MemorySwap: fresh.memory_limit * 1024 * 1024 } : {}),
+      ...(fresh.cpu_limit ? { NanoCpus: Math.round(fresh.cpu_limit * 1e9) } : {}),
       LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
     },
     NetworkingConfig: { EndpointsConfig: { [config.network]: { Aliases: [`xb-${app.slug}`] } } },
@@ -393,6 +420,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   let announced = false;
   let inspected = false;
   for (;;) {
+    if (signal.aborted) await failWithLogs(String(signal.reason));
     const state = await containerState(docker, name);
     if (!state.running) await failWithLogs(`Konteyner kapandı (çıkış kodu ${state.exitCode}).`);
     const probe = await execIn(docker, CADDY_CONTAINER, ["nc", "-z", "-w", "2", name, String(fresh.port)], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1 }));
@@ -511,13 +539,15 @@ export function composeEnv(server: ServerRow, workdir: string): NodeJS.ProcessEn
   return { HOME: home, DOCKER_HOST: "ssh://xudbin-target", DOCKER_CONFIG: path.join(home, ".docker") };
 }
 
-async function deployCompose(app: AppRow, server: ServerRow, workdir: string, log: (l: string) => void) {
+async function deployCompose(app: AppRow, server: ServerRow, workdir: string, log: (l: string) => void, signal: AbortSignal) {
   let dir: string;
   let composePath: string;
   if (app.git_url) {
-    const cloned = await cloneRepo(app, workdir, log);
+    const cloned = await cloneRepo(app, workdir, log, signal);
     dir = cloned.dir;
-    composePath = path.join(dir, app.dockerfile_path || "docker-compose.yml");
+    const found = resolveInside(dir, app.dockerfile_path || "docker-compose.yml");
+    if (!found) throw new Error("Compose dosyası repo dışında olamaz");
+    composePath = found;
     if (!fs.existsSync(composePath)) throw new Error(`Compose dosyası bulunamadı: ${app.dockerfile_path}`);
   } else {
     if (!app.compose_file?.trim()) throw new Error("Compose dosyası boş");
@@ -530,6 +560,13 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
   const doc = YAML.parse(fs.readFileSync(composePath, "utf8")) as { services?: Record<string, unknown> };
   const services = Object.keys(doc?.services ?? {});
   if (!services.length) throw new Error("Compose dosyasında servis yok");
+  if (!app.host_access) {
+    const issues = composeHostAccessIssues(doc as Parameters<typeof composeHostAccessIssues>[0]);
+    if (issues.length) {
+      issues.forEach((i) => log(`  ${i}`));
+      throw new Error("Compose dosyası sunucunun kendisine erişim istiyor. Bu ayarlar konteynere sunucuda root yetkisi verebileceği için ancak bir yönetici uygulama ayarlarından \"Sunucu erişimi\" iznini açarsa çalıştırılır.");
+    }
+  }
   log(`Servisler: ${services.join(", ")}`);
 
   // Her servisi Xudbin ağına da bağla ki Caddy alan adlarını yönlendirebilsin.
@@ -544,7 +581,7 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
   const env = composeEnv(server, workdir);
   const args = ["compose", "-p", `xb-${app.slug}`, "-f", composePath, "-f", overridePath];
   log("docker compose up çalıştırılıyor...");
-  await run(dockerBin(), [...args, "up", "-d", "--build", "--remove-orphans", "--wait", "--wait-timeout", "120"], { cwd: dir, env, log });
+  await run(dockerBin(), [...args, "up", "-d", "--build", "--remove-orphans", "--wait", "--wait-timeout", "120"], { cwd: dir, env, log, signal });
   db.prepare("UPDATE apps SET container = ? WHERE id = ?").run(`xb-${app.slug}`, app.id);
   await applyCaddyConfig(server);
 }
