@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Sunucudaki xudbin komutu. Panel işlemleri konteyner içindeki CLI'ya iletilir.
+set -e
+DIR=/opt/xudbin
+TTY=""; [ -t 0 ] && [ -t 1 ] && TTY="-t"
+case "${1:-}" in
+  update)
+    [ "$(id -u)" = 0 ] || { echo "sudo xudbin update ile çalıştır"; exit 1; }
+    exec bash "$DIR/install.sh" --update ;;
+  logs) exec docker logs -f --tail 200 xudbin ;;
+  restart) docker restart xudbin >/dev/null && echo "Panel yeniden başlatıldı" ;;
+  *) exec docker exec -i $TTY xudbin node dist/cli.js "$@" ;;
+esac

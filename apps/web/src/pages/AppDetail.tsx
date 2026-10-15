@@ -2,9 +2,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
+import { DropZone, uploadZip } from "@/components/DropZone";
+import { FrameworkLogo } from "@/components/FrameworkLogo";
+import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frameworkById, useFrameworks } from "@/components/FrameworkSetup";
 import { LogViewer } from "@/components/LogViewer";
 import { Button, ConfirmDialog, CopyField, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, Toggle, useAction } from "@/components/ui";
-import { api, type App, type Deployment } from "@/lib/api";
+import { api, type App, type DetectResult, type Deployment } from "@/lib/api";
 import { dateTime, duration, formatBytes, timeAgo } from "@/lib/format";
 
 type Tab = "overview" | "deployments" | "logs" | "env" | "domains" | "security" | "settings";
@@ -110,8 +113,17 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
   const last = deployments[0];
   const webhook = `${location.origin}${app.webhookPath}`;
   const source =
-    app.sourceType === "git" ? `${app.gitUrl} (${app.gitBranch})` : app.sourceType === "image" ? app.image : app.gitUrl ? `Compose, ${app.gitUrl}` : "Compose dosyası";
+    app.sourceType === "git"
+      ? `${app.gitUrl} (${app.gitBranch})`
+      : app.sourceType === "image"
+        ? app.image
+        : app.sourceType === "upload"
+          ? "Yüklenen dosyalar"
+          : app.gitUrl
+            ? `Compose, ${app.gitUrl}`
+            : "Compose dosyası";
 
+  if (!last && app.sourceType === "upload") return <UploadNewVersion app={app} first />;
   if (!last)
     return (
       <div className="panel px-5 py-6">
@@ -151,7 +163,9 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
         <Row label="İç adres" value={`${app.internalHost}:${app.port}`} hint="Aynı sunucudaki diğer uygulamalar bu adresle ulaşır." mono />
       </dl>
 
-      {app.sourceType !== "image" && (
+      {app.sourceType === "upload" && <UploadNewVersion app={app} />}
+
+      {(app.sourceType === "git" || app.sourceType === "compose") && (
         <Section title="Otomatik deploy" description="Git sağlayıcında bu adresi push webhook'u olarak ekle; her push'ta uygulama yeniden deploy edilir.">
           <CopyField value={webhook} secret />
         </Section>
@@ -229,6 +243,8 @@ function Deployments({ data }: { data: AppData }) {
 
 function Env({ data }: { data: AppData }) {
   const [env, setEnv] = useState(data.env);
+  const frameworks = useFrameworks();
+  const fw = frameworkById(frameworks.data?.frameworks, data.app.framework);
   const save = useAction(() => api.put(`/apps/${data.app.id}/env`, { env }), { success: "Kaydedildi. Geçerli olması için yeniden deploy et.", invalidate: [["app", data.app.id]] });
   return (
     <form
@@ -247,6 +263,14 @@ function Env({ data }: { data: AppData }) {
         onChange={(e) => setEnv(e.target.value)}
         placeholder={"DATABASE_URL=postgresql://...\nSECRET_KEY=..."}
       />
+      {fw && fw.envHints.length > 0 && (
+        <div className="mt-3">
+          <EnvSuggestions hints={fw.envHints} env={env} onChange={setEnv} ctx={{ hosts: data.app.domains.map((d) => d.host), https: data.app.domains[0]?.https ?? true }} />
+        </div>
+      )}
+      <p className="mt-3 text-[13px] text-faint">
+        <code className="font-mono">{"{{XUDBIN_URL}}"}</code>, <code className="font-mono">{"{{XUDBIN_DOMAINS}}"}</code> ve <code className="font-mono">{"{{XUDBIN_ORIGINS}}"}</code> deploy sırasında uygulamanın güncel alan adlarıyla doldurulur.
+      </p>
       <div className="mt-3 flex justify-end">
         <Button type="submit" variant="primary" loading={save.isPending} disabled={env === data.env}>Kaydet</Button>
       </div>
@@ -406,6 +430,8 @@ function Settings({ app }: { app: App }) {
     gitBranch: app.gitBranch,
     gitToken: "",
     buildType: app.buildType,
+    framework: app.framework,
+    buildOptions: app.buildOptions as Record<string, string | boolean>,
     dockerfilePath: app.dockerfilePath,
     buildContext: app.buildContext,
     image: app.image ?? "",
@@ -424,7 +450,8 @@ function Settings({ app }: { app: App }) {
         gitUrl: form.gitUrl || null,
         gitBranch: form.gitBranch,
         ...(form.gitToken ? { gitToken: form.gitToken } : {}),
-        buildType: form.buildType,
+        framework: form.framework,
+        buildOptions: form.buildOptions,
         dockerfilePath: form.dockerfilePath,
         buildContext: form.buildContext,
         image: form.image || null,
@@ -468,22 +495,15 @@ function Settings({ app }: { app: App }) {
               </Field>
             </>
           )}
-          {app.sourceType === "git" && (
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="Derleme türü">
-                <select className="input" value={form.buildType} onChange={set("buildType")}>
-                  <option value="auto">Otomatik</option>
-                  <option value="dockerfile">Dockerfile</option>
-                  <option value="static">Statik dosyalar</option>
-                </select>
-              </Field>
-              <Field label="Dockerfile yolu">
-                <input className="input font-mono text-[13px]" value={form.dockerfilePath} onChange={set("dockerfilePath")} />
-              </Field>
-              <Field label="Derleme klasörü">
-                <input className="input font-mono text-[13px]" value={form.buildContext} onChange={set("buildContext")} />
-              </Field>
-            </div>
+          {(app.sourceType === "git" || app.sourceType === "upload") && (
+            <FrameworkSection
+              app={app}
+              framework={form.framework}
+              opts={form.buildOptions}
+              context={form.buildContext}
+              onChange={(framework, buildOptions, port) => setForm({ ...form, framework, buildOptions, ...(port ? { port: String(port) } : {}) })}
+              onContext={(v) => setForm({ ...form, buildContext: v })}
+            />
           )}
           {app.sourceType === "image" && (
             <Field label="İmaj">
@@ -556,5 +576,78 @@ function Settings({ app }: { app: App }) {
         onConfirm={() => del.mutate()}
       />
     </>
+  );
+}
+
+function UploadNewVersion({ app, first }: { app: App; first?: boolean }) {
+  const [, setParams] = useSearchParams();
+  const up = useAction((blob: Blob) => uploadZip<{ deploymentId: number }>(`/apps/${app.id}/upload`, blob), {
+    success: "Dosyalar yüklendi, deploy başladı",
+    invalidate: [["app", app.id]],
+    onSuccess: (r) => setParams({ tab: "deployments", d: String(r.deploymentId) }, { replace: true }),
+  });
+  return (
+    <Section title={first ? "Proje dosyalarını yükle" : "Yeni sürüm yükle"} description="Klasörü veya zip'i bırakınca yüklenir ve hemen deploy edilir.">
+      <DropZone busy={up.isPending} onReady={(p) => up.mutate(p.blob)} />
+    </Section>
+  );
+}
+
+/** Framework seçimi, ayarları ve repo yeniden algılama. */
+function FrameworkSection(props: {
+  app: App;
+  framework: string;
+  opts: Record<string, string | boolean>;
+  context: string;
+  onChange: (framework: string, opts: Record<string, string | boolean>, port?: number) => void;
+  onContext: (v: string) => void;
+}) {
+  const frameworks = useFrameworks();
+  const [picking, setPicking] = useState(false);
+  const [detect, setDetect] = useState<DetectResult | null>(null);
+  const fw = frameworkById(frameworks.data?.frameworks, props.framework);
+  const analyze = useAction(() => api.post<DetectResult>("/frameworks/detect", { appId: props.app.id }), {
+    onSuccess: (d) => {
+      setDetect(d);
+      setPicking(true);
+    },
+  });
+  return (
+    <div className="space-y-4 rounded-md border border-line p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          {props.framework !== "auto" && <FrameworkLogo id={props.framework} className="size-6" />}
+          <div>
+            <div className="text-[14px] font-medium">{fw?.name ?? props.framework}</div>
+            <div className="text-[13px] text-muted">{fw?.description}</div>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {props.app.sourceType === "git" && (
+            <Button type="button" size="sm" variant="ghost" onClick={() => analyze.mutate()} loading={analyze.isPending}>Repoyu yeniden incele</Button>
+          )}
+          <Button type="button" size="sm" onClick={() => setPicking(!picking)}>{picking ? "Kapat" : "Değiştir"}</Button>
+        </div>
+      </div>
+      {picking && (
+        <FrameworkPicker
+          value={props.framework}
+          detected={detect?.matches}
+          onChange={(id) => {
+            const f = frameworkById(frameworks.data?.frameworks, id);
+            const match = detect?.matches.find((m) => m.id === id);
+            props.onChange(id, match?.options ?? {}, f && id !== "auto" && id !== "dockerfile" ? f.defaultPort : undefined);
+            setPicking(false);
+          }}
+        />
+      )}
+      {fw && <FrameworkSteps fw={fw} />}
+      {fw && fw.fields.length > 0 && <FrameworkFields fw={fw} values={props.opts} onChange={(v) => props.onChange(props.framework, v)} />}
+      {props.app.sourceType === "git" && (
+        <Field label="Proje klasörü" hint="Monorepo'da derlenecek alt klasör.">
+          <input className="input max-w-sm font-mono text-[13px]" value={props.context} onChange={(e) => props.onContext(e.target.value || ".")} />
+        </Field>
+      )}
+    </div>
   );
 }

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { config } from "../config.js";
 import { db } from "../db.js";
 
-export type SessionUser = { id: number; email: string; name: string };
+export type SessionUser = { id: number; email: string; name: string; role: "admin" | "member"; mustChangePassword: boolean };
 
 // Veritabanında token'ın kendisi değil SHA-256 özeti saklanır;
 // DB sızsa bile oturumlar ele geçirilemez.
@@ -20,16 +20,18 @@ export function createSession(userId: number, meta: { ip?: string; userAgent?: s
 export function validateSession(token: string): SessionUser | null {
   const row = db
     .prepare(
-      `SELECT s.id AS sid, s.expires_at, u.id, u.email, u.name
+      `SELECT s.id AS sid, s.expires_at, u.id, u.email, u.name, u.role, u.must_change_password
        FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`,
     )
-    .get(hashToken(token)) as { sid: string; expires_at: number; id: number; email: string; name: string } | undefined;
+    .get(hashToken(token)) as
+    | { sid: string; expires_at: number; id: number; email: string; name: string; role: "admin" | "member"; must_change_password: number }
+    | undefined;
   if (!row) return null;
   if (row.expires_at < Date.now()) {
     db.prepare("DELETE FROM sessions WHERE id = ?").run(row.sid);
     return null;
   }
-  return { id: row.id, email: row.email, name: row.name };
+  return { id: row.id, email: row.email, name: row.name, role: row.role, mustChangePassword: Boolean(row.must_change_password) };
 }
 
 export function destroySession(token: string) {

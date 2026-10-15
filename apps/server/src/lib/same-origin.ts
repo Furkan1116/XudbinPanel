@@ -9,7 +9,10 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export const sameOrigin = createMiddleware(async (c, next) => {
   if (SAFE_METHODS.has(c.req.method)) return next();
 
-  if (!c.req.header("content-type")?.startsWith("application/json")) {
+  const type = c.req.header("content-type") ?? "";
+  // Proje arşivi yüklemeleri zip olarak gelir; Origin kontrolü onlar için de geçerli.
+  const isUpload = /\/upload(s)?$/.test(c.req.path) && /^application\/(zip|octet-stream|x-zip-compressed)/.test(type);
+  if (!type.startsWith("application/json") && !isUpload) {
     return c.json({ error: "İstek JSON olmalı" }, 415);
   }
   if (c.req.header("sec-fetch-site") === "cross-site") {

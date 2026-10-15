@@ -25,6 +25,8 @@ export const config = {
   /** Sunucuların paylaştığı Docker ağı; Caddy uygulamalara bu ağ üzerinden ulaşır. */
   network: "xudbin",
   caddyImage: "xudbin/caddy:1",
+  /** Hazır Caddy imajı (CI'da çok mimarili derlenir); çekilemezse sunucuda derlenir. */
+  caddyPrebuilt: env.XUDBIN_CADDY_IMAGE ?? "ghcr.io/furkan1116/xudbin-caddy:1",
   /** Varsayılan Let's Encrypt yerine kullanılacak ACME dizini, ör. staging: https://acme-staging-v02.api.letsencrypt.org/directory */
   acmeCa: env.XUDBIN_ACME_CA || null,
   /** ACME sunucusu herkese açık bir sertifika kullanmıyorsa, Caddy konteynerindeki kök sertifika dosyası. */

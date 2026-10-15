@@ -27,7 +27,7 @@ export const api = {
   del: <T>(path: string) => request<T>(path, { method: "DELETE", body: "{}" }),
 };
 
-export type User = { id: number; email: string; name: string };
+export type User = { id: number; email: string; name: string; role: "admin" | "member"; mustChangePassword: boolean };
 export type AuthStatus = { setupRequired: boolean; user: User | null };
 
 export type ServerStats = {
@@ -95,7 +95,9 @@ export type App = {
   server: { id: number; name: string; status: string };
   name: string;
   slug: string;
-  sourceType: "git" | "image" | "compose";
+  sourceType: "git" | "image" | "compose" | "upload";
+  framework: string;
+  buildOptions: Record<string, string | boolean>;
   gitUrl: string | null;
   gitBranch: string;
   hasGitToken: boolean;
@@ -155,3 +157,30 @@ export type Database = {
 };
 
 export type Backup = { id: number; file: string; size: number; status: "running" | "success" | "failed"; error: string | null; createdAt: number };
+
+export type FieldDef = {
+  key: string;
+  label: string;
+  hint?: string;
+  placeholder?: string;
+  type: "text" | "select" | "toggle";
+  options?: { value: string; label: string }[];
+};
+export type EnvHint = { key: string; description: string; value?: string; auto?: "secret" | "laravel-key" | "domains" | "url" | "https-origins"; required?: boolean };
+export type FrameworkInfo = {
+  id: string;
+  name: string;
+  language: string;
+  category: string;
+  description: string;
+  defaultPort: number;
+  fields: FieldDef[];
+  envHints: EnvHint[];
+  steps: string[];
+};
+export type DetectResult = {
+  matches: { id: string; score: number; reason: string; options: Record<string, string | boolean> }[];
+  envFromCode: string[];
+  envExample: { key: string; value: string }[];
+  dockerfilePort?: number;
+};

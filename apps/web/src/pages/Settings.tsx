@@ -3,30 +3,39 @@ import { type FormEvent, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Button, ConfirmDialog, CopyField, Dialog, Field, Notice, PageHeader, PageLoading, Section, Tabs, Toggle, useAction } from "@/components/ui";
 import { api } from "@/lib/api";
+import { useAuthStatus } from "@/lib/auth";
 import { timeAgo } from "@/lib/format";
 
-type Tab = "panel" | "account" | "notifications" | "keys";
+type Tab = "panel" | "account" | "users" | "notifications" | "keys";
 
 export function SettingsPage() {
   const [params, setParams] = useSearchParams();
-  const tab = (params.get("tab") as Tab) || "panel";
+  const auth = useAuthStatus();
+  const admin = auth.data?.user?.role === "admin";
+  const tab = (params.get("tab") as Tab) || (admin ? "panel" : "account");
   return (
     <>
       <PageHeader title="Ayarlar" />
       <Tabs
         value={tab}
         onChange={(t) => setParams({ tab: t }, { replace: true })}
-        tabs={[
-          { id: "panel", label: "Panel" },
-          { id: "account", label: "Hesap" },
-          { id: "notifications", label: "Bildirimler" },
-          { id: "keys", label: "SSH anahtarları" },
-        ]}
+        tabs={
+          admin
+            ? [
+                { id: "panel", label: "Panel" },
+                { id: "account", label: "Hesap" },
+                { id: "users", label: "Kullanıcılar" },
+                { id: "notifications", label: "Bildirimler" },
+                { id: "keys", label: "SSH anahtarları" },
+              ]
+            : [{ id: "account", label: "Hesap" }]
+        }
       />
-      {tab === "panel" && <PanelSettings />}
+      {tab === "panel" && admin && <PanelSettings />}
+      {tab === "users" && admin && <Users />}
       {tab === "account" && <Account />}
-      {tab === "notifications" && <Notifications />}
-      {tab === "keys" && <SshKeys />}
+      {tab === "notifications" && admin && <Notifications />}
+      {tab === "keys" && admin && <SshKeys />}
     </>
   );
 }
@@ -364,5 +373,105 @@ function SshKeys() {
       )}
       <ConfirmDialog open={Boolean(del)} onClose={() => setDel(null)} title="Anahtar silinsin mi?" description="Hiçbir sunucu bu anahtarı kullanmıyor." confirmLabel="Sil" loading={remove.isPending} onConfirm={() => del && remove.mutate(del.id)} />
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+type UserItem = { id: number; email: string; name: string; role: "admin" | "member"; totpEnabled: boolean; mustChangePassword: boolean; createdAt: number };
+
+function Users() {
+  const { data } = useQuery({ queryKey: ["users"], queryFn: () => api.get<{ users: UserItem[]; me: number }>("/users") });
+  const [adding, setAdding] = useState(false);
+  const [shown, setShown] = useState<{ email: string; password: string } | null>(null);
+  const [removing, setRemoving] = useState<UserItem | null>(null);
+  const setRole = useAction((v: { id: number; role: string }) => api.patch(`/users/${v.id}`, { role: v.role }), { success: "Rol güncellendi", invalidate: [["users"]] });
+  const reset = useAction((u: UserItem) => api.post<{ temporaryPassword: string }>(`/users/${u.id}/reset-password`).then((r) => ({ ...r, email: u.email })), {
+    invalidate: [["users"]],
+    onSuccess: (r) => setShown({ email: r.email, password: r.temporaryPassword }),
+  });
+  const remove = useAction((id: number) => api.del(`/users/${id}`), { success: "Kullanıcı silindi", invalidate: [["users"]], onSuccess: () => setRemoving(null) });
+  if (!data) return <PageLoading />;
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-xl text-[14px] text-muted">Yöneticiler her şeyi yönetir. Üyeler yalnız proje, uygulama ve veritabanlarını yönetebilir; sunuculara, güvenliğe ve ayarlara erişemez.</p>
+        <Button variant="primary" onClick={() => setAdding(true)}>Kullanıcı ekle</Button>
+      </div>
+      <div className="panel divide-y divide-line">
+        {data.users.map((u) => (
+          <div key={u.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{u.name}{u.id === data.me && <span className="ml-2 text-[13px] font-normal text-faint">sen</span>}</div>
+              <div className="text-[13px] text-faint">
+                {u.email}
+                {u.totpEnabled ? ", 2FA açık" : ""}
+                {u.mustChangePassword ? ", geçici şifreyle bekliyor" : ""}
+              </div>
+            </div>
+            <select className="input w-auto" value={u.role} disabled={u.id === data.me} onChange={(e) => setRole.mutate({ id: u.id, role: e.target.value })} aria-label="Rol">
+              <option value="admin">Yönetici</option>
+              <option value="member">Üye</option>
+            </select>
+            {u.id !== data.me && (
+              <>
+                <Button size="sm" variant="ghost" onClick={() => reset.mutate(u)}>Şifre sıfırla</Button>
+                <Button size="sm" variant="ghost" onClick={() => setRemoving(u)}>Sil</Button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+      <AddUser open={adding} onClose={() => setAdding(false)} onCreated={(email, password) => setShown({ email, password })} />
+      <Dialog open={Boolean(shown)} onClose={() => setShown(null)} title="Geçici şifre" description={`${shown?.email} bu şifreyle giriş yapacak ve ilk girişte kendi şifresini belirleyecek. Bu şifre bir daha gösterilmez.`}>
+        {shown && <CopyField value={shown.password} />}
+        <div className="mt-5 flex justify-end">
+          <Button variant="primary" onClick={() => setShown(null)}>Tamam</Button>
+        </div>
+      </Dialog>
+      <ConfirmDialog open={Boolean(removing)} onClose={() => setRemoving(null)} title="Kullanıcı silinsin mi?" description={`${removing?.email} artık giriş yapamayacak.`} confirmLabel="Sil" loading={remove.isPending} onConfirm={() => removing && remove.mutate(removing.id)} />
+    </>
+  );
+}
+
+function AddUser({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (email: string, password: string) => void }) {
+  const [form, setForm] = useState({ email: "", name: "", role: "member" });
+  const create = useAction(() => api.post<{ temporaryPassword: string }>("/users", form), {
+    invalidate: [["users"]],
+    onSuccess: (r) => {
+      onClose();
+      onCreated(form.email, r.temporaryPassword);
+      setForm({ email: "", name: "", role: "member" });
+    },
+  });
+  return (
+    <Dialog open={open} onClose={onClose} title="Kullanıcı ekle" description="Geçici bir şifre üretilir; kullanıcıya kendin iletirsin.">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          create.mutate();
+        }}
+        className="space-y-4"
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Ad">
+            <input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </Field>
+          <Field label="E-posta">
+            <input className="input" type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="Rol">
+          <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+            <option value="member">Üye: proje, uygulama ve veritabanları</option>
+            <option value="admin">Yönetici: her şey</option>
+          </select>
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Vazgeç</Button>
+          <Button type="submit" variant="primary" loading={create.isPending}>Ekle</Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }

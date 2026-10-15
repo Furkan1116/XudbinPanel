@@ -14,9 +14,15 @@ import {
   demuxLogs,
   enqueueDeploy,
   getApp,
+  shallowClone,
   type AppRow,
 } from "../services/deploy.js";
 import { dockerFor, removeContainer, type ServerRow } from "../services/docker.js";
+import { detectFrameworks, getFramework, publicCatalog } from "../services/frameworks/index.js";
+import { config } from "../config.js";
+import fs from "node:fs";
+import path from "node:path";
+import { extractZip, newTempUpload, saveUpload, storeAppUpload, tempUploadFile } from "../services/uploads.js";
 import { getServer } from "../services/servers.js";
 
 const HOST_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
@@ -47,6 +53,8 @@ function publicApp(a: AppRow) {
     gitBranch: a.git_branch,
     hasGitToken: Boolean(a.git_token),
     buildType: a.build_type,
+    framework: a.framework,
+    buildOptions: JSON.parse(a.build_options || "{}"),
     dockerfilePath: a.dockerfile_path,
     buildContext: a.build_context,
     image: a.image,
@@ -71,17 +79,23 @@ const appInput = z.object({
   projectId: z.number().int(),
   serverId: z.number().int(),
   name: z.string().trim().min(1, "İsim gerekli").max(60),
-  sourceType: z.enum(["git", "image", "compose"]),
+  sourceType: z.enum(["git", "image", "compose", "upload"]),
+  uploadId: z.string().max(40).optional(),
   gitUrl: z.string().trim().max(500).optional(),
   gitBranch: z.string().trim().max(200).optional(),
   gitToken: z.string().max(500).optional(),
   buildType: z.enum(["auto", "dockerfile", "static"]).optional(),
+  framework: z.string().max(40).optional(),
+  buildOptions: z.record(z.string(), z.union([z.string().max(500), z.boolean()])).optional(),
+  buildContext: z.string().trim().max(300).optional(),
+  env: z.string().max(200_000).optional(),
   image: z.string().trim().max(300).optional(),
   composeFile: z.string().max(100_000).optional(),
   port: z.number().int().min(1).max(65535).optional(),
 });
 
-function validateSource(a: { sourceType: string; gitUrl?: string | null; image?: string | null; composeFile?: string | null }) {
+function validateSource(a: { sourceType: string; gitUrl?: string | null; image?: string | null; composeFile?: string | null; uploadId?: string }) {
+  if (a.sourceType === "upload" && a.uploadId !== undefined && !tempUploadFile(a.uploadId)) throw new HttpError(400, "Yüklenen dosya bulunamadı ya da süresi doldu; tekrar yükle");
   if (a.sourceType === "git" && !a.gitUrl) throw new HttpError(400, "Git adresi gerekli");
   if (a.gitUrl && !/^https:\/\/[^\s]+$/.test(a.gitUrl)) throw new HttpError(400, "Git adresi https:// ile başlamalı");
   if (a.sourceType === "image" && !a.image) throw new HttpError(400, "Docker imajı gerekli");
@@ -103,8 +117,8 @@ export const appRoutes = new Hono()
     const res = db
       .prepare(
         `INSERT INTO apps (project_id, server_id, name, slug, source_type, git_url, git_branch, git_token, build_type,
-                           image, compose_file, port, webhook_token, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           image, compose_file, port, webhook_token, created_at, framework, build_options, build_context, env)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.projectId,
@@ -118,11 +132,16 @@ export const appRoutes = new Hono()
         input.buildType ?? "auto",
         input.image || null,
         input.composeFile || null,
-        input.port ?? (input.sourceType === "image" ? 80 : 3000),
+        input.port ?? (input.framework ? (getFramework(input.framework)?.defaultPort ?? 3000) : input.sourceType === "image" ? 80 : 3000),
         randomToken(24),
         Date.now(),
+        input.framework && (input.framework === "auto" || getFramework(input.framework)) ? input.framework : "auto",
+        JSON.stringify(input.buildOptions ?? {}),
+        input.buildContext || ".",
+        input.env?.trim() ? encrypt(input.env) : null,
       );
     const id = Number(res.lastInsertRowid);
+    if (input.sourceType === "upload" && input.uploadId) storeAppUpload(slug, tempUploadFile(input.uploadId)!);
 
     // Domain almadan önce de çalışan bir adres: <slug>.<ip>.sslip.io
     const host = generatedHost(slug, server);
@@ -155,6 +174,8 @@ export const appRoutes = new Hono()
         gitBranch: z.string().trim().min(1).max(200).optional(),
         gitToken: z.string().max(500).nullable().optional(),
         buildType: z.enum(["auto", "dockerfile", "static"]).optional(),
+        framework: z.string().max(40).optional(),
+        buildOptions: z.record(z.string(), z.union([z.string().max(500), z.boolean()])).optional(),
         dockerfilePath: z.string().trim().min(1).max(300).optional(),
         buildContext: z.string().trim().min(1).max(300).optional(),
         image: z.string().trim().max(300).nullable().optional(),
@@ -183,6 +204,8 @@ export const appRoutes = new Hono()
       git_branch: input.gitBranch,
       git_token: input.gitToken === undefined ? undefined : input.gitToken ? encrypt(input.gitToken) : null,
       build_type: input.buildType,
+      framework: input.framework === undefined ? undefined : input.framework === "auto" || getFramework(input.framework) ? input.framework : undefined,
+      build_options: input.buildOptions ? JSON.stringify(input.buildOptions) : undefined,
       dockerfile_path: input.dockerfilePath,
       build_context: input.buildContext,
       image: input.image,
@@ -333,6 +356,22 @@ export const appRoutes = new Hono()
     return c.json({ ok: true });
   })
 
+  // Yeni sürüm: zip yüklenir ve deploy başlatılır.
+  .post("/:id/upload", async (c) => {
+    const app = loadApp(idParam(c));
+    if (app.source_type !== "upload") throw new HttpError(422, "Bu uygulama dosya yüklemeyle çalışmıyor");
+    if (!c.req.raw.body) throw new HttpError(400, "Dosya yok");
+    const tmp = newTempUpload();
+    try {
+      await saveUpload(c.req.raw.body, tmp.file);
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+    storeAppUpload(app.slug, tmp.file);
+    const deploymentId = enqueueDeploy(app.id, "manual", { title: "Dosya yüklemesi" });
+    return c.json({ deploymentId }, 202);
+  })
+
   .post("/:id/webhook/regenerate", (c) => {
     const app = loadApp(idParam(c));
     db.prepare("UPDATE apps SET webhook_token = ? WHERE id = ?").run(randomToken(24), app.id);
@@ -457,7 +496,7 @@ export const projectRoutes = new Hono()
     const project = must(db.prepare("SELECT id, name, description, created_at AS createdAt FROM projects WHERE id = ?").get(id), "Proje bulunamadı");
     const apps = (db.prepare("SELECT * FROM apps WHERE project_id = ? ORDER BY id").all(id) as AppRow[]).map((a) => {
       const p = publicApp(a);
-      return { id: p.id, name: p.name, sourceType: p.sourceType, status: p.status, server: p.server, domains: p.domains, gitUrl: p.gitUrl, image: p.image };
+      return { id: p.id, name: p.name, sourceType: p.sourceType, status: p.status, server: p.server, domains: p.domains, gitUrl: p.gitUrl, image: p.image, framework: p.framework };
     });
     const databases = db
       .prepare(
@@ -492,4 +531,67 @@ export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
   }
   const id = enqueueDeploy(app.id, "webhook", { title: payload.head_commit?.message?.split("\n")[0] ?? "" });
   return c.json({ ok: true, deploymentId: id }, 202);
+});
+
+/** Framework kataloğu ve repo algılama. */
+export const frameworkRoutes = new Hono()
+  .get("/", (c) => c.json({ frameworks: publicCatalog() }))
+  .post("/detect", async (c) => {
+    const input = await body(
+      c,
+      z.object({
+        appId: z.number().int().optional(),
+        gitUrl: z.string().trim().max(500).optional(),
+        gitBranch: z.string().trim().max(200).default("main"),
+        gitToken: z.string().max(500).optional(),
+        buildContext: z.string().trim().max(300).default("."),
+      }),
+    );
+    let url = input.gitUrl;
+    let branch = input.gitBranch;
+    let token = input.gitToken ?? "";
+    let context = input.buildContext;
+    if (input.appId) {
+      const app = loadApp(input.appId);
+      url = url || app.git_url || undefined;
+      branch = input.gitUrl ? branch : app.git_branch;
+      token = token || decrypt(app.git_token);
+      context = input.gitUrl ? context : app.build_context;
+    }
+    if (!url || !/^https:\/\//.test(url)) throw new HttpError(400, "https:// ile başlayan bir repo adresi gerekli");
+    const dest = path.join(config.dataDir, "builds", `detect-${randomAlnum(10)}`);
+    try {
+      await shallowClone(url, branch || "main", token, dest);
+    } catch {
+      throw new HttpError(422, token ? "Repo klonlanamadı. Adres, dal ve token'ı kontrol et." : "Repo klonlanamadı. Özel bir repoysa erişim token'ı gir; adres ve dalı kontrol et.");
+    }
+    try {
+      const dir = path.resolve(dest, context || ".");
+      if (!dir.startsWith(dest) || !fs.existsSync(dir)) throw new HttpError(422, `Derleme klasörü bulunamadı: ${context}`);
+      return c.json(detectFrameworks(dir));
+    } finally {
+      fs.rmSync(dest, { recursive: true, force: true });
+    }
+  });
+
+/** Uygulama oluşturmadan önce arşivi yükleyip proje türünü algılar; dönen uploadId oluştururken kullanılır. */
+export const uploadRoutes = new Hono().post("/", async (c) => {
+  if (!c.req.raw.body) throw new HttpError(400, "Dosya yok");
+  const tmp = newTempUpload();
+  let size: number;
+  try {
+    size = await saveUpload(c.req.raw.body, tmp.file);
+  } catch (err) {
+    throw new HttpError(400, (err as Error).message);
+  }
+  const dest = path.join(config.dataDir, "builds", `detect-${tmp.id}`);
+  try {
+    const dir = await extractZip(tmp.file, dest);
+    return c.json({ uploadId: tmp.id, size, detect: detectFrameworks(dir) }, 201);
+  } catch (err) {
+    fs.rmSync(tmp.file, { force: true });
+    throw new HttpError(400, (err as Error).message);
+  } finally {
+    fs.rmSync(dest, { recursive: true, force: true });
+  }
 });

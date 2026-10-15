@@ -13,6 +13,7 @@ import { ServerDetailPage } from "@/pages/ServerDetail";
 import { ServersPage } from "@/pages/Servers";
 import { SettingsPage } from "@/pages/Settings";
 import { SetupPage } from "@/pages/Setup";
+import { ChangePasswordPage } from "@/pages/ChangePassword";
 
 export function App() {
   const { data, isLoading, error } = useAuthStatus();
@@ -27,6 +28,8 @@ export function App() {
         <SetupPage />
       ) : !data.user ? (
         <LoginPage />
+      ) : data.user.mustChangePassword ? (
+        <ChangePasswordPage />
       ) : (
         <BrowserRouter>
           <Layout>

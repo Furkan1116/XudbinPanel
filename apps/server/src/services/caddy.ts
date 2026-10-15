@@ -5,6 +5,8 @@ import { getSettings } from "../lib/settings.js";
 import {
   buildImage,
   containerState,
+  pullImage,
+  withTimeout,
   dockerFor,
   ensureNetwork,
   execIn,
@@ -57,6 +59,17 @@ export async function ensureCaddy(server: ServerRow, log: (line: string) => void
   const docker = dockerFor(server);
   await ensureNetwork(docker);
 
+  if (!(await imageExists(docker, config.caddyImage)) && config.caddyPrebuilt) {
+    try {
+      log(`Hazır Caddy imajı deneniyor: ${config.caddyPrebuilt}`);
+      await withTimeout(pullImage(docker, config.caddyPrebuilt, () => {}), 180_000, "zaman aşımı");
+      const [repo, tag] = config.caddyImage.split(":") as [string, string];
+      await docker.getImage(config.caddyPrebuilt).tag({ repo, tag });
+      log("Hazır Caddy imajı kullanılıyor.");
+    } catch {
+      log("Hazır imaj alınamadı.");
+    }
+  }
   if (!(await imageExists(docker, config.caddyImage)) && server.kind === "ssh") {
     await copyCaddyImageFromLocal(server, log).catch((err) => log(`İmaj kopyalanamadı (${(err as Error).message}), derlenecek.`));
   }

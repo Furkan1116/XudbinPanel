@@ -72,7 +72,7 @@ export const settingsRoutes = new Hono<AppEnv>()
     const input = await body(c, z.object({ current: z.string().min(1).max(256), next: z.string().min(10, "Yeni şifre en az 10 karakter olmalı").max(256) }));
     const row = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(user.id) as { password_hash: string };
     if (!(await verifyPassword(input.current, row.password_hash))) throw new HttpError(403, "Mevcut şifre hatalı");
-    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(await hashPassword(input.next), user.id);
+    db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(await hashPassword(input.next), user.id);
     // Diğer cihazlardaki oturumları kapat.
     const current = createHash("sha256").update(getCookie(c, SESSION_COOKIE) ?? "").digest("hex");
     db.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").run(user.id, current);

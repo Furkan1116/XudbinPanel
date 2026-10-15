@@ -176,19 +176,78 @@ const migrations: string[] = [
   CREATE INDEX security_events_ip ON security_events(ip, created_at);
   ALTER TABLE users ADD COLUMN totp_secret TEXT;
   `,
+  `
+  ALTER TABLE apps ADD COLUMN framework TEXT NOT NULL DEFAULT 'auto';
+  ALTER TABLE apps ADD COLUMN build_options TEXT NOT NULL DEFAULT '{}';
+  UPDATE apps SET framework = 'dockerfile' WHERE build_type = 'dockerfile';
+  UPDATE apps SET framework = 'static' WHERE build_type = 'static';
+  `,
+  // Kaynak türü kısıtlaması kaldırılır (yeni türler, ör. "upload", uygulama kodunda doğrulanır).
+  // SQLite CHECK kısıtını değiştiremediği için tablo yeniden kurulur; yabancı anahtarlar bu sırada kapalı.
+  `-- foreign_keys_off
+  CREATE TABLE apps_new (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    server_id       INTEGER NOT NULL REFERENCES servers(id),
+    name            TEXT NOT NULL,
+    slug            TEXT NOT NULL UNIQUE,
+    source_type     TEXT NOT NULL,
+    git_url         TEXT,
+    git_branch      TEXT NOT NULL DEFAULT 'main',
+    git_token       TEXT,
+    build_type      TEXT NOT NULL DEFAULT 'auto',
+    dockerfile_path TEXT NOT NULL DEFAULT 'Dockerfile',
+    build_context   TEXT NOT NULL DEFAULT '.',
+    image           TEXT,
+    compose_file    TEXT,
+    compose_service TEXT,
+    port            INTEGER NOT NULL DEFAULT 3000,
+    command         TEXT,
+    env             TEXT,
+    volumes         TEXT NOT NULL DEFAULT '[]',
+    security        TEXT NOT NULL DEFAULT '{}',
+    webhook_token   TEXT NOT NULL,
+    auto_deploy     INTEGER NOT NULL DEFAULT 1,
+    status          TEXT NOT NULL DEFAULT 'idle',
+    container       TEXT,
+    current_image   TEXT,
+    created_at      INTEGER NOT NULL,
+    framework       TEXT NOT NULL DEFAULT 'auto',
+    build_options   TEXT NOT NULL DEFAULT '{}'
+  );
+  INSERT INTO apps_new SELECT id, project_id, server_id, name, slug, source_type, git_url, git_branch, git_token, build_type,
+    dockerfile_path, build_context, image, compose_file, compose_service, port, command, env, volumes, security,
+    webhook_token, auto_deploy, status, container, current_image, created_at, framework, build_options FROM apps;
+  DROP TABLE apps;
+  ALTER TABLE apps_new RENAME TO apps;
+  `,
+  `
+  ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin';
+  ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 function migrate() {
   const { user_version: current } = db.prepare("PRAGMA user_version").get() as { user_version: number };
   for (let v = current; v < migrations.length; v++) {
+    const sql = migrations[v]!;
+    // Tablo yeniden kuran migration'lar için (PRAGMA işlem içinde değiştirilemez).
+    const fkOff = sql.trimStart().startsWith("-- foreign_keys_off");
+    if (fkOff) db.exec("PRAGMA foreign_keys = OFF");
     db.exec("BEGIN");
     try {
-      db.exec(migrations[v]!);
+      db.exec(sql);
+      if (fkOff) {
+        const broken = db.prepare("PRAGMA foreign_key_check").all();
+        if (broken.length) throw new Error(`Migration ${v + 1} yabancı anahtarları bozdu`);
+      }
       db.exec(`PRAGMA user_version = ${v + 1}`);
       db.exec("COMMIT");
     } catch (err) {
       db.exec("ROLLBACK");
       throw err;
+    } finally {
+      if (fkOff) db.exec("PRAGMA foreign_keys = ON");
     }
   }
 }

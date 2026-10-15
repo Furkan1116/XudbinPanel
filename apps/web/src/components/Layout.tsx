@@ -8,8 +8,8 @@ import { ThemeSwitch } from "./ThemeSwitch";
 const NAV = [
   { to: "/", label: "Genel bakış", icon: LayoutGrid, end: true },
   { to: "/projects", label: "Projeler", icon: FolderKanban },
-  { to: "/servers", label: "Sunucular", icon: Server },
-  { to: "/security", label: "Güvenlik", icon: ShieldCheck },
+  { to: "/servers", label: "Sunucular", icon: Server, admin: true },
+  { to: "/security", label: "Güvenlik", icon: ShieldCheck, admin: true },
   { to: "/settings", label: "Ayarlar", icon: Settings },
 ];
 
@@ -32,7 +32,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="flex gap-0.5 overflow-x-auto px-2 pb-2 md:flex-1 md:flex-col md:px-3 md:pb-0">
-          {NAV.map((item) => (
+          {NAV.filter((item) => !item.admin || user?.role === "admin").map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

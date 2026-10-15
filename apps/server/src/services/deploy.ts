@@ -8,12 +8,13 @@ import { config } from "../config.js";
 import { db } from "../db.js";
 import { decrypt } from "../lib/crypto.js";
 import { bus } from "../lib/events.js";
-import { detectProject, staticSite } from "./buildpacks.js";
+import { detectFrameworks, getFramework, openRepo, type Options } from "./frameworks/index.js";
 import { applyCaddyConfig } from "./caddy.js";
 import { buildImage, containerState, dockerFor, pullImage, removeContainer, type ServerRow } from "./docker.js";
 import { notify } from "./notify.js";
 import { getServer } from "./servers.js";
 import { getPrivateKey } from "./ssh.js";
+import { extractZip, latestAppUpload } from "./uploads.js";
 
 export type AppRow = {
   id: number;
@@ -21,11 +22,13 @@ export type AppRow = {
   server_id: number;
   name: string;
   slug: string;
-  source_type: "git" | "image" | "compose";
+  source_type: "git" | "image" | "compose" | "upload";
   git_url: string | null;
   git_branch: string;
   git_token: string | null;
   build_type: "auto" | "dockerfile" | "static";
+  framework: string;
+  build_options: string;
   dockerfile_path: string;
   build_context: string;
   image: string | null;
@@ -49,6 +52,19 @@ export function getApp(id: number) {
 }
 
 const BUILD_ROOT = path.join(config.dataDir, "builds");
+
+/** {{XUDBIN_URL}}, {{XUDBIN_DOMAINS}}, {{XUDBIN_ORIGINS}} yer tutucularını uygulamanın güncel alan adlarıyla doldurur. */
+export function fillPlaceholders(env: Record<string, string>, appId: number, httpsOn: boolean) {
+  const hosts = db.prepare("SELECT host, https FROM domains WHERE app_id = ? ORDER BY generated, id").all(appId) as { host: string; https: number }[];
+  const url = (h: { host: string; https: number }) => `${h.https && httpsOn ? "https" : "http"}://${h.host}`;
+  const values: Record<string, string> = {
+    XUDBIN_URL: hosts[0] ? url(hosts[0]) : "",
+    XUDBIN_DOMAINS: hosts.map((h) => h.host).join(","),
+    XUDBIN_ORIGINS: hosts.map(url).join(","),
+  };
+  for (const k of Object.keys(env)) env[k] = env[k]!.replace(/\{\{(XUDBIN_URL|XUDBIN_DOMAINS|XUDBIN_ORIGINS)\}\}/g, (_, n: string) => values[n] ?? "");
+  return { env, values };
+}
 
 export function parseEnv(raw: string): Record<string, string> {
   const env: Record<string, string> = {};
@@ -169,11 +185,11 @@ async function runDeployment(deploymentId: number) {
         log(`İmaj çekiliyor: ${image}`);
         await pullImage(dockerFor(server), image, log);
       } else {
-        image = await buildFromGit(app, server, deploymentId, workdir, log);
+        image = await buildFromSource(app, server, deploymentId, workdir, log);
       }
       db.prepare("UPDATE deployments SET image = ? WHERE id = ?").run(image, deploymentId);
       await runContainer(app, server, image, deploymentId, log);
-      if (app.source_type === "git" && !dep.image) pruneImages(app, server).catch(() => {});
+      if ((app.source_type === "git" || app.source_type === "upload") && !dep.image) pruneImages(app, server).catch(() => {});
     }
 
     const seconds = Math.round((Date.now() - started) / 1000);
@@ -221,6 +237,17 @@ function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.Pro
   });
 }
 
+/** Repoyu yalnız son commit'iyle klonlar (algılama ve derleme için). */
+export async function shallowClone(url: string, branch: string, token: string, dest: string, log: (l: string) => void = () => {}) {
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  await run("git", ["clone", "--depth", "1", "--branch", branch, gitUrlWithToken(url, token), dest], {
+    env: { GIT_TERMINAL_PROMPT: "0" },
+    log,
+    redact: [token],
+  });
+}
+
 async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void) {
   if (!app.git_url) throw new Error("Git adresi tanımlı değil");
   fs.rmSync(workdir, { recursive: true, force: true });
@@ -239,32 +266,55 @@ async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void)
   return { dir: path.join(workdir, "src"), sha, msg };
 }
 
-async function buildFromGit(app: AppRow, server: ServerRow, deploymentId: number, workdir: string, log: (l: string) => void) {
-  const { dir, sha, msg } = await cloneRepo(app, workdir, log);
-  db.prepare("UPDATE deployments SET commit_sha = ?, title = CASE WHEN title = '' THEN ? ELSE title END WHERE id = ?").run(sha, msg, deploymentId);
+async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: number, workdir: string, log: (l: string) => void) {
+  let dir: string;
+  if (app.source_type === "upload") {
+    const zip = latestAppUpload(app.slug);
+    if (!zip) throw new Error("Yüklenmiş dosya yok. Uygulama sayfasından proje klasörünü veya zip'i yükle.");
+    log(`Yüklenen dosya açılıyor (${(fs.statSync(zip).size / 1024 / 1024).toFixed(1)} MB)...`);
+    dir = await extractZip(zip, path.join(workdir, "src"));
+    db.prepare("UPDATE deployments SET title = CASE WHEN title = '' THEN 'Dosya yüklemesi' ELSE title END WHERE id = ?").run(deploymentId);
+  } else {
+    const cloned = await cloneRepo(app, workdir, log);
+    dir = cloned.dir;
+    db.prepare("UPDATE deployments SET commit_sha = ?, title = CASE WHEN title = '' THEN ? ELSE title END WHERE id = ?").run(cloned.sha, cloned.msg, deploymentId);
+  }
 
   const contextDir = path.resolve(dir, app.build_context || ".");
   if (!contextDir.startsWith(dir)) throw new Error("Derleme klasörü repo dışında olamaz");
   if (!fs.existsSync(contextDir)) throw new Error(`Derleme klasörü bulunamadı: ${app.build_context}`);
 
-  let dockerfile = app.dockerfile_path || "Dockerfile";
-  const hasDockerfile = fs.existsSync(path.join(contextDir, dockerfile));
-  if (app.build_type === "static" || (app.build_type === "auto" && !hasDockerfile)) {
-    const detected = app.build_type === "static" ? staticSite(".") : detectProject(contextDir);
-    if (!detected) {
-      throw new Error("Dockerfile bulunamadı ve proje türü tanınamadı. Repoya bir Dockerfile ekle veya derleme türünü değiştir.");
-    }
+  const opts = JSON.parse(app.build_options || "{}") as Options;
+  let frameworkId = app.framework || "auto";
+  if (frameworkId === "auto") {
+    const best = detectFrameworks(contextDir).matches[0];
+    if (!best) throw new Error("Proje türü tanınamadı. Uygulama ayarlarından framework seç veya repoya bir Dockerfile ekle.");
+    frameworkId = best.id;
+    Object.assign(opts, { ...best.options, ...opts });
+    log(`Proje türü otomatik algılandı: ${getFramework(best.id)!.name} (${best.reason})`);
+  }
+
+  let dockerfile = (typeof opts.dockerfilePath === "string" && opts.dockerfilePath) || app.dockerfile_path || "Dockerfile";
+  if (frameworkId === "dockerfile") {
+    if (!fs.existsSync(path.join(contextDir, dockerfile))) throw new Error(`${dockerfile} bulunamadı`);
+    log(`Repodaki ${dockerfile} kullanılıyor.`);
+  } else {
+    const fw = getFramework(frameworkId);
+    if (!fw) throw new Error(`Bilinmeyen framework: ${frameworkId}`);
+    const env = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off").env;
+    const result = fw.build(openRepo(contextDir), opts, env);
     dockerfile = "Dockerfile.xudbin";
-    fs.writeFileSync(path.join(contextDir, dockerfile), detected.dockerfile);
-    log(`Proje türü: ${detected.kind}. Üretilen Dockerfile:`);
-    detected.dockerfile.trim().split("\n").forEach((l) => log(`  ${l}`));
-    if (detected.port !== app.port) {
-      log(`Uygulama portu ${app.port} → ${detected.port} olarak güncellendi.`);
-      db.prepare("UPDATE apps SET port = ? WHERE id = ?").run(detected.port, app.id);
-      app.port = detected.port;
+    for (const [name, content] of Object.entries(result.files ?? {})) fs.writeFileSync(path.join(contextDir, name), content);
+    fs.writeFileSync(path.join(contextDir, dockerfile), result.dockerfile);
+    log(`Framework: ${fw.name}`);
+    result.notes?.forEach((n) => log(n));
+    log("Üretilen Dockerfile:");
+    result.dockerfile.trim().split("\n").forEach((l) => log(`  ${l}`));
+    if (result.port !== app.port) {
+      log(`Uygulama portu ${app.port} → ${result.port} olarak güncellendi.`);
+      db.prepare("UPDATE apps SET port = ? WHERE id = ?").run(result.port, app.id);
+      app.port = result.port;
     }
-  } else if (!hasDockerfile) {
-    throw new Error(`${dockerfile} bulunamadı`);
   }
 
   const tag = `xudbin/${app.slug}:${deploymentId}`;
@@ -279,7 +329,8 @@ type Volume = { name: string; path: string };
 async function runContainer(app: AppRow, server: ServerRow, image: string, deploymentId: number, log: (l: string) => void) {
   const docker = dockerFor(server);
   const fresh = getApp(app.id)!;
-  const env = { PORT: String(fresh.port), ...parseEnv(decrypt(fresh.env)) };
+  const filled = fillPlaceholders(parseEnv(decrypt(fresh.env)), app.id, server.https_mode !== "off");
+  const env = { PORT: String(fresh.port), XUDBIN_URL: filled.values.XUDBIN_URL!, XUDBIN_DOMAINS: filled.values.XUDBIN_DOMAINS!, ...filled.env };
   const volumes = JSON.parse(fresh.volumes || "[]") as Volume[];
   const name = `xb-${app.slug}-${deploymentId}`;
 

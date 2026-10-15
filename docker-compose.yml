@@ -4,7 +4,7 @@ name: xudbin
 services:
   xudbin:
     build: .
-    image: xudbin:local
+    image: ${XUDBIN_IMAGE:-xudbin:local}
     container_name: xudbin
     restart: unless-stopped
     environment:

@@ -1,159 +1,200 @@
 #!/usr/bin/env bash
-# Xudbin kurulum scripti — Ubuntu/Debian ve AlmaLinux/Rocky/RHEL sunucular için.
+# Xudbin kurulum betiği — Ubuntu/Debian ve AlmaLinux/Rocky/RHEL sunucular için.
 #
-#   sudo ./install.sh
+#   curl -fsSL https://raw.githubusercontent.com/furkan1116/xudbin/main/install.sh | sudo bash
+#   (veya repo içinden)  sudo ./install.sh
+#   Güncelleme:          sudo xudbin update
 #
 # Seçenekler (ortam değişkeni):
-#   XUDBIN_DOMAIN  Panel için kendi domainin (boşsa <ip>.sslip.io adresi üretilir)
+#   XUDBIN_DOMAIN  Panel için kendi alan adın (boşsa <ip>.sslip.io adresi üretilir)
 #   ACME_EMAIL     Let's Encrypt bildirimleri için e-posta (isteğe bağlı)
-#   XUDBIN_REPO    Kaynak kodun git adresi (script repo içinden çalıştırılmıyorsa gerekli)
+#   XUDBIN_REPO    Kaynak kodun git adresi (varsayılan: resmi repo)
+#   XUDBIN_IMAGE   Hazır panel imajı (varsayılan: ghcr.io/furkan1116/xudbin:latest; yoksa kaynaktan derlenir)
 #   XUDBIN_HARDEN  0 yapılırsa güvenlik duvarı ve fail2ban kurulmaz (varsayılan 1)
 #   XUDBIN_HTTPS   0 yapılırsa HTTPS kapalı kurulur (dış IP'si olmayan yerel ağ/test sunucuları için)
 set -euo pipefail
 
 INSTALL_DIR=/opt/xudbin
-c_green=$'\e[32m'; c_red=$'\e[31m'; c_dim=$'\e[2m'; c_reset=$'\e[0m'
-step() { echo "${c_green}==>${c_reset} $*"; }
-fail() { echo "${c_red}Hata:${c_reset} $*" >&2; exit 1; }
+DEFAULT_REPO=https://github.com/furkan1116/xudbin
+DEFAULT_IMAGE=ghcr.io/furkan1116/xudbin:latest
+MODE=install
+[[ ${1:-} == --update ]] && MODE=update
 
-[[ $EUID -eq 0 ]] || fail "Bu script root olarak çalışmalı (sudo ./install.sh)."
+R=$'\e[31m'; G=$'\e[32m'; Y=$'\e[33m'; D=$'\e[2m'; B=$'\e[1m'; X=$'\e[0m'
+TOTAL=7; N=0
+step() { N=$((N + 1)); echo; echo "${R}[$N/$TOTAL]${X} ${B}$*${X}"; }
+ok() { echo "   ${G}✓${X} $*"; }
+info() { echo "   ${D}$*${X}"; }
+fail() { echo; echo "   ${R}✗ Hata:${X} $*" >&2; exit 1; }
+
+banner() {
+  echo
+  echo "${R}   ██╗  ██╗██╗   ██╗██████╗ ██████╗ ██╗███╗   ██╗${X}"
+  echo "${R}   ╚██╗██╔╝██║   ██║██╔══██╗██╔══██╗██║████╗  ██║${X}"
+  echo "${R}    ╚███╔╝ ██║   ██║██║  ██║██████╔╝██║██╔██╗ ██║${X}"
+  echo "${R}    ██╔██╗ ██║   ██║██║  ██║██╔══██╗██║██║╚██╗██║${X}"
+  echo "${R}   ██╔╝ ██╗╚██████╔╝██████╔╝██████╔╝██║██║ ╚████║${X}"
+  echo "${R}   ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝${X}"
+  echo "   ${D}Sunucularını tek panelden yönet: otomatik domain, ücretsiz HTTPS, saldırı koruması${X}"
+}
+
+banner
+[[ $MODE == update ]] && TOTAL=5
+
+# --- 1. Sistem ---------------------------------------------------------------
+step "Sistem kontrol ediliyor"
+[[ $EUID -eq 0 ]] || fail "Root olarak çalıştır: sudo bash install.sh"
 [[ $(uname -s) == Linux ]] || fail "Xudbin yalnızca Linux sunucularda çalışır."
-
-# --- Port kontrolü: 80 ve 443 boş olmalı (Xudbin'in kendi Caddy'si hariç) ---
-for port in 80 443; do
-  if ss -ltnH "sport = :$port" 2>/dev/null | grep -q .; then
-    if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'xudbin-caddy'; then
-      fail "$port portu başka bir servis tarafından kullanılıyor (nginx/apache/CloudPanel?). Önce onu durdur."
-    fi
-  fi
-done
-
-# --- Swap: düşük RAM'li sunucularda derlemeler (Caddy, Node) bellek yetersizliğinden çökmesin ---
+OS_NAME=$( (. /etc/os-release && echo "$PRETTY_NAME") 2>/dev/null || echo Linux)
 MEM_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
-if [[ $MEM_MB -lt 3000 ]] && ! swapon --show --noheadings | grep -q . && [[ ! -e /swapfile ]]; then
-  step "RAM ${MEM_MB} MB; 2 GB swap oluşturuluyor..."
-  fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
-  chmod 600 /swapfile
-  mkswap /swapfile >/dev/null
-  swapon /swapfile
-  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+ok "$OS_NAME, $(nproc) çekirdek, ${MEM_MB} MB RAM"
+if [[ $MODE == install ]]; then
+  for port in 80 443; do
+    if ss -ltnH "sport = :$port" 2>/dev/null | grep -q .; then
+      docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'xudbin-caddy' || fail "$port portu kullanımda (nginx/apache/CloudPanel?). Önce o servisi durdur."
+    fi
+  done
+  ok "80 ve 443 portları boş"
+  # Düşük RAM'li sunucularda derlemeler (Caddy, Node) bellek yetersizliğinden çökmesin.
+  if [[ $MEM_MB -lt 3000 ]] && ! swapon --show --noheadings | grep -q . && [[ ! -e /swapfile ]]; then
+    fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+    chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+    grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    ok "Düşük RAM için 2 GB swap oluşturuldu"
+  fi
 fi
 
-# --- Docker ---
-if ! command -v docker >/dev/null 2>&1; then
-  step "Docker kuruluyor..."
-  curl -fsSL https://get.docker.com | sh
+# --- 2. Docker ---------------------------------------------------------------
+if [[ $MODE == install ]]; then
+  step "Docker"
+  if ! command -v docker >/dev/null 2>&1; then
+    info "Docker kuruluyor (get.docker.com)..."
+    curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || fail "Docker kurulamadı."
+  fi
+  systemctl enable --now docker >/dev/null 2>&1 || true
+  docker compose version >/dev/null 2>&1 || fail "Docker Compose eklentisi bulunamadı."
+  ok "$(docker --version | sed 's/,.*//')"
 fi
-systemctl enable --now docker >/dev/null 2>&1 || true
-docker compose version >/dev/null 2>&1 || fail "Docker Compose eklentisi bulunamadı."
 
-# --- Kaynak kod ---
+# --- 3. Kaynak kod -------------------------------------------------------------
+step "Xudbin indiriliyor"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")
+REPO=${XUDBIN_REPO:-$DEFAULT_REPO}
+ensure_git() { command -v git >/dev/null || { command -v apt-get >/dev/null && { apt-get update -qq && apt-get install -y -qq git >/dev/null; } || dnf install -y -q git >/dev/null; }; }
 if [[ -n $SCRIPT_DIR && -f $SCRIPT_DIR/install.sh && -d $SCRIPT_DIR/apps/server && $SCRIPT_DIR != "$INSTALL_DIR" ]]; then
-  step "Kaynak kod kopyalanıyor: $SCRIPT_DIR -> $INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
-  tar -C "$SCRIPT_DIR" --exclude=node_modules --exclude=dist --exclude=data --exclude=.git -cf - . | tar -C "$INSTALL_DIR" -xf -
+  tar -C "$SCRIPT_DIR" --exclude=node_modules --exclude=dist --exclude=data --exclude=.git --exclude=.env -cf - . | tar -C "$INSTALL_DIR" -xf -
+  ok "Kaynak kod kopyalandı: $SCRIPT_DIR"
+elif [[ -d $INSTALL_DIR/.git ]]; then
+  ensure_git
+  git -C "$INSTALL_DIR" pull --ff-only -q && ok "Güncel sürüm çekildi ($(git -C "$INSTALL_DIR" rev-parse --short HEAD))"
 elif [[ ! -f $INSTALL_DIR/docker-compose.yml ]]; then
-  [[ -n ${XUDBIN_REPO:-} ]] || fail "Kaynak kod bulunamadı. XUDBIN_REPO=<git adresi> ile çalıştır."
-  command -v git >/dev/null || { command -v apt-get >/dev/null && { apt-get update -qq && apt-get install -y -qq git; } || dnf install -y -q git; }
-  step "Kaynak kod indiriliyor: $XUDBIN_REPO"
-  git clone --depth 1 "$XUDBIN_REPO" "$INSTALL_DIR"
+  ensure_git
+  git clone -q --depth 1 "$REPO" "$INSTALL_DIR" || fail "Repo indirilemedi: $REPO"
+  ok "İndirildi: $REPO"
+else
+  ok "Mevcut kurulum kullanılıyor"
 fi
 cd "$INSTALL_DIR"
+install -m 0755 "$INSTALL_DIR/scripts/xudbin" /usr/local/bin/xudbin
+ok "xudbin komutu kuruldu (xudbin link, xudbin status, xudbin update...)"
 
-# --- Domain: yoksa sslip.io ile otomatik üret ---
-# Komut satırında verilen değerler, önceki kurulumdan kalan .env'yi ezer.
-CLI_DOMAIN=${XUDBIN_DOMAIN:-}; CLI_EMAIL=${ACME_EMAIL:-}; CLI_HTTPS=${XUDBIN_HTTPS:-}
+# --- Ayarlar (.env) ---
+CLI_DOMAIN=${XUDBIN_DOMAIN:-}; CLI_EMAIL=${ACME_EMAIL:-}; CLI_HTTPS=${XUDBIN_HTTPS:-}; CLI_IMAGE=${XUDBIN_IMAGE:-}
 if [[ -f .env ]]; then
   # shellcheck disable=SC1091
   source .env
 fi
-XUDBIN_DOMAIN=${CLI_DOMAIN:-${XUDBIN_DOMAIN:-}}; ACME_EMAIL=${CLI_EMAIL:-${ACME_EMAIL:-}}; XUDBIN_HTTPS=${CLI_HTTPS:-${XUDBIN_HTTPS:-1}}
+XUDBIN_DOMAIN=${CLI_DOMAIN:-${XUDBIN_DOMAIN:-}}; ACME_EMAIL=${CLI_EMAIL:-${ACME_EMAIL:-}}
+XUDBIN_HTTPS=${CLI_HTTPS:-${XUDBIN_HTTPS:-1}}; XUDBIN_IMAGE=${CLI_IMAGE:-${XUDBIN_IMAGE:-$DEFAULT_IMAGE}}
 if [[ $XUDBIN_HTTPS == 0 ]]; then SCHEME=http; SECURE_COOKIES=false; else SCHEME=https; SECURE_COOKIES=true; fi
+PUBLIC_IP=${XUDBIN_PUBLIC_IP:-}
 if [[ -z ${XUDBIN_DOMAIN:-} ]]; then
   if [[ $XUDBIN_HTTPS == 0 ]]; then
     PUBLIC_IP=$(hostname -I | awk '{print $1}')
   else
-    step "Sunucunun dış IP adresi bulunuyor..."
     PUBLIC_IP=$(curl -4 -fsS --max-time 5 https://api.ipify.org || curl -4 -fsS --max-time 5 https://ifconfig.me || true)
   fi
   [[ $PUBLIC_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "IP adresi bulunamadı. XUDBIN_DOMAIN=panel.ornek.com ile tekrar dene."
   XUDBIN_DOMAIN="xudbin.${PUBLIC_IP//./-}.sslip.io"
 fi
 
+# --- 4. Güvenlik duvarı ---------------------------------------------------------
+# Debian/Ubuntu'da UFW, AlmaLinux/Rocky/RHEL'de firewalld kullanılır; fail2ban ikisinde de var.
+if [[ $MODE == install ]]; then
+  step "Sunucu güvenliği"
+  if [[ ${XUDBIN_HARDEN:-1} == 1 ]]; then
+    SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}' || true)
+    SSH_PORT=${SSH_PORT:-22}
+    if command -v apt-get >/dev/null; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw fail2ban >/dev/null
+      for p in "$SSH_PORT/tcp" 80/tcp 443/tcp 443/udp; do ufw allow "$p" >/dev/null; done
+      ufw --force enable >/dev/null
+      F2B_BACKEND=auto
+    elif command -v dnf >/dev/null; then
+      dnf install -y -q epel-release >/dev/null && dnf install -y -q firewalld fail2ban >/dev/null
+      systemctl enable --now firewalld >/dev/null 2>&1
+      for p in "$SSH_PORT/tcp" 80/tcp 443/tcp 443/udp; do firewall-cmd -q --permanent --add-port="$p"; done
+      firewall-cmd -q --reload
+      F2B_BACKEND=systemd
+    fi
+    if [[ -d /etc/fail2ban ]]; then
+      printf '[sshd]\nenabled = true\nport = %s\nbackend = %s\nmaxretry = 5\nfindtime = 10m\nbantime = 1h\n' "$SSH_PORT" "${F2B_BACKEND:-auto}" > /etc/fail2ban/jail.d/xudbin.local
+      systemctl enable --now fail2ban >/dev/null 2>&1 || true
+      systemctl restart fail2ban || true
+    fi
+    ok "Güvenlik duvarı açık: yalnız $SSH_PORT (SSH), 80, 443"
+    ok "fail2ban: 10 dakikada 5 hatalı SSH girişi 1 saat ban"
+  else
+    info "Atlandı (XUDBIN_HARDEN=0)"
+  fi
+fi
+
+# --- 5. Panel ------------------------------------------------------------------
+step "Panel başlatılıyor"
+if docker pull -q "$XUDBIN_IMAGE" >/dev/null 2>&1; then
+  ok "Hazır imaj indirildi: $XUDBIN_IMAGE"
+  BUILD_FLAG=--no-build
+else
+  XUDBIN_IMAGE=xudbin:local
+  info "Hazır imaj bulunamadı, kaynaktan derleniyor (birkaç dakika)..."
+  BUILD_FLAG=--build
+fi
 cat > .env <<ENV
 XUDBIN_DOMAIN=${XUDBIN_DOMAIN}
 ACME_EMAIL=${ACME_EMAIL:-}
 XUDBIN_HTTPS=${XUDBIN_HTTPS}
 XUDBIN_PUBLIC_IP=${PUBLIC_IP:-}
+XUDBIN_IMAGE=${XUDBIN_IMAGE}
 SECURE_COOKIES=${SECURE_COOKIES}
 HOST_HOSTNAME=$(hostname)
 ENV
 chmod 600 .env
+docker compose up -d $BUILD_FLAG >/tmp/xudbin-compose.log 2>&1 || { tail -20 /tmp/xudbin-compose.log; fail "Panel başlatılamadı."; }
+ok "Panel konteyneri çalışıyor"
 
-# --- Sunucu güvenliği: güvenlik duvarı + SSH kaba kuvvet koruması ---
-# Debian/Ubuntu'da UFW, AlmaLinux/Rocky/RHEL'de firewalld kullanılır; fail2ban ikisinde de var.
-if [[ ${XUDBIN_HARDEN:-1} == 1 ]]; then
-  SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}' || true)
-  SSH_PORT=${SSH_PORT:-22}
-  if command -v apt-get >/dev/null; then
-    step "Güvenlik duvarı (UFW) ve fail2ban kuruluyor..."
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw fail2ban >/dev/null
-    ufw allow "$SSH_PORT"/tcp >/dev/null
-    ufw allow 80/tcp >/dev/null
-    ufw allow 443/tcp >/dev/null
-    ufw allow 443/udp >/dev/null
-    ufw --force enable >/dev/null
-    F2B_BACKEND=auto
-  elif command -v dnf >/dev/null; then
-    step "Güvenlik duvarı (firewalld) ve fail2ban kuruluyor..."
-    dnf install -y -q epel-release >/dev/null
-    dnf install -y -q firewalld fail2ban >/dev/null
-    systemctl enable --now firewalld >/dev/null 2>&1
-    firewall-cmd -q --permanent --add-port="$SSH_PORT"/tcp
-    firewall-cmd -q --permanent --add-port=80/tcp
-    firewall-cmd -q --permanent --add-port=443/tcp
-    firewall-cmd -q --permanent --add-port=443/udp
-    firewall-cmd -q --reload
-    F2B_BACKEND=systemd
-  fi
-  if [[ -d /etc/fail2ban ]]; then
-    printf '[sshd]\nenabled = true\nport = %s\nbackend = %s\nmaxretry = 5\nfindtime = 10m\nbantime = 1h\n' "$SSH_PORT" "$F2B_BACKEND" > /etc/fail2ban/jail.d/xudbin.local
-    systemctl enable --now fail2ban >/dev/null 2>&1 || true
-    systemctl restart fail2ban || true
-    echo "   Açık portlar: $SSH_PORT (SSH), 80, 443"
-  fi
-fi
-
-# --- Başlat ---
-step "Xudbin derleniyor ve başlatılıyor (ilk seferde birkaç dakika sürebilir)..."
-docker compose up -d --build
-
+# --- 6. Caddy + sertifika --------------------------------------------------------
+step "Alan adı ve ${SCHEME^^}"
 if [[ $SCHEME == https ]]; then
-  step "Panel, Caddy'yi WAF modülleriyle derliyor ve HTTPS sertifikası alıyor (3-6 dakika)..."
+  info "Caddy WAF ve hız sınırı modülleriyle hazırlanıyor, Let's Encrypt sertifikası alınıyor..."
 else
-  step "Panel, Caddy'yi WAF modülleriyle derliyor (3-6 dakika)..."
+  info "Caddy WAF ve hız sınırı modülleriyle hazırlanıyor..."
 fi
-for _ in $(seq 1 120); do
-  if curl -fsS --max-time 5 "${SCHEME}://${XUDBIN_DOMAIN}/api/auth/status" >/dev/null 2>&1; then
-    READY=1; break
-  fi
+READY=0
+for i in $(seq 1 180); do
+  if curl -fsS --max-time 5 "${SCHEME}://${XUDBIN_DOMAIN}/api/auth/status" >/dev/null 2>&1; then READY=1; break; fi
+  (( i % 12 == 0 )) && info "Bekleniyor... ($((i * 5 / 60)) dk)"
   sleep 5
 done
+if [[ $READY == 1 ]]; then
+  ok "${SCHEME}://${XUDBIN_DOMAIN} yanıt veriyor"
+else
+  echo "   ${Y}!${X} Adres henüz doğrulanamadı. 80/443 portlarının dışarıya açık olduğundan emin ol."
+  info "Loglar: xudbin logs   |   docker logs xudbin-caddy"
+fi
 
-SETUP_TOKEN=$(docker compose exec -T xudbin cat /data/setup-token 2>/dev/null || true)
-echo
-if [[ ${READY:-0} == 1 ]]; then
-  echo "${c_green}Xudbin hazır!${c_reset}"
-else
-  echo "Xudbin başlatıldı ama HTTPS henüz doğrulanamadı. 80/443 portlarının dışarıya açık olduğundan emin ol."
-  echo "${c_dim}Loglar: docker logs xudbin  |  docker logs xudbin-caddy${c_reset}"
-fi
-echo
-if [[ -n $SETUP_TOKEN ]]; then
-  echo "  Kurulum linki:  ${SCHEME}://${XUDBIN_DOMAIN}/?setup=${SETUP_TOKEN}"
-  echo "  ${c_dim}Bu linkle yönetici hesabını oluştur. Linki kimseyle paylaşma.${c_reset}"
-else
-  echo "  Panel adresi:   ${SCHEME}://${XUDBIN_DOMAIN}"
-fi
+# --- 7. Bitti -----------------------------------------------------------------
+step "$([[ $MODE == update ]] && echo "Güncellendi" || echo "Xudbin hazır")"
+docker exec xudbin node dist/cli.js link || echo "   Panel: ${SCHEME}://${XUDBIN_DOMAIN}"
+echo "   ${D}Komutlar: xudbin link | xudbin status | xudbin user list | xudbin update | xudbin logs${X}"
 echo

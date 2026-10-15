@@ -11,7 +11,7 @@ RUN npm run build
 # ---- Çalışma zamanı ----
 FROM node:24-alpine
 # git: repoları klonlamak, docker-cli + compose: Compose uygulamaları, openssh-client: uzak sunucularda compose
-RUN apk add --no-cache git docker-cli docker-cli-compose openssh-client tini
+RUN apk add --no-cache git docker-cli docker-cli-compose openssh-client tini unzip
 ENV NODE_ENV=production \
     DATA_DIR=/data \
     WEB_DIST=/app/web \
