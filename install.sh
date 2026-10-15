@@ -28,6 +28,17 @@ for port in 80 443; do
   fi
 done
 
+# --- Swap: düşük RAM'li sunucularda derlemeler (Caddy, Node) bellek yetersizliğinden çökmesin ---
+MEM_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
+if [[ $MEM_MB -lt 3000 ]] && ! swapon --show --noheadings | grep -q . && [[ ! -e /swapfile ]]; then
+  step "RAM ${MEM_MB} MB; 2 GB swap oluşturuluyor..."
+  fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 # --- Docker ---
 if ! command -v docker >/dev/null 2>&1; then
   step "Docker kuruluyor..."
@@ -74,6 +85,7 @@ cat > .env <<ENV
 XUDBIN_DOMAIN=${XUDBIN_DOMAIN}
 ACME_EMAIL=${ACME_EMAIL:-}
 XUDBIN_HTTPS=${XUDBIN_HTTPS}
+XUDBIN_PUBLIC_IP=${PUBLIC_IP:-}
 SECURE_COOKIES=${SECURE_COOKIES}
 HOST_HOSTNAME=$(hostname)
 ENV
@@ -82,7 +94,7 @@ chmod 600 .env
 # --- Sunucu güvenliği: güvenlik duvarı + SSH kaba kuvvet koruması ---
 if [[ ${XUDBIN_HARDEN:-1} == 1 ]] && command -v apt-get >/dev/null; then
   step "Güvenlik duvarı (UFW) ve fail2ban kuruluyor..."
-  SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')
+  SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}' || true)
   SSH_PORT=${SSH_PORT:-22}
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw fail2ban >/dev/null
   ufw allow "$SSH_PORT"/tcp >/dev/null

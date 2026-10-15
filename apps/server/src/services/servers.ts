@@ -29,7 +29,8 @@ export function ensureLocalServer() {
   ).run(
     process.env.HOST_HOSTNAME || os.hostname(),
     config.isProd && process.env.XUDBIN_HTTPS !== "0" ? "auto" : "off",
-    config.isProd ? null : "127.0.0.1",
+    // install.sh IP'yi bulduysa onu kullan (yerel ağ kurulumlarında dış IP'den farklıdır).
+    process.env.XUDBIN_PUBLIC_IP || (config.isProd ? null : "127.0.0.1"),
     Date.now(),
   );
 }
@@ -172,6 +173,19 @@ export function startServerSetup(serverId: number) {
           const check = await sshExec(target, "sudo -n true");
           if (check.code !== 0) throw new Error(`${server.username} kullanıcısı şifresiz sudo yetkisine sahip değil. root kullan veya NOPASSWD sudo ver.`);
         }
+
+        // Düşük RAM'li sunucularda (ör. 2 GB VPS) derlemeler bellek yetersizliğinden çökmesin.
+        const swap = await sshExec(
+          target,
+          `mem=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
+           if [ "$mem" -lt 3000 ] && [ -z "$(swapon --show --noheadings)" ] && [ ! -e /swapfile ]; then
+             (${sudo}fallocate -l 2G /swapfile || ${sudo}dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none) &&
+             ${sudo}chmod 600 /swapfile && ${sudo}mkswap /swapfile >/dev/null && ${sudo}swapon /swapfile &&
+             (grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' | ${sudo}tee -a /etc/fstab >/dev/null) &&
+             echo "RAM \${mem} MB; 2 GB swap oluşturuldu."
+           fi`,
+        );
+        if (swap.stdout.trim()) log(swap.stdout.trim());
 
         const hasDocker = (await sshExec(target, "command -v docker")).code === 0;
         if (!hasDocker) {
