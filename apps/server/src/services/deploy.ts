@@ -420,7 +420,8 @@ async function listeningPorts(docker: ReturnType<typeof dockerFor>, name: string
     const [addr, portHex] = (cols[1] ?? "").split(":");
     const port = parseInt(portHex ?? "", 16);
     if (!port || out.some((p) => p.port === port)) continue;
-    const localOnly = addr === "0100007F" || addr === "00000000000000000000000001000000";
+    // 127.0.0.0/8 (Docker'ın gömülü DNS'i 127.0.0.11'de rastgele bir portu dinler) ve ::1 dışarıdan erişilemez.
+    const localOnly = (addr?.length === 8 && addr.endsWith("7F")) || addr === "00000000000000000000000001000000";
     out.push({ port, localOnly });
   }
   return out;
