@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import { config } from "../config.js";
@@ -27,6 +28,14 @@ function readMemory() {
   if (process.platform === "linux") {
     const match = fs.readFileSync("/proc/meminfo", "utf8").match(/^MemAvailable:\s+(\d+) kB/m);
     if (match) available = Number(match[1]) * 1024;
+  } else if (process.platform === "darwin") {
+    // macOS'ta freemem önbelleği "dolu" sayar; geliştirme sırasında yanıltmasın diye vm_stat'tan hesapla.
+    try {
+      const out = execFileSync("vm_stat", { encoding: "utf8" });
+      const pageSize = Number(out.match(/page size of (\d+)/)?.[1] ?? 16384);
+      const pages = (name: string) => Number(out.match(new RegExp(`${name}:\\s+(\\d+)`))?.[1] ?? 0);
+      available = (pages("Pages free") + pages("Pages inactive") + pages("Pages speculative") + pages("Pages purgeable")) * pageSize;
+    } catch {}
   }
   return { total, used: total - available };
 }

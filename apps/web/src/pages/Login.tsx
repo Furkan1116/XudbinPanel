@@ -17,7 +17,7 @@ export function LoginPage() {
   };
 
   return (
-    <AuthShell title="Giriş yap" subtitle="Sunucunu yönetmek için hesabına giriş yap.">
+    <AuthShell title="Giriş yap" subtitle="Sunucunu yönetmek için hesabınla giriş yap.">
       <form onSubmit={submit} className="space-y-4">
         <Field label="E-posta">
           <input className="input" type="email" required autoFocus autoComplete="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />

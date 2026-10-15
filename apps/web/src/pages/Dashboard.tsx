@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Box, Cpu, HardDrive, MemoryStick, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { Sparkline } from "@/components/Sparkline";
+import { ResourceChart } from "@/components/ResourceChart";
 import { api, type Container, type SystemStats } from "@/lib/api";
 import { formatBytes, formatUptime, percent } from "@/lib/format";
 
@@ -17,52 +16,49 @@ export function DashboardPage() {
 
   const { system, docker } = data;
   const memPct = percent(system.memory.used, system.memory.total);
-  const diskPct = system.disk ? percent(system.disk.used, system.disk.total) : 0;
+  const diskPct = system.disk ? percent(system.disk.used, system.disk.total) : null;
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="mb-1 flex items-center gap-2 text-xs text-muted">
-            <span className="size-1.5 rounded-full bg-accent shadow-[0_0_8px] shadow-accent" />
-            Çevrimiçi · Çalışma süresi {formatUptime(system.uptime)}
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">{system.hostname}</h1>
-        </div>
-        <div className="font-mono text-xs text-faint">
-          {system.platform} · {system.arch}
-        </div>
+    <div className="mx-auto max-w-5xl">
+      <header className="mb-7">
+        <h1 className="text-[28px] leading-tight font-semibold tracking-[-0.02em]">{system.hostname}</h1>
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[14px] text-muted">
+          <span className="inline-flex items-center gap-1.5 text-ok">
+            <span className="size-2 rounded-full bg-ok" />
+            Çalışıyor
+          </span>
+          <span>{formatUptime(system.uptime)} önce açıldı, {system.platform} ({system.arch})</span>
+        </p>
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={Cpu} label="İşlemci" value={`${system.cpu.usage.toFixed(0)}%`} pct={system.cpu.usage}
-          detail={`${system.cpu.cores} çekirdek · yük ${system.cpu.load[0]?.toFixed(2)}`}>
-          <Sparkline values={system.history.map((h) => h.cpu)} className="mt-4 h-10 w-full" />
-        </StatCard>
-        <StatCard icon={MemoryStick} label="Bellek" value={`${memPct.toFixed(0)}%`} pct={memPct}
-          detail={`${formatBytes(system.memory.used)} / ${formatBytes(system.memory.total)}`}>
-          <Sparkline values={system.history.map((h) => h.mem)} className="mt-4 h-10 w-full" />
-        </StatCard>
-        <StatCard icon={HardDrive} label="Disk" value={system.disk ? `${diskPct.toFixed(0)}%` : "—"} pct={diskPct}
-          detail={system.disk ? `${formatBytes(system.disk.used)} / ${formatBytes(system.disk.total)}` : "Okunamadı"}>
-          <Meter pct={diskPct} />
-        </StatCard>
-        <StatCard icon={Box} label="Docker"
-          value={docker.available ? `${docker.containers.running}/${docker.containers.total}` : "Yok"}
-          detail={docker.available ? `v${docker.version} · ${docker.images} imaj` : "Bağlanılamadı"}>
-          <Meter pct={docker.available ? percent(docker.containers.running, docker.containers.total) : 0} />
-        </StatCard>
-      </div>
+      <section className="panel" aria-label="Kaynak kullanımı">
+        <dl className="grid grid-cols-2 border-b border-line lg:grid-cols-4 [&>div]:border-line max-lg:[&>div:nth-child(-n+2)]:border-b [&>div:not(:last-child)]:lg:border-r max-lg:[&>div:nth-child(odd)]:border-r">
+          <Metric label="İşlemci" value={`${system.cpu.usage.toFixed(0)}%`} pct={system.cpu.usage}
+            detail={`${system.cpu.cores} çekirdek, yük ${system.cpu.load[0]?.toFixed(2)}`} />
+          <Metric label="Bellek" value={`${memPct.toFixed(0)}%`} pct={memPct}
+            detail={`${formatBytes(system.memory.used)} / ${formatBytes(system.memory.total)}`} bar />
+          <Metric label="Disk" value={diskPct === null ? "–" : `${diskPct.toFixed(0)}%`} pct={diskPct ?? 0}
+            detail={system.disk ? `${formatBytes(system.disk.total - system.disk.used)} boş` : "Okunamadı"} bar />
+          <Metric label="Konteyner" value={docker.available ? `${docker.containers.running}` : "–"}
+            detail={docker.available ? `${docker.containers.total} konteynerden çalışan` : "Docker bulunamadı"} />
+        </dl>
+        <div className="px-5 pt-4 pb-5">
+          <ResourceChart history={system.history} />
+        </div>
+      </section>
 
-      <section className="mt-10">
-        <h2 className="mb-4 text-sm font-medium text-muted">Konteynerler</h2>
+      <section className="mt-9" aria-labelledby="containers-title">
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 id="containers-title" className="text-[17px] font-semibold tracking-[-0.01em]">Konteynerler</h2>
+          {docker.available && <span className="text-[13px] text-faint">Docker {docker.version}</span>}
+        </div>
         {docker.available ? (
           <ContainerList />
         ) : (
-          <Notice tone="warn" title="Docker'a ulaşılamıyor">
-            Uygulama çalıştırabilmek için sunucuda Docker kurulu olmalı. Kurulum scripti bunu otomatik yapar; panel
-            konteyner içinde çalışıyorsa <code className="font-mono text-fg">/var/run/docker.sock</code> bağlı olmalı.
-            <div className="mt-2 font-mono text-xs text-faint">{docker.error}</div>
+          <Notice tone="warn" title="Docker'a bağlanılamadı">
+            Uygulama çalıştırmak için sunucuda Docker kurulu olmalı. install.sh Docker'ı kendisi kurar. Panel
+            konteyner içinde çalışıyorsa <code className="font-mono text-[13px] text-fg">/var/run/docker.sock</code> bağlı
+            olmalı.
           </Notice>
         )}
       </section>
@@ -70,28 +66,21 @@ export function DashboardPage() {
   );
 }
 
-function StatCard(props: { icon: LucideIcon; label: string; value: string; detail: string; pct?: number; children?: ReactNode }) {
-  const tone = (props.pct ?? 0) >= 90 ? "text-danger" : (props.pct ?? 0) >= 75 ? "text-warn" : "text-fg";
+function Metric(props: { label: string; value: string; detail: string; pct?: number; bar?: boolean }) {
+  const pct = props.pct ?? 0;
+  const level = pct >= 90 ? "critical" : pct >= 75 ? "high" : "normal";
+  const valueColor = level === "critical" ? "text-accent" : level === "high" ? "text-warn" : "text-fg";
+  const barColor = level === "critical" ? "bg-accent" : level === "high" ? "bg-warn" : "bg-fg/70";
   return (
-    <div className="card p-5">
-      <div className="flex items-center gap-2 text-sm text-muted">
-        <props.icon className="size-4" />
-        {props.label}
-      </div>
-      <div className={`mt-3 font-mono text-3xl font-medium tracking-tight tabular-nums ${tone}`}>{props.value}</div>
-      <div className="mt-1 truncate text-xs text-faint">{props.detail}</div>
-      {props.children}
-    </div>
-  );
-}
-
-function Meter({ pct }: { pct: number }) {
-  const color = pct >= 90 ? "bg-danger" : pct >= 75 ? "bg-warn" : "bg-accent";
-  return (
-    <div className="mt-4 flex h-10 items-end">
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
-        <div className={`h-full rounded-full ${color} transition-[width] duration-700`} style={{ width: `${Math.min(pct, 100)}%` }} />
-      </div>
+    <div className="px-5 py-4">
+      <dt className="text-[13px] text-muted">{props.label}</dt>
+      <dd className={`mt-1 text-[28px] leading-none font-medium tracking-[-0.02em] tabular-nums ${valueColor}`}>{props.value}</dd>
+      <dd className="mt-2 truncate text-[13px] text-faint">{props.detail}</dd>
+      {props.bar && (
+        <dd className="mt-3 h-1 overflow-hidden rounded-full bg-surface-2">
+          <div className={`h-full rounded-full ${barColor} transition-[width] duration-700`} style={{ width: `${Math.min(pct, 100)}%` }} />
+        </dd>
+      )}
     </div>
   );
 }
@@ -104,44 +93,68 @@ function ContainerList() {
   });
 
   if (error) return <Notice tone="danger" title="Konteynerler alınamadı">{error.message}</Notice>;
-  if (!data) return <div className="card h-32 animate-pulse" />;
+  if (!data) return <div className="panel h-28 animate-pulse" />;
   if (data.containers.length === 0)
-    return <div className="card px-5 py-10 text-center text-sm text-muted">Henüz çalışan bir konteyner yok.</div>;
+    return (
+      <div className="panel px-5 py-8 text-[14px] text-muted">
+        Bu sunucuda henüz konteyner yok. Uygulamalar bölümü hazır olunca ilk uygulamanı buradan yayınlayabileceksin.
+      </div>
+    );
 
   return (
-    <div className="card divide-y divide-line overflow-hidden">
-      {data.containers.map((c) => (
-        <div key={c.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3.5">
-          <span className={`size-2 shrink-0 rounded-full ${c.state === "running" ? "bg-accent" : c.state === "restarting" ? "bg-warn" : "bg-faint"}`} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium">{c.name}</div>
-            <div className="truncate font-mono text-xs text-faint">{c.image}</div>
-          </div>
-          {c.ports.length > 0 && <div className="font-mono text-xs text-muted">{c.ports.join(", ")}</div>}
-          <div className="w-full text-xs text-muted sm:w-40 sm:text-right">{c.status}</div>
-        </div>
-      ))}
+    <div className="panel overflow-hidden">
+      <table className="w-full text-left text-[14px]">
+        <thead className="border-b border-line text-[13px] text-muted">
+          <tr>
+            <th className="px-5 py-2.5 font-normal">Ad</th>
+            <th className="hidden px-5 py-2.5 font-normal md:table-cell">İmaj</th>
+            <th className="hidden px-5 py-2.5 font-normal sm:table-cell">Port</th>
+            <th className="px-5 py-2.5 text-right font-normal">Durum</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-line">
+          {data.containers.map((c) => (
+            <tr key={c.id}>
+              <td className="max-w-0 truncate px-5 py-3 font-medium">{c.name}</td>
+              <td className="hidden max-w-0 truncate px-5 py-3 font-mono text-[13px] text-muted md:table-cell">{c.image}</td>
+              <td className="hidden px-5 py-3 font-mono text-[13px] text-muted sm:table-cell">{c.ports.join(", ") || "–"}</td>
+              <td className="px-5 py-3 text-right whitespace-nowrap">
+                <span className={`inline-flex items-center gap-1.5 ${c.state === "running" ? "text-ok" : c.state === "restarting" ? "text-warn" : "text-faint"}`}>
+                  <span className="size-1.5 rounded-full bg-current" />
+                  {STATE_LABELS[c.state] ?? c.state}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
+const STATE_LABELS: Record<string, string> = {
+  running: "Çalışıyor",
+  exited: "Durdu",
+  restarting: "Yeniden başlıyor",
+  paused: "Duraklatıldı",
+  created: "Oluşturuldu",
+  dead: "Çöktü",
+};
+
 function Notice({ tone, title, children }: { tone: "warn" | "danger"; title: string; children: ReactNode }) {
-  const styles = tone === "warn" ? "border-warn/25 bg-warn/5" : "border-danger/25 bg-danger/5";
   return (
-    <div className={`rounded-xl border px-5 py-4 ${styles}`}>
-      <div className={`text-sm font-medium ${tone === "warn" ? "text-warn" : "text-danger"}`}>{title}</div>
-      <div className="mt-1.5 text-sm leading-relaxed text-muted">{children}</div>
+    <div className={`panel border-l-[3px] px-5 py-4 ${tone === "warn" ? "border-l-warn" : "border-l-accent"}`}>
+      <div className="text-[15px] font-medium">{title}</div>
+      <div className="mt-1 text-[14px] leading-relaxed text-muted">{children}</div>
     </div>
   );
 }
 
 function DashboardSkeleton() {
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="mb-8 h-12 w-64 animate-pulse rounded-lg bg-surface" />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => <div key={i} className="card h-44 animate-pulse" />)}
-      </div>
+    <div className="mx-auto max-w-5xl animate-pulse">
+      <div className="mb-7 h-9 w-56 rounded-md bg-surface-2" />
+      <div className="panel h-80" />
     </div>
   );
 }

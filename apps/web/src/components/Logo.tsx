@@ -1,14 +1,24 @@
 export const APP_NAME = "Xudbin";
 
+/** Dört konteyner karesi; aralarındaki boşluk X harfini çizer. */
+export function LogoMark({ className = "size-7" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} aria-hidden>
+      <g transform="rotate(45 16 16)" className="fill-accent">
+        <rect x="5.5" y="5.5" width="9.5" height="9.5" rx="2" />
+        <rect x="17" y="5.5" width="9.5" height="9.5" rx="2" />
+        <rect x="5.5" y="17" width="9.5" height="9.5" rx="2" />
+        <rect x="17" y="17" width="9.5" height="9.5" rx="2" />
+      </g>
+    </svg>
+  );
+}
+
 export function Logo({ className = "" }: { className?: string }) {
   return (
-    <div className={`flex items-center gap-2.5 ${className}`}>
-      <svg viewBox="0 0 32 32" className="size-7" aria-hidden>
-        <rect width="32" height="32" rx="8" className="fill-accent-dim" />
-        <path d="M16 6l9 3.5v6.2c0 5.4-3.8 9.4-9 10.8-5.2-1.4-9-5.4-9-10.8V9.5L16 6z" fill="none" className="stroke-accent" strokeWidth="2.2" strokeLinejoin="round" />
-        <path d="M12 16l3 3 5.5-6" fill="none" className="stroke-accent" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <span className="text-[15px] font-semibold tracking-tight">{APP_NAME}</span>
+    <div className={`flex items-center gap-2 ${className}`}>
+      <LogoMark />
+      <span className="text-[17px] font-semibold tracking-[-0.01em]">{APP_NAME}</span>
     </div>
   );
 }

@@ -27,8 +27,8 @@ export function SetupPage() {
 
   return (
     <AuthShell
-      title="Paneline hoş geldin"
-      subtitle="Önce yönetici hesabını oluştur. Bu hesap sunucunun tüm kontrolüne sahip olacak, güçlü bir şifre seç."
+      title="Yönetici hesabını oluştur"
+      subtitle="Bu hesap sunucunun tamamını yönetir. Başkasının tahmin edemeyeceği bir şifre seç."
     >
       <form onSubmit={submit} className="space-y-4">
         <Field label="Adın">
@@ -40,7 +40,7 @@ export function SetupPage() {
         <Field label="Şifre" hint="En az 10 karakter.">
           <input className="input" type="password" required minLength={10} autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
         </Field>
-        <Field label="Kurulum anahtarı" hint="Kurulum çıktısında veya sunucu loglarında yazar.">
+        <Field label="Kurulum anahtarı" hint={<>Kurulum bitince ekrana yazılır. Kaçırdıysan sunucuda <code className="font-mono text-muted">docker compose exec xudbin cat /data/setup-token</code> ile görebilirsin.</>}>
           <input className="input font-mono" required value={form.setupToken} onChange={(e) => setForm({ ...form, setupToken: e.target.value.trim() })} />
         </Field>
         <FormError message={setup.error?.message} />
