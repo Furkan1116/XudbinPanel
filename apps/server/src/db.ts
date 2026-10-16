@@ -6,7 +6,7 @@ import { config } from "./config.js";
 fs.mkdirSync(config.dataDir, { recursive: true });
 
 export const db = new DatabaseSync(path.join(config.dataDir, "xudbin.db"));
-db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
 
 /**
  * Sıralı migration listesi. Yeni bir şema değişikliği gerektiğinde sona ekle,
@@ -445,14 +445,21 @@ const migrations: string[] = [
 ];
 
 function migrate() {
-  const { user_version: current } = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  for (let v = current; v < migrations.length; v++) {
+  const version = () => (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+  for (let v = version(); v < migrations.length; v++) {
     const sql = migrations[v]!;
     // Tablo yeniden kuran migration'lar için (PRAGMA işlem içinde değiştirilemez).
     const fkOff = sql.trimStart().startsWith("-- foreign_keys_off");
     if (fkOff) db.exec("PRAGMA foreign_keys = OFF");
-    db.exec("BEGIN");
+    // Yazma kilidi alınıp sürüm yeniden okunur: aynı anda açılan başka bir süreç (ör. panel ve xudbin komutu)
+    // bu migration'ı az önce uyguladıysa atlanır.
+    db.exec("BEGIN IMMEDIATE");
     try {
+      if (version() > v) {
+        db.exec("COMMIT");
+        v = version() - 1;
+        continue;
+      }
       db.exec(sql);
       if (fkOff) {
         const broken = db.prepare("PRAGMA foreign_key_check").all();
