@@ -202,6 +202,38 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
     return c.json({ ok: true });
   })
 
+  // --- Tek oturum açma (OIDC) ---------------------------------------------------------------
+  .get("/sso", (c) => {
+    const o = getSettings().oidc;
+    return c.json({ sso: o ? { ...o, clientSecret: "", hasSecret: Boolean(o.clientSecret) } : null, redirectUri: `${new URL(c.req.url).protocol}//${c.req.header("x-forwarded-host") ?? c.req.header("host")}/api/auth/oidc/callback` });
+  })
+  .put("/sso", async (c) => {
+    const input = await body(
+      c,
+      z
+        .object({
+          issuer: z.string().trim().url("Geçerli bir adres gir (https://...)").max(300),
+          clientId: z.string().trim().min(1, "Client ID gerekli").max(300),
+          clientSecret: z.string().max(500).default(""),
+          label: z.string().trim().max(60).default(""),
+          autoCreate: z.boolean().default(false),
+          allowedDomains: z.string().trim().max(500).default(""),
+        }),
+    );
+    const current = getSettings().oidc;
+    const secret = input.clientSecret ? encrypt(input.clientSecret) : (current?.clientSecret ?? "");
+    if (!secret) throw new HttpError(400, "Client secret gerekli");
+    // Sağlayıcıya ulaşılabildiğini kaydetmeden önce dene.
+    const res = await fetch(`${input.issuer.replace(/\/+$/, "")}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(10_000) }).catch(() => null);
+    if (!res?.ok) throw new HttpError(400, "Sağlayıcıya ulaşılamadı: issuer adresinin sonuna /.well-known/openid-configuration eklenince yapılandırma dönmeli");
+    updateSettings({ oidc: { ...input, clientSecret: secret } });
+    return c.json({ ok: true });
+  })
+  .delete("/sso", (c) => {
+    updateSettings({ oidc: null });
+    return c.json({ ok: true });
+  })
+
   // --- API anahtarları -------------------------------------------------------------------------
   .get("/account/tokens", (c) => {
     const tokens = db

@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router";
 import { ApiTokens } from "@/components/ApiTokens";
 import { AuditLog } from "@/components/AuditLog";
 import { BackupSettings } from "@/components/BackupSettings";
+import { SsoSettings } from "@/components/SsoSettings";
 import { Button, ConfirmDialog, CopyField, Dialog, Field, Notice, PageHeader, PageLoading, Section, Tabs, Toggle, useAction } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuthStatus } from "@/lib/auth";
@@ -93,6 +94,7 @@ function PanelSettings() {
           <Button type="submit" variant="primary" loading={save.isPending}>{t("Kaydet")}</Button>
         </div>
       </form>
+      <SsoSettings />
     </div>
   );
 }

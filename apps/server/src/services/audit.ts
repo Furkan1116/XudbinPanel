@@ -40,7 +40,7 @@ const LABELS: [RegExp, string, string?][] = [
   [/^POST \/api\/settings\/account\/totp\/enable$/, "İki adımlı doğrulamayı açtı"],
   [/^POST \/api\/settings\/account\/totp\/disable$/, "İki adımlı doğrulamayı kapattı"],
   [/^(POST|DELETE) \/api\/settings\/account\/tokens/, "API anahtarlarını değiştirdi"],
-  [/^PUT \/api\/settings\/(panel|backup)$/, "Panel ayarlarını değiştirdi"],
+  [/^PUT \/api\/settings\/(panel|backup|sso)$/, "Panel ayarlarını değiştirdi"],
   [/^(POST|DELETE) \/api\/settings\/notifications/, "Bildirim kanallarını değiştirdi"],
   [/^POST \/api\/security\/score\/fix$/, "Güvenlik düzeltmesi uyguladı"],
   [/^(POST|DELETE|PUT) \/api\/security/, "Güvenlik ayarlarını değiştirdi"],

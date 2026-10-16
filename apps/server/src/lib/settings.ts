@@ -23,6 +23,8 @@ export type Settings = {
   analyticsSalt: { day: string; value: string } | null;
   geoDbMonth: string | null;
   uptimeEnabled: boolean;
+  /** OpenID Connect ile giriş; clientSecret şifreli. */
+  oidc: { issuer: string; clientId: string; clientSecret: string; label: string; autoCreate: boolean; allowedDomains: string } | null;
 };
 
 const DEFAULTS: Settings = {
@@ -43,6 +45,7 @@ const DEFAULTS: Settings = {
   analyticsSalt: null,
   geoDbMonth: null,
   uptimeEnabled: true,
+  oidc: null,
 };
 
 export function getSettings(): Settings {

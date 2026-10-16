@@ -29,7 +29,7 @@ export const api = {
 };
 
 export type User = { id: number; email: string; name: string; role: "admin" | "member"; mustChangePassword: boolean };
-export type AuthStatus = { setupRequired: boolean; user: User | null };
+export type AuthStatus = { setupRequired: boolean; user: User | null; sso: { label: string } | null };
 
 export type ServerStats = {
   cpu: { usage: number; cores: number; load: number[]; model: string };

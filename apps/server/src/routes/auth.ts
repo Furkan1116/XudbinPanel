@@ -9,6 +9,14 @@ import { totpCounter } from "../auth/totp.js";
 import { decrypt } from "../lib/crypto.js";
 import { recordPanelEvent } from "../services/security.js";
 import { recordAudit } from "../services/audit.js";
+import { finishLogin, oidcConfig, startLogin } from "../auth/oidc.js";
+
+/** Panelin dışarıdan görünen adresi (Caddy arkasında X-Forwarded-* başlıklarından). */
+function publicOrigin(c: Context) {
+  const proto = (config.trustProxy && c.req.header("x-forwarded-proto")) || new URL(c.req.url).protocol.replace(":", "");
+  const host = (config.trustProxy && c.req.header("x-forwarded-host")) || c.req.header("host") || new URL(c.req.url).host;
+  return `${proto}://${host}`;
+}
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { clientIp } from "../lib/client-ip.js";
@@ -48,10 +56,44 @@ function startSession(c: Context, userId: number) {
 export const authRoutes = new Hono()
   .get("/status", (c) => {
     const token = getCookie(c, SESSION_COOKIE);
+    const sso = oidcConfig();
     return c.json({
       setupRequired: userCount() === 0,
       user: token ? validateSession(token) : null,
+      sso: sso ? { label: sso.label || "Tek oturum açma (SSO)" } : null,
     });
+  })
+
+  // --- Tek oturum açma (OpenID Connect) ----------------------------------------------------
+  .get("/oidc/start", async (c) => {
+    try {
+      return c.redirect(await startLogin(`${publicOrigin(c)}/api/auth/oidc/callback`));
+    } catch (err) {
+      return c.redirect(`/?sso_error=${encodeURIComponent((err as Error).message)}`);
+    }
+  })
+  .get("/oidc/callback", async (c) => {
+    const ip = clientIp(c);
+    try {
+      const err = c.req.query("error_description") ?? c.req.query("error");
+      if (err) throw new Error(`Sağlayıcı: ${err}`);
+      const { email, name, cfg } = await finishLogin(c.req.query("state") ?? "", c.req.query("code") ?? "");
+      let user = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as { id: number } | undefined;
+      if (!user) {
+        const domain = email.split("@")[1] ?? "";
+        const allowed = cfg.allowedDomains.split(/[,\s]+/).map((d) => d.trim().toLowerCase()).filter(Boolean);
+        if (!cfg.autoCreate || !allowed.includes(domain)) throw new Error(`${email} bu panelde kayıtlı değil. Bir yöneticinin seni eklemesi gerekiyor.`);
+        // SSO ile gelen yeni kullanıcı: üye, şifresi yok (şifreyle giriş yapamaz), proje ataması yönetici tarafından yapılır.
+        const id = db.prepare("INSERT INTO users (email, name, password_hash, role, created_at) VALUES (?, ?, '!sso', 'member', ?)").run(email, name.slice(0, 100), Date.now()).lastInsertRowid;
+        user = { id: Number(id) };
+      }
+      startSession(c, user.id);
+      recordAudit({ userId: user.id, email, action: "SSO ile giriş yaptı", method: "GET", path: "/api/auth/oidc/callback", status: 200, ip, via: "panel" });
+      return c.redirect("/");
+    } catch (err) {
+      recordAudit({ action: "Başarısız SSO girişi", method: "GET", path: "/api/auth/oidc/callback", status: 401, ip, via: "panel" });
+      return c.redirect(`/?sso_error=${encodeURIComponent((err as Error).message)}`);
+    }
   })
 
   // İlk kurulum: henüz hiç kullanıcı yoksa yönetici hesabını oluşturur.
