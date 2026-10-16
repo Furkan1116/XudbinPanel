@@ -27,6 +27,15 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Her deploy'dan sonra imaj Trivy ile bilinen güvenlik açıklarına karşı taranır
 - Tek tıkla önceki sürüme dönüş, canlı deploy ve uygulama logları
 - Git push webhook'u ile otomatik deploy (GitHub, GitLab, Gitea...), HMAC imza doğrulamalı
+- **GitHub App:** panelden tek tıkla oluşturulur; özel repolar token girmeden deploy edilir, repolar listeden seçilir, push ve PR olayları webhook kurmadan gelir
+- **Pull request önizlemeleri:** her PR ayrı bir adreste açılır, yeni commit'lerde güncellenir, PR kapanınca silinir; adres PR'a yorum olarak yazılır. Fork'tan gelen PR'lar deploy edilmez
+- **Hazır şablonlar:** WordPress, Ghost, n8n, Uptime Kuma, Vaultwarden, Gitea, Nextcloud, Metabase, Grafana, Directus, Matomo ve daha fazlası tek tıkla
+- Arka plan işçileri (portu olmayan servisler) ve web uygulamaları için birden çok kopya (replica); Caddy kopyalar arasında yük dağıtır, çöken kopyayı devre dışı bırakır
+- **Çok sunuculu yük dağıtımı:** uygulama ek sunucularda da çalışır; istekler tüm kopyalara dağıtılır, ulaşılamayan sunucu atlanır. Sunucular arası trafik TLS ile şifrelidir
+- **Ayrı derleme sunucusu:** ağır derlemeler başka bir sunucuda yapılır, hazır imaj aktarılır
+- **Zamanlanmış görevler (cron):** uygulamanın imajında komut çalıştırma, çıktı ve süre geçmişi
+- Kalıcı klasör (volume) yedekleri: zamanlanmış, S3'e de yüklenebilen, tek tıkla geri yükleme
+- Canlı loglarda anlık filtre; geçmiş loglarda (son 1 saat – 14 gün) tüm kopyalar ve Compose servislerinde arama
 - Şifreli ortam değişkenleri, kalıcı depolama klasörleri, CPU/bellek izleme
 
 **Veritabanları**
@@ -46,9 +55,17 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Panel: kurulum anahtarı, iki adımlı doğrulama (TOTP), giriş hız sınırı, CSRF koruması, oturum yönetimi
 - SSH anahtarları, git token'ları, ortam değişkenleri ve veritabanı şifreleri AES-256-GCM ile şifrelenir
 
-**Bildirimler:** Discord, Telegram, Slack, genel webhook. Olaylar: deploy sonucu, banlanan IP, başarısız yedek, erişilemeyen sunucu.
+**Trafik analitiği:** Google Analytics benzeri, çerezsiz ve ek kod gerektirmeyen site istatistikleri. Ziyaretçi, sayfa görüntüleme, hemen çıkma; en çok ziyaret edilen sayfalar, trafik kaynakları (yönlendiren siteler ve UTM kampanyaları), ülkeler, tarayıcılar, işletim sistemleri ve cihazlar. Veriler Caddy erişim loglarından, panelin kendi sunucusunda hesaplanır.
 
-**Kullanıcılar:** Yönetici ve üye rolleri. Üyeler proje, uygulama ve veritabanlarını yönetir; sunuculara, güvenliğe ve ayarlara erişemez. Yeni kullanıcı geçici şifreyle eklenir, ilk girişte kendi şifresini belirler.
+**Erişilebilirlik izleme:** Tüm siteler dakikada bir denenir; site çökünce ve düzelince bildirim gelir (kesinti süresiyle). Uygulama başına son 24 saat / 30 gün erişilebilirlik oranı ve kesinti geçmişi.
+
+**Bildirimler:** E-posta (SMTP), Discord, Telegram, Slack, genel webhook. Olaylar: site çöktü / düzeldi, deploy sonucu, imajda kritik güvenlik açığı, HTTPS sertifikası bitmek üzere, sunucuda disk veya bellek doluyor, başarısız zamanlanmış görev, banlanan IP, başarısız yedek, erişilemeyen sunucu.
+
+**Alan adları:** Sunucuya kendi wildcard alan adını ver (`*.apps.sirketim.com`), yeni uygulamalar onun altında adres alır. DNS kayıtları panelden denetlenir ("bu kayıt şu IP'yi göstermeli"). Portları açık olmayan sunucular için **Cloudflare Tunnel** desteği.
+
+**Kullanıcılar ve ekip:** Yönetici ve üye rolleri; üyeler projelere **geliştirici** veya **izleyici** olarak eklenir ve yalnız o projeleri görür. **Tek oturum açma (SSO):** Google Workspace, Microsoft Entra, Keycloak, Authentik, GitLab gibi OpenID Connect sağlayıcılarıyla giriş. **İşlem kaydı:** kim, ne zaman, neyi değiştirdi. **API anahtarları:** süreli, istenirse salt okunur; `xb` komut satırı aracı ve CI/CD için. Yeni kullanıcı geçici şifreyle eklenir, ilk girişte kendi şifresini belirler.
+
+**Panel:** Yeni sürüm bildirimi ve panelden tek tıkla güncelleme; saat dilimi ayarı.
 
 **Arayüz:** Türkçe ve İngilizce, açık ve koyu tema.
 
@@ -201,7 +218,9 @@ install.sh    Tek komutla sunucu kurulumu
 ```
 
 - Panel her sunucuya Docker API üzerinden bağlanır: kendi sunucusunda soketle, uzak sunucularda SSH tüneliyle (`docker system dial-stdio`).
-- Her sunucuda `xudbin` adlı bir Docker ağı ve `xudbin-caddy` konteyneri bulunur. Panel Caddy yapılandırmasını JSON olarak üretip konteynere yazar ve `caddy reload` ile uygular.
+- Her sunucuda bir `xudbin-caddy` konteyneri bulunur. Panel Caddy yapılandırmasını JSON olarak üretip konteynere yazar ve `caddy reload` ile uygular.
+- Her projenin kendi Docker ağı vardır (`xb-p<id>`); bir projedeki uygulama başka projenin uygulamalarına ve veritabanlarına, panelin kendisine de ulaşamaz. Caddy tüm proje ağlarına bağlıdır.
+- Çok sunuculu uygulamalarda ana sunucunun Caddy'si ek sunucuların Caddy'sine 443 üzerinden bağlanır; her sunucunun Caddy iç sertifika otoritesi (CA) panel tarafından okunur ve yalnız ona güvenilir. Ek sunucu, uygulamaya özel gizli başlığı taşımayan istekleri reddeder.
 - Caddy erişim logları 20 saniyede bir okunur; WAF (403), hız sınırı (429), banlı IP ve hatalı şifre (401) olayları saldırı ekranına düşer.
 - Git uygulamaları panelin sunucusunda klonlanır, derleme bağlamı hedef sunucunun Docker'ına gönderilip orada derlenir.
 
@@ -209,6 +228,8 @@ install.sh    Tek komutla sunucu kurulumu
 
 - Büyük hacimli (L3/L4) DDoS saldırıları sunucu seviyesinde durdurulamaz; bunun için hosting firmasının koruması veya Cloudflare gibi bir katman gerekir.
 - Compose uygulamalarında göreli dosya bağlamaları (`./data:/data`) desteklenmez; adlandırılmış volume kullan.
+- Çok sunuculu dağıtım durumsuz (stateless) uygulamalar içindir: kalıcı klasörlü uygulamalar ve Compose dağıtılamaz, ek sunuculardaki kopyalar ana sunucunun iç ağındaki veritabanlarına ulaşamaz (veritabanını dış erişime açıp adresini ona göre ver). Ziyaretçiler her zaman ana sunucuya gelir; ana sunucu çökerse site de erişilemez olur (DNS düzeyinde yedeklilik kapsam dışında).
+- GitHub App için panelin internetten https ile erişilebilir olması gerekir (GitHub webhook gönderebilsin diye).
 
 ## Lisans
 
