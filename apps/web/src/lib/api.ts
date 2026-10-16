@@ -126,6 +126,8 @@ export type App = {
   replicas: number;
   previewsEnabled: boolean;
   buildServerId: number | null;
+  extraServerIds: number[];
+  remoteReplicas: { serverId: number; container: string }[];
   parentAppId: number | null;
   previewPr: number | null;
   previews: { id: number; name: string; pr: number; branch: string; status: string; url: string | null }[];

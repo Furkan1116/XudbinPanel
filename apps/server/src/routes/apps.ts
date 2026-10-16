@@ -41,6 +41,7 @@ import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
 import { accessibleAppIds, accessibleProjectIds, canWriteProject } from "../services/access.js";
 import { appsForRepo, completeManifest, gitTokenFor, verifyGithubSignature } from "../services/github-app.js";
+import { extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas } from "../services/remote-replicas.js";
 
 const parseJson = (raw: string | null) => {
   try {
@@ -106,6 +107,8 @@ function publicApp(a: AppRow) {
     replicas: a.replicas,
     previewsEnabled: Boolean(a.previews_enabled),
     buildServerId: a.build_server_id,
+    extraServerIds: parseIds(a.extra_server_ids),
+    remoteReplicas: remoteReplicasOf(a).map((r) => ({ serverId: r.serverId, container: r.container })),
     parentAppId: a.parent_app_id,
     previewPr: a.preview_pr,
     previews: (db.prepare("SELECT id, name, preview_pr AS pr, git_branch AS branch, status FROM apps WHERE parent_app_id = ? ORDER BY preview_pr").all(a.id) as { id: number }[]).map((p) => ({
@@ -270,6 +273,7 @@ export const appRoutes = new Hono<AppEnv>()
         volumeBackupIntervalH: z.number().int().min(0).max(24 * 30).optional(),
         volumeBackupKeep: z.number().int().min(1).max(100).optional(),
         buildServerId: z.number().int().nullable().optional(),
+        extraServerIds: z.array(z.number().int()).max(5).optional(),
         healthPath: z.string().trim().max(200).regex(/^\/[\w\-./?=&%~]*$/, "Sağlık yolu / ile başlamalı, ör. /health").nullable().optional(),
         memoryLimit: z.number().int().min(32).max(1024 * 1024).nullable().optional(),
         volumes: z
@@ -288,6 +292,13 @@ export const appRoutes = new Hono<AppEnv>()
       composeFile: input.composeFile === undefined ? app.compose_file : input.composeFile,
     };
     validateSource(next);
+    if (input.extraServerIds?.length) {
+      const merged = { ...app, volumes: input.volumes ? JSON.stringify(input.volumes) : app.volumes };
+      for (const id of new Set(input.extraServerIds)) {
+        const problem = extraServerProblem(merged, getServer(id));
+        if (problem) throw new HttpError(422, problem);
+      }
+    }
 
     const map: Record<string, unknown> = {
       name: input.name,
@@ -316,6 +327,7 @@ export const appRoutes = new Hono<AppEnv>()
       volume_backup_interval_h: input.volumeBackupIntervalH,
       volume_backup_keep: input.volumeBackupKeep,
       build_server_id: input.buildServerId,
+      extra_server_ids: input.extraServerIds ? JSON.stringify([...new Set(input.extraServerIds)]) : undefined,
       health_path: input.healthPath,
       memory_limit: input.memoryLimit,
       volumes: input.volumes ? JSON.stringify(input.volumes) : undefined,
@@ -603,6 +615,15 @@ export const appRoutes = new Hono<AppEnv>()
           if (msg) throw new HttpError(500, msg);
         }
       }
+      // Ek sunuculardaki kopyalar: ulaşılamayan sunucu işlemi durdurmaz.
+      for (const r of remoteReplicasOf(app)) {
+        try {
+          const container = dockerFor(getServer(r.serverId)).getContainer(r.container);
+          if (action === "start") await container.start().catch(() => {});
+          if (action === "stop") await container.stop({ t: 10 }).catch(() => {});
+          if (action === "restart") await container.restart({ t: 10 });
+        } catch {}
+      }
     }
     db.prepare("UPDATE apps SET status = ? WHERE id = ?").run(action === "stop" ? "stopped" : "running", app.id);
     if (server.status === "ready") await applyCaddyConfig(server);
@@ -619,8 +640,18 @@ export const appRoutes = new Hono<AppEnv>()
     for (const ct of containers) await removeContainer(docker, ct.Id);
     const images = await docker.listImages({ filters: { reference: [`xudbin/${app.slug}`] } }).catch(() => []);
     for (const img of images) await docker.getImage(img.Id).remove({ force: true }).catch(() => {});
+    const remote = remoteReplicasOf(app);
+    await removeRemoteReplicas(remote);
     db.prepare("DELETE FROM apps WHERE id = ?").run(app.id);
     if (server.status === "ready") await applyCaddyConfig(server).catch(() => {});
+    for (const sid of new Set(remote.map((r) => r.serverId))) {
+      try {
+        const s = getServer(sid);
+        await applyCaddyConfig(s);
+        const imgs = await dockerFor(s).listImages({ filters: { reference: [`xudbin/${app.slug}`] } }).catch(() => []);
+        for (const img of imgs) await dockerFor(s).getImage(img.Id).remove({ force: true }).catch(() => {});
+      } catch {}
+    }
     return c.json({ ok: true });
   })
 

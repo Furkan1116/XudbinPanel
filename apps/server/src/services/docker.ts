@@ -16,6 +16,7 @@ export type ServerRow = {
   host_key: string | null;
   apps_domain: string | null;
   tunnel_token: string | null;
+  relay_ca: string | null;
   public_ip: string | null;
   https_mode: "auto" | "internal" | "off";
   acme_email: string | null;

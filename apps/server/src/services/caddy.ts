@@ -1,4 +1,5 @@
 import tarStream from "tar-stream";
+import { incomingRelays, outgoingRelays } from "./remote-replicas.js";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { getSettings } from "../lib/settings.js";
@@ -347,8 +348,13 @@ export function buildCaddyConfig(server: ServerRow) {
     });
   }
 
+  // Çok sunuculu dağıtım: bu sunucu ana sunucuysa uzak kopyalara aktarma, ek sunucuysa gelen aktarma rotaları.
+  const relayOut = outgoingRelays(server);
+  const relayIn = httpsOff ? { routes: [], hosts: [] } : incomingRelays(server);
+
   for (const d of domains) {
-    const upstreams = upstreamsFor(d);
+    const relay = d.kind === "worker" ? undefined : relayOut.get(d.app_id);
+    const upstreams = relay ? relay.upstreams.map((u) => u.dial) : upstreamsFor(d);
     const sec = parseSecurity(d.security);
     const { routes: secRoutes, handlers } = securityHandlers(sec, `app_${d.app_id}`);
     const final: Route =
@@ -360,9 +366,17 @@ export function buildCaddyConfig(server: ServerRow) {
                 handler: "reverse_proxy",
                 upstreams: upstreams.map((dial) => ({ dial })),
                 // Birden çok kopyada: sırayla dağıt, hata veren kopyayı 30 sn devre dışı bırak, isteği diğerine yeniden dene.
-                ...(upstreams.length > 1
-                  ? { load_balancing: { selection_policy: { policy: "round_robin" }, retries: 2 }, health_checks: { passive: { fail_duration: "30s", max_fails: 3, unhealthy_status: [502, 503, 504] } } }
-                  : {}),
+                ...(relay
+                  ? {
+                      // Çok sunuculu: hedefler sunucular (ağırlık = kopya sayısı), bağlantı şifreli; ulaşılamayan sunucu atlanır.
+                      transport: relay.transport,
+                      headers: relay.headers,
+                      load_balancing: { selection_policy: { policy: "weighted_round_robin", weights: relay.upstreams.map((u) => u.weight) }, retries: 2 },
+                      health_checks: { passive: { fail_duration: "30s", max_fails: 1, unhealthy_status: [502, 503, 504] } },
+                    }
+                  : upstreams.length > 1
+                    ? { load_balancing: { selection_policy: { policy: "round_robin" }, retries: 2 }, health_checks: { passive: { fail_duration: "30s", max_fails: 3, unhealthy_status: [502, 503, 504] } } }
+                    : {}),
               },
             ],
           }
@@ -440,7 +454,7 @@ export function buildCaddyConfig(server: ServerRow) {
           : {
               https: {
                 listen: [":443"],
-                routes: [...httpsRoutes, fallback],
+                routes: [...relayIn.routes, ...httpsRoutes, fallback],
                 logs: { default_logger_name: "access" },
                 automatic_https: { skip: httpOnlyHosts },
                 ...clientIp,
@@ -448,8 +462,19 @@ export function buildCaddyConfig(server: ServerRow) {
               http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, ...clientIp },
             },
       },
-      ...(tlsPolicies && !httpsOff && httpsHosts.length
-        ? { tls: { automation: { policies: tlsPolicies } } }
+      ...(!httpsOff && (relayIn.hosts.length || (tlsPolicies && httpsHosts.length))
+        ? {
+            tls: {
+              // Sunucular arası aktarma adresleri: Caddy'nin iç CA'sından sertifika (ana sunucu bu CA'ya güvenir).
+              ...(relayIn.hosts.length ? { certificates: { automate: relayIn.hosts } } : {}),
+              automation: {
+                policies: [
+                  ...(relayIn.hosts.length ? [{ subjects: relayIn.hosts, issuers: [{ module: "internal" }] }] : []),
+                  ...(tlsPolicies && httpsHosts.length ? tlsPolicies : []),
+                ],
+              },
+            },
+          }
         : {}),
     },
   };

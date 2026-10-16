@@ -21,6 +21,7 @@ import { getServer } from "./servers.js";
 import { getPrivateKey } from "./ssh.js";
 import { extractZip, latestAppUpload } from "./uploads.js";
 import { gitTokenFor } from "./github-app.js";
+import { ensureRelayCa, extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas, startRemoteReplicas } from "./remote-replicas.js";
 
 export type AppRow = {
   id: number;
@@ -71,6 +72,9 @@ export type AppRow = {
   volume_backup_keep: number;
   last_volume_backup_at: number | null;
   build_server_id: number | null;
+  extra_server_ids: string;
+  remote_replicas: string;
+  relay_secret: string | null;
   created_at: number;
 };
 
@@ -616,15 +620,55 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     }
   }
 
+  // Ek sunuculardaki kopyalar (çok sunuculu yük dağıtımı). Başarısız ek sunucu atlanır; ana sunucu yayına geçer.
+  const extras: ServerRow[] = [];
+  for (const id of parseIds(fresh.extra_server_ids)) {
+    let extra: ServerRow;
+    try {
+      extra = getServer(id);
+    } catch {
+      continue;
+    }
+    const problem = extraServerProblem(fresh, extra);
+    if (problem) log(`Uyarı: ${problem}; bu sunucu atlanıyor.`);
+    else extras.push(extra);
+  }
+  const previousRemote = remoteReplicasOf(fresh);
+  const remote = await startRemoteReplicas({ app: fresh, primary: server, image, deploymentId, env, hosts, log, signal }, extras);
+
   const previous = [fresh.container, ...(JSON.parse(fresh.replica_containers || "[]") as string[])].filter((n): n is string => Boolean(n) && !names.includes(n!));
-  db.prepare("UPDATE apps SET container = ?, replica_containers = ?, current_image = ? WHERE id = ?").run(names[0]!, JSON.stringify(names.slice(1)), image, app.id);
-  log(count > 1 ? `Trafik ${count} kopyaya dağıtılıyor...` : "Trafik yeni sürüme yönlendiriliyor...");
+  db.prepare("UPDATE apps SET container = ?, replica_containers = ?, remote_replicas = ?, current_image = ? WHERE id = ?").run(
+    names[0]!,
+    JSON.stringify(names.slice(1)),
+    JSON.stringify(remote),
+    image,
+    app.id,
+  );
+  const total = count + remote.length;
+  // Önce ek sunucular yeni kopyaları kabul edecek şekilde güncellenir, sonra ana sunucu trafiği onlara da yollar.
+  const touched = [...new Set([...remote, ...previousRemote].map((r) => r.serverId))];
+  for (const sid of touched) {
+    try {
+      const s = getServer(sid);
+      await applyCaddyConfig(s);
+      if (remote.some((r) => r.serverId === sid)) await ensureRelayCa(s, log);
+    } catch (err) {
+      log(`Uyarı: ek sunucu Caddy yapılandırması güncellenemedi: ${(err as Error).message}`);
+    }
+  }
+  log(total > 1 ? `Trafik ${total} kopyaya dağıtılıyor${remote.length ? ` (${remote.length} tanesi ek sunucularda)` : ""}...` : "Trafik yeni sürüme yönlendiriliyor...");
   await applyCaddyConfig(server);
+  if (remote.length) {
+    // Ana sunucu kendi kopyalarına da şifreli yoldan gider; iç CA'sı ilk kez oluştuysa yapılandırma bir kez daha uygulanır.
+    const before = server.relay_ca;
+    if ((await ensureRelayCa(server, log)) !== before) await applyCaddyConfig(server);
+  }
 
   for (const p of previous) {
     log(`Eski konteyner kaldırılıyor: ${p}`);
     await removeContainer(docker, p);
   }
+  await removeRemoteReplicas(previousRemote.filter((r) => !remote.some((x) => x.container === r.container)), log);
   if (!worker) await waitForCertificates(server, app.id, log);
 }
 

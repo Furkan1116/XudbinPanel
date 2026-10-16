@@ -435,6 +435,13 @@ const migrations: string[] = [
   `
   ALTER TABLE apps ADD COLUMN build_server_id INTEGER REFERENCES servers(id) ON DELETE SET NULL;
   `,
+  // Çok sunuculu yük dağıtımı: ek sunuculardaki kopyalar ve sunucular arası TLS için iç CA.
+  `
+  ALTER TABLE apps ADD COLUMN extra_server_ids TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE apps ADD COLUMN remote_replicas TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE apps ADD COLUMN relay_secret TEXT;
+  ALTER TABLE servers ADD COLUMN relay_ca TEXT;
+  `,
 ];
 
 function migrate() {

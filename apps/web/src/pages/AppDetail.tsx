@@ -523,6 +523,7 @@ function Settings({ app }: { app: App }) {
     replicas: String(app.replicas),
     previewsEnabled: app.previewsEnabled,
     buildServerId: app.buildServerId ? String(app.buildServerId) : "",
+    extraServerIds: app.extraServerIds,
     healthPath: app.healthPath ?? "",
     volumes: app.volumes,
   });
@@ -555,6 +556,7 @@ function Settings({ app }: { app: App }) {
         ...(app.sourceType !== "compose" ? { kind: form.kind, replicas: Number(form.replicas) || 1 } : {}),
         ...(app.sourceType === "git" && !app.parentAppId ? { previewsEnabled: form.previewsEnabled } : {}),
         ...(app.sourceType === "git" || app.sourceType === "upload" ? { buildServerId: form.buildServerId ? Number(form.buildServerId) : null } : {}),
+        ...(app.sourceType !== "compose" && !app.parentAppId ? { extraServerIds: form.extraServerIds } : {}),
         healthPath: form.healthPath.trim() || null,
         volumes: form.volumes.filter((v) => v.name && v.path),
       }),
@@ -648,6 +650,26 @@ function Settings({ app }: { app: App }) {
                   <option key={x.id} value={x.id}>{x.name}</option>
                 ))}
               </select>
+            </Field>
+          )}
+          {app.sourceType !== "compose" && !app.parentAppId && (servers.data?.servers.filter((x) => x.status === "ready").length ?? 0) > 1 && (
+            <Field
+              label={t("Ek sunucular (yük dağıtımı)")}
+              hint={t("Uygulama seçilen sunucularda da çalışır; ziyaretçiler bu sunucuya gelir ve istekler tüm kopyalara dağıtılır, çöken sunucu devre dışı kalır. Sunucular arası trafik şifrelidir. Kalıcı klasörlü uygulamalar dağıtılamaz; ek sunucular panelin iç veritabanlarına ulaşamaz. Sonraki deploy'da uygulanır.")}
+            >
+              <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
+                {servers.data!.servers.filter((x) => x.status === "ready" && x.id !== app.server.id).map((x) => (
+                  <label key={x.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={form.extraServerIds.includes(x.id)}
+                      onChange={(e) => setForm({ ...form, extraServerIds: e.target.checked ? [...form.extraServerIds, x.id] : form.extraServerIds.filter((id) => id !== x.id) })}
+                    />
+                    {x.name}
+                    {app.remoteReplicas.some((r) => r.serverId === x.id) && <span className="text-[12px] text-ok">● {t("çalışıyor")}</span>}
+                  </label>
+                ))}
+              </div>
             </Field>
           )}
           {app.sourceType === "git" && !app.parentAppId && (
