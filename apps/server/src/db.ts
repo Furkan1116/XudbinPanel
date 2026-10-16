@@ -401,6 +401,12 @@ const migrations: string[] = [
     trigger     TEXT NOT NULL DEFAULT 'schedule'
   );
   `,
+  // PR önizlemeleri.
+  `
+  ALTER TABLE apps ADD COLUMN previews_enabled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE apps ADD COLUMN parent_app_id INTEGER REFERENCES apps(id) ON DELETE CASCADE;
+  ALTER TABLE apps ADD COLUMN preview_pr INTEGER;
+  `,
 ];
 
 function migrate() {

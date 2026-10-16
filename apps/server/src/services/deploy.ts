@@ -63,6 +63,9 @@ export type AppRow = {
   kind: "web" | "worker";
   replicas: number;
   replica_containers: string;
+  previews_enabled: number;
+  parent_app_id: number | null;
+  preview_pr: number | null;
   created_at: number;
 };
 

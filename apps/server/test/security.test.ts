@@ -57,3 +57,22 @@ test("webhook imzaları doğrulanır", () => {
   assert.equal(verifyWebhook(app, body, h({})), false);
   assert.equal(verifyWebhook({ ...app, webhook_signed: 0 }, body, h({})), true);
 });
+
+test("PR olayları: GitHub, GitLab ve fork koruması", async () => {
+  const { parsePrEvent } = await import("../src/services/previews.js");
+  const gh = (o: Record<string, string>) => (n: string) => o[n];
+  const ev = parsePrEvent(gh({ "x-github-event": "pull_request" }), {
+    action: "synchronize",
+    number: 7,
+    pull_request: { number: 7, title: "Yeni sayfa", head: { ref: "ozellik", repo: { full_name: "a/b" } }, base: { repo: { full_name: "a/b" } } },
+  });
+  assert.deepEqual({ ...ev, commentUrl: undefined }, { action: "update", number: 7, branch: "ozellik", title: "Yeni sayfa", sameRepo: true, commentUrl: undefined });
+  const fork = parsePrEvent(gh({ "x-github-event": "pull_request" }), {
+    action: "opened",
+    pull_request: { number: 8, head: { ref: "x", repo: { full_name: "kotu/b" } }, base: { repo: { full_name: "a/b" } } },
+  });
+  assert.equal(fork?.sameRepo, false);
+  const gl = parsePrEvent(gh({ "x-gitlab-event": "Merge Request Hook" }), { object_attributes: { action: "merge", iid: 3, source_branch: "f", source_project_id: 1, target_project_id: 1 } });
+  assert.equal(gl?.action, "close");
+  assert.equal(parsePrEvent(gh({ "x-github-event": "push" }), { ref: "refs/heads/main" }), null);
+});

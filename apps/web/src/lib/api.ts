@@ -122,6 +122,10 @@ export type App = {
   uptimeEnabled: boolean;
   kind: "web" | "worker";
   replicas: number;
+  previewsEnabled: boolean;
+  parentAppId: number | null;
+  previewPr: number | null;
+  previews: { id: number; name: string; pr: number; branch: string; status: string; url: string | null }[];
   scan: {
     status: "running" | "success" | "failed" | null;
     at: number | null;

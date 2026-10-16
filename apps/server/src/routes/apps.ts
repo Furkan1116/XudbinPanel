@@ -32,6 +32,7 @@ import { getServer } from "../services/servers.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor.js";
 import { scanApp } from "../services/scan.js";
 import { uptimeSummary } from "../services/uptime.js";
+import { deletePreview, handlePrEvent, parsePrEvent } from "../services/previews.js";
 import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
@@ -97,6 +98,13 @@ function publicApp(a: AppRow) {
     uptimeEnabled: Boolean(a.uptime_enabled),
     kind: a.kind,
     replicas: a.replicas,
+    previewsEnabled: Boolean(a.previews_enabled),
+    parentAppId: a.parent_app_id,
+    previewPr: a.preview_pr,
+    previews: (db.prepare("SELECT id, name, preview_pr AS pr, git_branch AS branch, status FROM apps WHERE parent_app_id = ? ORDER BY preview_pr").all(a.id) as { id: number }[]).map((p) => ({
+      ...p,
+      url: ((d) => (d ? `${d.https && httpsActive ? "https" : "http"}://${d.host}` : null))(db.prepare("SELECT host, https FROM domains WHERE app_id = ? LIMIT 1").get(p.id) as { host: string; https: number } | undefined),
+    })),
     scan: { status: a.scan_status, at: a.scanned_at, summary: parseJson(a.scan_summary) },
     healthPath: a.health_path,
     memoryLimit: a.memory_limit,
@@ -251,6 +259,7 @@ export const appRoutes = new Hono<AppEnv>()
         uptimeEnabled: z.boolean().optional(),
         kind: z.enum(["web", "worker"]).optional(),
         replicas: z.number().int().min(1).max(10).optional(),
+        previewsEnabled: z.boolean().optional(),
         healthPath: z.string().trim().max(200).regex(/^\/[\w\-./?=&%~]*$/, "Sağlık yolu / ile başlamalı, ör. /health").nullable().optional(),
         memoryLimit: z.number().int().min(32).max(1024 * 1024).nullable().optional(),
         volumes: z
@@ -293,6 +302,7 @@ export const appRoutes = new Hono<AppEnv>()
       uptime_enabled: input.uptimeEnabled === undefined ? undefined : input.uptimeEnabled ? 1 : 0,
       kind: input.kind,
       replicas: input.replicas,
+      previews_enabled: input.previewsEnabled === undefined ? undefined : input.previewsEnabled ? 1 : 0,
       health_path: input.healthPath,
       memory_limit: input.memoryLimit,
       volumes: input.volumes ? JSON.stringify(input.volumes) : undefined,
@@ -532,6 +542,7 @@ export const appRoutes = new Hono<AppEnv>()
 
   .delete("/:id", async (c) => {
     const app = loadApp(idParam(c));
+    for (const p of db.prepare("SELECT * FROM apps WHERE parent_app_id = ?").all(app.id) as AppRow[]) await deletePreview(p).catch(() => {});
     const server = getServer(app.server_id);
     const docker = dockerFor(server);
     if (app.source_type === "compose") await composeCommand(app, "down").catch(() => {});
@@ -760,11 +771,17 @@ export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
   if (!verifyWebhook(app, raw, (h) => c.req.header(h))) {
     return c.json({ error: "Webhook imzası doğrulanamadı. Git sağlayıcısındaki Secret alanına uygulamanın webhook gizli anahtarını gir." }, 401);
   }
-  if (!app.auto_deploy) return c.json({ ok: false, reason: "Otomatik deploy kapalı" });
-  let payload: { ref?: string; head_commit?: { message?: string } } = {};
+  let payload: { ref?: string; head_commit?: { message?: string } } & Record<string, unknown> = {};
   try {
     payload = JSON.parse(raw);
   } catch {}
+  // Pull request olayları: önizleme ortamı aç / güncelle / kapat.
+  const pr = parsePrEvent((h) => c.req.header(h), payload);
+  if (pr) {
+    if (!app.previews_enabled || app.source_type !== "git") return c.json({ ok: false, reason: "PR önizlemeleri bu uygulamada kapalı" });
+    return c.json(await handlePrEvent(app, pr), 202);
+  }
+  if (!app.auto_deploy) return c.json({ ok: false, reason: "Otomatik deploy kapalı" });
   if (payload.ref && payload.ref !== `refs/heads/${app.git_branch}`) {
     return c.json({ ok: false, reason: `Yalnızca ${app.git_branch} dalı deploy edilir` });
   }

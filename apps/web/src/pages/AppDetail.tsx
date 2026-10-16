@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { CronJobs } from "@/components/CronJobs";
 import { DeployDoctor } from "@/components/DeployDoctor";
 import { DropZone, uploadZip } from "@/components/DropZone";
@@ -171,6 +171,29 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
         <Row label={t("İç adres")} value={`${app.internalHost}:${app.port}`} hint={t("Aynı sunucudaki diğer uygulamalar bu adresle ulaşır.")} mono />
       </dl>
 
+      {app.parentAppId && (
+        <Notice tone="info" title={t("Bu bir pull request önizlemesi (PR #{n})", { n: app.previewPr ?? "" })}>
+          {t("PR kapanınca bu uygulama ve verileri otomatik silinir.")}{" "}
+          <Link to={`/apps/${app.parentAppId}`} className="underline">{t("Ana uygulamaya git")}</Link>
+        </Notice>
+      )}
+      {app.previews.length > 0 && (
+        <Section title={t("Açık PR önizlemeleri")} className="!mt-0">
+          <div className="panel divide-y divide-line">
+            {app.previews.map((p) => (
+              <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+                <Link to={`/apps/${p.id}`} className="min-w-0 font-medium hover:underline">
+                  PR #{p.pr} <span className="font-mono text-[13px] text-muted">{p.branch}</span>
+                </Link>
+                <div className="flex items-center gap-3">
+                  {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="text-[13px] text-muted hover:text-fg">{p.url.replace(/^https?:\/\//, "")}</a>}
+                  <StatusBadge status={p.status} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
       <UptimeCard app={app} />
       <DeployDoctor app={app} last={last} />
       <ImageScan app={app} />
@@ -470,6 +493,7 @@ function Settings({ app }: { app: App }) {
     uptimeEnabled: app.uptimeEnabled,
     kind: app.kind,
     replicas: String(app.replicas),
+    previewsEnabled: app.previewsEnabled,
     healthPath: app.healthPath ?? "",
     volumes: app.volumes,
   });
@@ -499,6 +523,7 @@ function Settings({ app }: { app: App }) {
         httpCheck: form.httpCheck,
         uptimeEnabled: form.uptimeEnabled,
         ...(app.sourceType !== "compose" ? { kind: form.kind, replicas: Number(form.replicas) || 1 } : {}),
+        ...(app.sourceType === "git" && !app.parentAppId ? { previewsEnabled: form.previewsEnabled } : {}),
         healthPath: form.healthPath.trim() || null,
         volumes: form.volumes.filter((v) => v.name && v.path),
       }),
@@ -584,6 +609,14 @@ function Settings({ app }: { app: App }) {
             )}
           </div>
           {app.sourceType !== "image" && <Toggle checked={form.autoDeploy} onChange={(v) => setForm({ ...form, autoDeploy: v })} label={t("Push'ta otomatik deploy")} description={t("Webhook çağrıldığında yeni sürüm otomatik yayınlanır.")} />}
+          {app.sourceType === "git" && !app.parentAppId && (
+            <Toggle
+              checked={form.previewsEnabled}
+              onChange={(v) => setForm({ ...form, previewsEnabled: v })}
+              label={t("Pull request önizlemeleri")}
+              description={t("Her PR için ayrı bir adreste önizleme açılır, yeni commit'lerde güncellenir, PR kapanınca silinir. Git sağlayıcının webhook ayarında \"Pull requests\" olaylarını da seç. Fork'tan gelen PR'lar güvenlik nedeniyle deploy edilmez.")}
+            />
+          )}
           {app.sourceType !== "image" && (
             <Toggle checked={form.webhookSigned} onChange={(v) => setForm({ ...form, webhookSigned: v })} label={t("Webhook imzası zorunlu")} description={t("Yalnız gizli anahtarla imzalanmış istekler deploy başlatır; webhook adresi sızsa bile başkası deploy tetikleyemez.")} />
           )}
