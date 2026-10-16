@@ -58,7 +58,9 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 WORKDIR /app
 COPY . .
 ${viteAssets ? "COPY --from=assets /app/public/build ./public/build\n" : ""}RUN if [ -f composer.json ]; then composer install --no-dev --optimize-autoloader --no-interaction --no-progress; fi
-ENV SERVER_NAME=:80`,
+ENV SERVER_NAME=:80
+# Temel imajın sağlık kontrolü php-server'da açık olmayan yönetim portunu (2019) dener; panel kendi kontrolünü yapar.
+HEALTHCHECK NONE`,
   };
 }
 
