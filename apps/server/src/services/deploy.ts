@@ -66,6 +66,9 @@ export type AppRow = {
   previews_enabled: number;
   parent_app_id: number | null;
   preview_pr: number | null;
+  volume_backup_interval_h: number;
+  volume_backup_keep: number;
+  last_volume_backup_at: number | null;
   created_at: number;
 };
 

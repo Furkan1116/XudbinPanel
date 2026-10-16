@@ -36,6 +36,7 @@ import { startMaintenance } from "./services/maintenance.js";
 import { startUptimeMonitor } from "./services/uptime.js";
 import { startAnalyticsJobs } from "./services/analytics.js";
 import { startCronScheduler } from "./services/cron.js";
+import { startVolumeBackupScheduler } from "./services/volume-backups.js";
 import { reconcileNetworks } from "./services/networks.js";
 import { getSettings, updateSettings } from "./lib/settings.js";
 import { notify } from "./services/notify.js";
@@ -130,6 +131,7 @@ startMaintenance();
 startUptimeMonitor();
 startAnalyticsJobs();
 startCronScheduler();
+startVolumeBackupScheduler();
 setInterval(pruneAudit, 24 * 3_600_000).unref();
 startServerMonitor((s, ok) =>
   ok ? notify("server_down", `${s.name} yeniden erişilebilir`, "Sunucuyla bağlantı geri geldi.") : notify("server_down", `${s.name} sunucusuna ulaşılamıyor`, "SSH bağlantısı 20 saniye içinde kurulamadı."),

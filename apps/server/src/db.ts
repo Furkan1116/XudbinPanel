@@ -407,6 +407,25 @@ const migrations: string[] = [
   ALTER TABLE apps ADD COLUMN parent_app_id INTEGER REFERENCES apps(id) ON DELETE CASCADE;
   ALTER TABLE apps ADD COLUMN preview_pr INTEGER;
   `,
+  // Kalıcı klasör (volume) yedekleri.
+  `
+  ALTER TABLE apps ADD COLUMN volume_backup_interval_h INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE apps ADD COLUMN volume_backup_keep INTEGER NOT NULL DEFAULT 7;
+  ALTER TABLE apps ADD COLUMN last_volume_backup_at INTEGER;
+  CREATE TABLE volume_backups (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_id       INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    volume       TEXT NOT NULL,
+    file         TEXT NOT NULL,
+    size         INTEGER NOT NULL DEFAULT 0,
+    status       TEXT NOT NULL,
+    error        TEXT,
+    remote_key   TEXT,
+    remote_error TEXT,
+    trigger      TEXT NOT NULL DEFAULT 'manual',
+    created_at   INTEGER NOT NULL
+  );
+  `,
 ];
 
 function migrate() {

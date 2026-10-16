@@ -7,6 +7,7 @@ import { DeployDoctor } from "@/components/DeployDoctor";
 import { DropZone, uploadZip } from "@/components/DropZone";
 import { ImageScan } from "@/components/ImageScan";
 import { UptimeCard } from "@/components/UptimeCard";
+import { VolumeBackups } from "@/components/VolumeBackups";
 import { FrameworkLogo } from "@/components/FrameworkLogo";
 import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frameworkById, useFrameworks } from "@/components/FrameworkSetup";
 import { LogViewer } from "@/components/LogViewer";
@@ -197,6 +198,8 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
       <UptimeCard app={app} />
       <DeployDoctor app={app} last={last} />
       <ImageScan app={app} />
+
+      <VolumeBackups app={app} />
 
       {app.sourceType === "upload" && <UploadNewVersion app={app} />}
 

@@ -33,6 +33,8 @@ import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor
 import { scanApp } from "../services/scan.js";
 import { uptimeSummary } from "../services/uptime.js";
 import { deletePreview, handlePrEvent, parsePrEvent } from "../services/previews.js";
+import { appVolumes, backupAppVolumes, restoreVolumeBackup, volumeBackupFile } from "../services/volume-backups.js";
+import { Readable } from "node:stream";
 import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
@@ -260,6 +262,8 @@ export const appRoutes = new Hono<AppEnv>()
         kind: z.enum(["web", "worker"]).optional(),
         replicas: z.number().int().min(1).max(10).optional(),
         previewsEnabled: z.boolean().optional(),
+        volumeBackupIntervalH: z.number().int().min(0).max(24 * 30).optional(),
+        volumeBackupKeep: z.number().int().min(1).max(100).optional(),
         healthPath: z.string().trim().max(200).regex(/^\/[\w\-./?=&%~]*$/, "Sağlık yolu / ile başlamalı, ör. /health").nullable().optional(),
         memoryLimit: z.number().int().min(32).max(1024 * 1024).nullable().optional(),
         volumes: z
@@ -303,6 +307,8 @@ export const appRoutes = new Hono<AppEnv>()
       kind: input.kind,
       replicas: input.replicas,
       previews_enabled: input.previewsEnabled === undefined ? undefined : input.previewsEnabled ? 1 : 0,
+      volume_backup_interval_h: input.volumeBackupIntervalH,
+      volume_backup_keep: input.volumeBackupKeep,
       health_path: input.healthPath,
       memory_limit: input.memoryLimit,
       volumes: input.volumes ? JSON.stringify(input.volumes) : undefined,
@@ -326,6 +332,50 @@ export const appRoutes = new Hono<AppEnv>()
     const { env } = await body(c, z.object({ env: z.string().max(200_000) }));
     db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(env.trim() ? encrypt(env) : null, app.id);
     return c.json({ ok: true, note: "Değişikliklerin geçerli olması için yeniden deploy et." });
+  })
+
+  // --- Kalıcı klasör (volume) yedekleri ------------------------------------------------------
+  .get("/:id/volume-backups", async (c) => {
+    const app = loadApp(idParam(c));
+    const volumes = await appVolumes(app).catch(() => []);
+    const backups = db
+      .prepare(
+        `SELECT id, volume, file, size, status, error, remote_key IS NOT NULL AS remote, remote_error AS remoteError, trigger, created_at AS createdAt
+         FROM volume_backups WHERE app_id = ? ORDER BY id DESC LIMIT 100`,
+      )
+      .all(app.id);
+    return c.json({ volumes, backups, intervalH: app.volume_backup_interval_h, keep: app.volume_backup_keep, lastAt: app.last_volume_backup_at });
+  })
+  .post("/:id/volume-backups", (c) => {
+    const app = loadApp(idParam(c));
+    backupAppVolumes(app.id).catch(() => {});
+    return c.json({ ok: true }, 202);
+  })
+  .post("/:id/volume-backups/:backupId/restore", async (c) => {
+    const app = loadApp(idParam(c));
+    try {
+      await restoreVolumeBackup(app.id, idParam(c, "backupId"));
+    } catch (err) {
+      throw new HttpError(500, `Geri yüklenemedi: ${(err as Error).message}`);
+    }
+    return c.json({ ok: true });
+  })
+  .get("/:id/volume-backups/:backupId/download", (c) => {
+    const app = loadApp(idParam(c));
+    const b = must(db.prepare("SELECT file FROM volume_backups WHERE id = ? AND app_id = ? AND status = 'success'").get(idParam(c, "backupId"), app.id) as { file: string } | undefined, "Yedek bulunamadı");
+    const full = volumeBackupFile(app, b.file);
+    if (!fs.existsSync(full)) throw new HttpError(404, "Yedek dosyası diskte yok (uzak depolamada olabilir)");
+    c.header("Content-Type", "application/gzip");
+    c.header("Content-Disposition", `attachment; filename="${b.file}"`);
+    c.header("Content-Length", String(fs.statSync(full).size));
+    return c.body(Readable.toWeb(fs.createReadStream(full)) as ReadableStream);
+  })
+  .delete("/:id/volume-backups/:backupId", (c) => {
+    const app = loadApp(idParam(c));
+    const b = db.prepare("SELECT file FROM volume_backups WHERE id = ? AND app_id = ?").get(idParam(c, "backupId"), app.id) as { file: string } | undefined;
+    if (b) fs.rmSync(volumeBackupFile(app, b.file), { force: true });
+    db.prepare("DELETE FROM volume_backups WHERE id = ? AND app_id = ?").run(idParam(c, "backupId"), app.id);
+    return c.json({ ok: true });
   })
 
   // --- Zamanlanmış görevler ---------------------------------------------------------------
