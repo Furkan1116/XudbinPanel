@@ -15,6 +15,8 @@ import { body, HttpError, idParam } from "../lib/http.js";
 import { getSettings, updateSettings } from "../lib/settings.js";
 import { VERSION } from "../lib/version.js";
 import { updateInfo } from "../lib/update-check.js";
+import { config } from "../config.js";
+import { hostExec } from "../services/firewall.js";
 import { createApiToken } from "../auth/api-tokens.js";
 import type { AppEnv } from "../lib/types.js";
 import { applyCaddyConfig } from "../services/caddy.js";
@@ -33,7 +35,28 @@ export const settingsRoutes = new Hono<AppEnv>()
     return c.json({ panelDomain: s.panelDomain, panelHttps: s.panelHttps, localServerIp: local?.public_ip ?? null, version: VERSION, timezone: s.timezone, uptimeEnabled: s.uptimeEnabled });
   })
 
-  .get("/update", async (c) => c.json(await updateInfo()))
+  .get("/update", async (c) => c.json({ ...(await updateInfo()), canSelfUpdate: config.isProd }))
+
+  // Panelden güncelleme: install.sh --update sunucunun systemd'sinde ayrı bir iş olarak çalışır (panel yeniden
+  // başlasa da devam eder). İlerleme: journalctl -u xudbin-update
+  .post("/update/apply", async (c) => {
+    if (c.get("user").role !== "admin") throw new HttpError(403, "Yalnız yönetici güncelleyebilir");
+    if (!config.isProd) throw new HttpError(422, "Geliştirme ortamında panelden güncelleme yapılmaz");
+    const local = listServers().find((x) => x.kind === "local");
+    if (!local) throw new HttpError(500, "Panel sunucusu bulunamadı");
+    try {
+      await hostExec(
+        local,
+        `test -f /opt/xudbin/install.sh || { echo "Kurulum klasörü /opt/xudbin bulunamadı"; exit 3; }
+systemctl reset-failed xudbin-update >/dev/null 2>&1 || true
+systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" /bin/bash /opt/xudbin/install.sh --update`,
+        60_000,
+      );
+    } catch (err) {
+      throw new HttpError(500, `Güncelleme başlatılamadı: ${(err as Error).message}`);
+    }
+    return c.json({ ok: true, note: "Güncelleme başladı. Panel birkaç dakika içinde yeniden başlayacak." }, 202);
+  })
 
   .put("/panel", async (c) => {
     const input = await body(

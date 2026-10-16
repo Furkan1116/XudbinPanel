@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { ApiTokens } from "@/components/ApiTokens";
 import { AuditLog } from "@/components/AuditLog";
@@ -49,13 +49,24 @@ export function SettingsPage() {
 }
 
 function PanelSettings() {
-  const { data } = useQuery({ queryKey: ["settings"], queryFn: () => api.get<{ panelDomain: string; panelHttps: boolean; localServerIp: string | null; version: string }>("/settings") });
-  const [form, setForm] = useState<{ panelDomain: string; panelHttps: boolean } | null>(null);
-  const f = form ?? (data ? { panelDomain: data.panelDomain, panelHttps: data.panelHttps } : null);
-  const save = useAction(() => api.put("/settings/panel", f), { success: t("Panel adresi güncellendi"), invalidate: [["settings"]] });
+  const { data } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api.get<{ panelDomain: string; panelHttps: boolean; localServerIp: string | null; version: string; timezone: string; uptimeEnabled: boolean }>("/settings"),
+  });
+  const [form, setForm] = useState<{ panelDomain: string; panelHttps: boolean; timezone: string; uptimeEnabled: boolean } | null>(null);
+  const f = form ?? (data ? { panelDomain: data.panelDomain, panelHttps: data.panelHttps, timezone: data.timezone, uptimeEnabled: data.uptimeEnabled } : null);
+  const save = useAction(() => api.put("/settings/panel", f), { success: t("Ayarlar kaydedildi"), invalidate: [["settings"]] });
+  const zones = useMemo(() => {
+    try {
+      return Intl.supportedValuesOf("timeZone");
+    } catch {
+      return ["Europe/Istanbul", "UTC"];
+    }
+  }, []);
   if (!data || !f) return <PageLoading />;
   return (
-    <>
+    <div className="space-y-9">
+      <UpdateCard version={data.version} />
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -70,12 +81,65 @@ function PanelSettings() {
           <input className="input" value={f.panelDomain} onChange={(e) => setForm({ ...f, panelDomain: e.target.value.trim().toLowerCase() })} placeholder="panel.ornek.com" />
         </Field>
         <Toggle checked={f.panelHttps} onChange={(v) => setForm({ ...f, panelHttps: v })} label={t("HTTPS")} description={t("Ücretsiz Let's Encrypt sertifikası otomatik alınır.")} />
+        <Field label={t("Saat dilimi")} hint={t("Analitikteki gün sınırları ve zamanlanmış görevler bu saat dilimine göre.")}>
+          <select className="input" value={f.timezone} onChange={(e) => setForm({ ...f, timezone: e.target.value })}>
+            {zones.map((z) => (
+              <option key={z} value={z}>{z}</option>
+            ))}
+          </select>
+        </Field>
+        <Toggle checked={f.uptimeEnabled} onChange={(v) => setForm({ ...f, uptimeEnabled: v })} label={t("Erişilebilirlik izleme")} description={t("Tüm siteler dakikada bir denenir; çökme ve düzelme bildirimleri gönderilir.")} />
         <div className="flex justify-end">
           <Button type="submit" variant="primary" loading={save.isPending}>{t("Kaydet")}</Button>
         </div>
       </form>
-      <p className="mt-6 text-[13px] text-faint">Xudbin {data.version}</p>
-    </>
+    </div>
+  );
+}
+
+/** Sürüm ve panelden güncelleme: güncelleme sunucuda ayrı bir iş olarak çalışır, panel yeni sürümle geri gelince sayfa yenilenir. */
+function UpdateCard({ version }: { version: string }) {
+  const { data } = useQuery({ queryKey: ["update"], queryFn: () => api.get<{ current: string; latest: string | null; updateAvailable: boolean; url: string; canSelfUpdate: boolean }>("/settings/update") });
+  const [waiting, setWaiting] = useState(false);
+  const apply = useAction(() => api.post("/settings/update/apply"), {
+    success: t("Güncelleme başladı; panel birkaç dakika içinde yeniden başlayacak."),
+    onSuccess: () => setWaiting(true),
+  });
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setInterval(async () => {
+      try {
+        const s = await api.get<{ version: string }>("/settings");
+        if (s.version !== version) location.reload();
+      } catch {}
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [waiting, version]);
+  return (
+    <section className="panel flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+      <div>
+        <div className="font-medium">Xudbin {version}</div>
+        <div className="text-[13px] text-muted">
+          {waiting
+            ? t("Güncelleniyor... Sayfa yeni sürüm hazır olunca kendiliğinden yenilenecek.")
+            : data?.updateAvailable
+              ? t("Yeni sürüm yayında: {v}", { v: data.latest ?? "" })
+              : data?.latest
+                ? t("Güncel.")
+                : t("Yeni sürüm bilgisi alınamadı.")}{" "}
+          {data?.url && (
+            <a href={data.url} target="_blank" rel="noreferrer" className="underline">{t("Sürüm notları")}</a>
+          )}
+        </div>
+      </div>
+      {data?.updateAvailable && !waiting && (
+        data.canSelfUpdate ? (
+          <Button variant="primary" onClick={() => apply.mutate()} loading={apply.isPending}>{t("Güncelle")}</Button>
+        ) : (
+          <code className="font-mono text-[13px] text-muted">sudo xudbin update</code>
+        )
+      )}
+    </section>
   );
 }
 
