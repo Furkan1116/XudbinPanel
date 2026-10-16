@@ -38,6 +38,7 @@ import { startAnalyticsJobs } from "./services/analytics.js";
 import { startCronScheduler } from "./services/cron.js";
 import { startVolumeBackupScheduler } from "./services/volume-backups.js";
 import { reconcileNetworks } from "./services/networks.js";
+import { ensureTunnel } from "./services/tunnel.js";
 import { getSettings, updateSettings } from "./lib/settings.js";
 import { notify } from "./services/notify.js";
 import { isBlocked, startSecurityMonitor } from "./services/security.js";
@@ -147,6 +148,7 @@ if (local.status === "ready") {
 // Ağ ayrımı: uygulamalar ve veritabanları kendi proje ağlarına taşınır (çalışırken, yeniden deploy gerekmeden).
 setTimeout(() => {
   for (const s of listServers().filter((x) => x.status === "ready")) {
+    if (s.tunnel_token) ensureTunnel(s).catch((err) => console.error(`${s.name}: tunnel başlatılamadı:`, (err as Error).message));
     reconcileNetworks(s)
       .then((n) => n && console.log(`${s.name}: ${n} konteyner proje ağına taşındı`))
       .catch((err) => console.error(`${s.name}: ağlar düzenlenemedi:`, (err as Error).message));

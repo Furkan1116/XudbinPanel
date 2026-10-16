@@ -426,6 +426,11 @@ const migrations: string[] = [
     created_at   INTEGER NOT NULL
   );
   `,
+  // Sunucuya özel wildcard alan adı (otomatik adresler için) ve Cloudflare Tunnel.
+  `
+  ALTER TABLE servers ADD COLUMN apps_domain TEXT;
+  ALTER TABLE servers ADD COLUMN tunnel_token TEXT;
+  `,
 ];
 
 function migrate() {

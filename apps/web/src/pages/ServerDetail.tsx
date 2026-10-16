@@ -265,8 +265,11 @@ function Settings({ server }: { server: Server }) {
     publicIp: server.publicIp ?? "",
     httpsMode: server.httpsMode,
     acmeEmail: server.acmeEmail ?? "",
+    appsDomain: server.appsDomain ?? "",
   });
   const [confirm, setConfirm] = useState(false);
+  const [domainCheck, setDomainCheck] = useState<{ ok: boolean; message: string } | null>(null);
+  const check = useAction(() => api.post<{ ok: boolean; message: string }>(`/servers/${server.id}/apps-domain/check`, { domain: form.appsDomain }), { onSuccess: setDomainCheck });
   const save = useAction(
     () =>
       api.patch(`/servers/${server.id}`, {
@@ -274,6 +277,7 @@ function Settings({ server }: { server: Server }) {
         publicIp: form.publicIp,
         httpsMode: form.httpsMode,
         acmeEmail: form.acmeEmail,
+        appsDomain: form.appsDomain,
         ...(server.kind === "ssh" ? { host: form.host, port: Number(form.port), username: form.username } : {}),
       }),
     { success: t("Sunucu ayarları kaydedildi"), invalidate: [["server", server.id], ["servers"]] },
@@ -324,10 +328,22 @@ function Settings({ server }: { server: Server }) {
             <input className="input" type="email" value={form.acmeEmail} onChange={(e) => setForm({ ...form, acmeEmail: e.target.value })} />
           </Field>
         )}
+        <Field
+          label={t("Otomatik adresler için kendi alan adın (isteğe bağlı)")}
+          hint={t("Örneğin apps.ornek.com verirsen yeni uygulamalar uygulama.apps.ornek.com adresini alır (sslip.io yerine). DNS'te *.apps.ornek.com için sunucunun IP'sine bir wildcard A kaydı gerekir. Mevcut adresler değişmez.")}
+        >
+          <div className="flex gap-2">
+            <input className="input" value={form.appsDomain} onChange={(e) => (setForm({ ...form, appsDomain: e.target.value.trim().toLowerCase() }), setDomainCheck(null))} placeholder="apps.ornek.com" />
+            <Button type="button" onClick={() => check.mutate()} loading={check.isPending} disabled={!form.appsDomain}>{t("Dene")}</Button>
+          </div>
+          {domainCheck && <p className={`mt-1.5 text-[13px] ${domainCheck.ok ? "text-ok" : "text-warn"}`}>{domainCheck.message}</p>}
+        </Field>
         <div className="flex justify-end">
           <Button type="submit" variant="primary" loading={save.isPending}>{t("Kaydet")}</Button>
         </div>
       </form>
+
+      <Tunnel server={server} />
 
       {server.kind === "ssh" && (
         <Section title={t("Sunucuyu kaldır")} description={t("Sunucu panelden kaldırılır; sunucudaki konteynerler ve veriler silinmez.")}>
@@ -344,5 +360,52 @@ function Settings({ server }: { server: Server }) {
         </Section>
       )}
     </>
+  );
+}
+
+/** Cloudflare Tunnel: port açmadan (ev sunucusu, NAT arkası) siteleri Cloudflare üzerinden yayınla. */
+function Tunnel({ server }: { server: Server }) {
+  const status = useQuery({
+    queryKey: ["server", server.id, "tunnel"],
+    queryFn: () => api.get<{ enabled: boolean; running: boolean; connected?: boolean; logs: string[] }>(`/servers/${server.id}/tunnel`),
+    refetchInterval: 10_000,
+  });
+  const [token, setToken] = useState("");
+  const save = useAction((tunnelToken: string | null) => api.patch(`/servers/${server.id}`, { tunnelToken }), {
+    success: t("Tunnel ayarı kaydedildi"),
+    invalidate: [["server", server.id], ["server", server.id, "tunnel"]],
+    onSuccess: () => setToken(""),
+  });
+  const s = status.data;
+  return (
+    <Section
+      title={t("Cloudflare Tunnel")}
+      description={t("Dış IP'si olmayan ya da port açamayan sunucular için. Cloudflare Zero Trust > Networks > Tunnels'tan bir tunnel oluştur, token'ı buraya yapıştır; sonra Cloudflare'de her alan adı için \"Public hostname\" ekleyip servis olarak http://xudbin-caddy:80 yaz. HTTPS'i Cloudflare sağlar; bu sunucuda HTTPS'i \"Kapalı\" yapman önerilir.")}
+    >
+      <div className="panel space-y-3 p-5">
+        {s?.enabled && (
+          <p className={`text-[14px] ${s.connected ? "text-ok" : s.running ? "text-warn" : "text-accent"}`}>
+            {s.connected ? t("Tunnel Cloudflare'e bağlı.") : s.running ? t("Tunnel çalışıyor, bağlantı bekleniyor...") : t("Tunnel çalışmıyor.")}
+          </p>
+        )}
+        <form
+          className="flex flex-wrap gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (token) save.mutate(token);
+          }}
+        >
+          <input className="input flex-1 font-mono text-[13px]" type="password" autoComplete="off" placeholder={s?.enabled ? t("Yeni token (değiştirmek için)") : "eyJhIjoi..."} value={token} onChange={(e) => setToken(e.target.value.trim())} />
+          <Button type="submit" variant="primary" disabled={!token} loading={save.isPending}>{s?.enabled ? t("Token'ı değiştir") : t("Tunnel'ı aç")}</Button>
+          {s?.enabled && <Button type="button" variant="ghost" onClick={() => save.mutate(null)}>{t("Kapat")}</Button>}
+        </form>
+        {s?.enabled && s.logs.length > 0 && (
+          <details>
+            <summary className="cursor-pointer text-[13px] text-muted">{t("Son loglar")}</summary>
+            <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-surface-2 p-3 font-mono text-[12px] whitespace-pre-wrap">{s.logs.join("\n")}</pre>
+          </details>
+        )}
+      </div>
+    </Section>
   );
 }

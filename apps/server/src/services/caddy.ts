@@ -289,6 +289,10 @@ function upstreamsFor(d: DomainRow): string[] {
 }
 
 export function buildCaddyConfig(server: ServerRow) {
+  // Cloudflare Tunnel açıkken istekler cloudflared konteynerinden gelir; ziyaretçinin gerçek IP'si başlıktan alınır.
+  const clientIp = server.tunnel_token
+    ? { trusted_proxies: { source: "static", ranges: ["172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16"] }, client_ip_headers: ["Cf-Connecting-Ip", "X-Forwarded-For"] }
+    : {};
   const settings = getSettings();
   const blocked = blockedIpRanges();
   const domains = db
@@ -431,7 +435,7 @@ export function buildCaddyConfig(server: ServerRow) {
       http: {
         servers: httpsOff
           ? {
-              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, automatic_https: { disable: true } },
+              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, automatic_https: { disable: true }, ...clientIp },
             }
           : {
               https: {
@@ -439,8 +443,9 @@ export function buildCaddyConfig(server: ServerRow) {
                 routes: [...httpsRoutes, fallback],
                 logs: { default_logger_name: "access" },
                 automatic_https: { skip: httpOnlyHosts },
+                ...clientIp,
               },
-              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" } },
+              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, ...clientIp },
             },
       },
       ...(tlsPolicies && !httpsOff && httpsHosts.length

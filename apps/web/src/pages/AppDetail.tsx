@@ -328,11 +328,23 @@ function Env({ data }: { data: AppData }) {
 
 // ---------------------------------------------------------------------------
 
+type DnsResult = { host: string; ok: boolean; reason: string; message: string; addresses: string[] };
+
 function Domains({ app }: { app: App }) {
   const [host, setHost] = useState("");
   const [https, setHttps] = useState(true);
   const servers = useQuery({ queryKey: ["server", app.server.id], queryFn: () => api.get<{ server: { publicIp: string | null; httpsMode: string } }>(`/servers/${app.server.id}`) });
-  const add = useAction(() => api.post(`/apps/${app.id}/domains`, { host, https }), { success: t("Alan adı eklendi"), invalidate: [["app", app.id]], onSuccess: () => setHost("") });
+  const dnsCheck = useQuery({ queryKey: ["app", app.id, "dns"], queryFn: () => api.get<{ results: DnsResult[] }>(`/apps/${app.id}/domains/check`), refetchInterval: 60_000 });
+  const [addedDns, setAddedDns] = useState<DnsResult | null>(null);
+  const add = useAction(() => api.post<{ dns: DnsResult | null }>(`/apps/${app.id}/domains`, { host, https }), {
+    success: t("Alan adı eklendi"),
+    invalidate: [["app", app.id], ["app", app.id, "dns"]],
+    onSuccess: (r) => {
+      setHost("");
+      setAddedDns(r.dns && !r.dns.ok ? r.dns : null);
+    },
+  });
+  const dnsOf = (h: string) => dnsCheck.data?.results.find((r) => r.host === h);
   const gen = useAction(() => api.post(`/apps/${app.id}/domains/generate`), { success: t("Yeni otomatik adres oluşturuldu"), invalidate: [["app", app.id]] });
   const del = useAction((domainId: number) => api.del(`/apps/${app.id}/domains/${domainId}`), { success: t("Alan adı kaldırıldı"), invalidate: [["app", app.id]] });
   const ip = servers.data?.server.publicIp;
@@ -345,7 +357,12 @@ function Domains({ app }: { app: App }) {
           <div key={d.id} className="flex items-center gap-3 px-5 py-3">
             <div className="min-w-0 flex-1">
               <a href={d.url} target="_blank" rel="noreferrer" className="block truncate font-medium hover:underline">{d.host}</a>
-              <div className="text-[13px] text-faint">{d.generated ? t("Otomatik (sslip.io), DNS ayarı gerekmez") : t("Kendi alan adın")}, {d.https ? t("HTTPS otomatik") : t("yalnız HTTP")}</div>
+              <div className="text-[13px] text-faint">{d.generated ? t("Otomatik adres") : t("Kendi alan adın")}, {d.https ? t("HTTPS otomatik") : t("yalnız HTTP")}</div>
+              {dnsOf(d.host) && (
+                <div className={`mt-0.5 text-[12px] ${dnsOf(d.host)!.ok ? "text-ok" : "text-warn"}`}>
+                  {dnsOf(d.host)!.ok ? `✓ ${t("DNS bu sunucuyu gösteriyor")}` : `⚠ ${dnsOf(d.host)!.message}`}
+                </div>
+              )}
             </div>
             <Button size="sm" variant="ghost" aria-label={t("Kaldır")} onClick={() => del.mutate(d.id)}>
               <Trash2 className="size-4" />
@@ -354,6 +371,8 @@ function Domains({ app }: { app: App }) {
         ))}
         {app.domains.length === 0 && <div className="px-5 py-4 text-[14px] text-muted">{t("Bu uygulamanın adresi yok.")}</div>}
       </div>
+
+      {addedDns && <Notice tone="warn" title={t("Alan adı eklendi ama DNS henüz hazır değil")}>{addedDns.message}</Notice>}
 
       <Section title={t("Alan adı bağla")} description={ip ? t("Alan adının DNS ayarlarında {ip} adresine bir A kaydı oluştur, sonra buraya ekle. Sertifika ilk ziyarette otomatik alınır.", { ip }) : t("Önce sunucunun dış IP adresini sunucu ayarlarından gir.")}>
         <form

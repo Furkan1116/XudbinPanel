@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db.js";
 import { bus } from "../lib/events.js";
 import { body, HttpError, idParam } from "../lib/http.js";
+import { encrypt } from "../lib/crypto.js";
 import { applyCaddyConfig } from "../services/caddy.js";
 import { dockerFor, listContainers, type ServerRow } from "../services/docker.js";
 import {
@@ -19,6 +20,8 @@ import {
 } from "../services/servers.js";
 import { generateSshKey, hostKeyFingerprint, sshExec } from "../services/ssh.js";
 import { forgetDockerClient } from "../services/docker.js";
+import { checkDomain } from "../services/dns-check.js";
+import { ensureTunnel, tunnelStatus } from "../services/tunnel.js";
 
 // Alan adı veya IP; boşluk ve satır sonu içeremez (SSH ayar dosyasına yazılıyor).
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^\[?[0-9a-f:.]+\]?$/i;
@@ -46,6 +49,8 @@ function publicServer(s: ServerRow) {
     setupRunning: isSetupRunning(s.id),
     sshKey: key ? { id: key.id, name: key.name, publicKey: key.public_key } : null,
     hostKeyFingerprint: s.host_key ? hostKeyFingerprint(s.host_key) : null,
+    appsDomain: s.apps_domain,
+    tunnelEnabled: Boolean(s.tunnel_token),
     apps: usage.apps,
     databases: usage.dbs,
     createdAt: s.created_at,
@@ -119,6 +124,8 @@ export const serverRoutes = new Hono()
         publicIp: z.union([z.ipv4(), z.literal("")]).optional(),
         httpsMode: z.enum(["auto", "internal", "off"]).optional(),
         acmeEmail: z.union([z.email(), z.literal("")]).optional(),
+        appsDomain: z.union([z.string().trim().toLowerCase().regex(/^([a-z0-9-]+\.)+[a-z]{2,63}$/, "Geçerli bir alan adı gir (ör. apps.ornek.com)"), z.literal("")]).optional(),
+        tunnelToken: z.string().trim().max(2000).nullable().optional(),
       }),
     );
     if (s.kind === "local" && (input.host || input.port || input.username || input.sshKeyId))
@@ -132,6 +139,8 @@ export const serverRoutes = new Hono()
       public_ip: input.publicIp === "" ? null : input.publicIp,
       https_mode: input.httpsMode,
       acme_email: input.acmeEmail === "" ? null : input.acmeEmail,
+      apps_domain: input.appsDomain === undefined ? undefined : input.appsDomain || null,
+      tunnel_token: input.tunnelToken === undefined ? undefined : input.tunnelToken ? encrypt(input.tunnelToken) : null,
     });
     // Adres değiştiyse kayıtlı SSH anahtarı artık başka bir makineye ait; yeni bağlantıda yeniden kaydedilir.
     if ((input.host && input.host !== s.host) || (input.port && input.port !== s.port)) {
@@ -139,6 +148,14 @@ export const serverRoutes = new Hono()
       forgetDockerClient(s.id);
     }
     const updated = getServer(s.id);
+    if (updated.status === "ready" && input.tunnelToken !== undefined) {
+      try {
+        await ensureTunnel(updated);
+      } catch (err) {
+        throw new HttpError(500, `Tunnel başlatılamadı: ${(err as Error).message}`);
+      }
+      await applyCaddyConfig(updated);
+    }
     if (updated.status === "ready" && (input.httpsMode || input.acmeEmail !== undefined)) await applyCaddyConfig(updated);
     return c.json({ server: publicServer(updated) });
   })
@@ -190,6 +207,17 @@ export const serverRoutes = new Hono()
   })
 
   // Sunucu yeniden kurulduysa: kayıtlı SSH anahtarı silinir, bir sonraki bağlantıda yenisi kaydedilir.
+  // Wildcard alan adı testi: rastgele bir alt alan adı sunucunun IP'sine çözülüyor mu?
+  .post("/:id/apps-domain/check", async (c) => {
+    const s = getServer(idParam(c));
+    const { domain } = await body(c, z.object({ domain: z.string().trim().toLowerCase().regex(/^([a-z0-9-]+\.)+[a-z]{2,63}$/) }));
+    const probe = `xudbin-test-${Math.random().toString(36).slice(2, 8)}.${domain}`;
+    const r = await checkDomain(probe, s.public_ip);
+    return c.json({ ...r, message: r.ok ? `*.${domain} bu sunucuyu gösteriyor.` : r.reason === "missing" ? `*.${domain} için wildcard A kaydı yok. Alan adı sağlayıcında "*.${domain}" → ${s.public_ip ?? "sunucunun IP'si"} kaydını ekle.` : r.message });
+  })
+
+  .get("/:id/tunnel", async (c) => c.json(await tunnelStatus(getServer(idParam(c))).catch(() => ({ enabled: false, running: false, logs: [] }))))
+
   .post("/:id/reset-host-key", (c) => {
     const s = getServer(idParam(c));
     db.prepare("UPDATE servers SET host_key = NULL WHERE id = ?").run(s.id);

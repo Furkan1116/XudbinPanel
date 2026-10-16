@@ -14,6 +14,8 @@ export type ServerRow = {
   username: string;
   ssh_key_id: number | null;
   host_key: string | null;
+  apps_domain: string | null;
+  tunnel_token: string | null;
   public_ip: string | null;
   https_mode: "auto" | "internal" | "off";
   acme_email: string | null;

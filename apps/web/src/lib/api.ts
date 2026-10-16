@@ -60,6 +60,8 @@ export type Server = {
   setupRunning: boolean;
   sshKey: { id: number; name: string; publicKey: string } | null;
   hostKeyFingerprint: string | null;
+  appsDomain: string | null;
+  tunnelEnabled: boolean;
   apps: number;
   databases: number;
   createdAt: number;

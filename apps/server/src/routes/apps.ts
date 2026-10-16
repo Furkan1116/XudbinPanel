@@ -35,6 +35,7 @@ import { uptimeSummary } from "../services/uptime.js";
 import { deletePreview, handlePrEvent, parsePrEvent } from "../services/previews.js";
 import { appVolumes, backupAppVolumes, restoreVolumeBackup, volumeBackupFile } from "../services/volume-backups.js";
 import { Readable } from "node:stream";
+import { checkDomain } from "../services/dns-check.js";
 import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
@@ -50,7 +51,9 @@ const parseJson = (raw: string | null) => {
 
 const HOST_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
+/** Otomatik adres: sunucuya kendi wildcard alan adı tanımlıysa <ad>.apps.ornek.com, değilse <ad>.<ip>.sslip.io. */
 export function generatedHost(slug: string, server: ServerRow) {
+  if (server.apps_domain) return `${slug}.${server.apps_domain}`;
   if (!server.public_ip) return null;
   return `${slug}.${server.public_ip.replace(/\./g, "-")}.sslip.io`;
 }
@@ -521,10 +524,22 @@ export const appRoutes = new Hono<AppEnv>()
     const input = await body(c, z.object({ host: z.string().trim().toLowerCase(), https: z.boolean().default(true) }));
     if (!HOST_RE.test(input.host)) throw new HttpError(400, "Geçerli bir alan adı gir (ör. blog.ornek.com)");
     if (db.prepare("SELECT 1 FROM domains WHERE host = ?").get(input.host)) throw new HttpError(409, "Bu alan adı zaten kullanılıyor");
+    // DNS henüz sunucuyu göstermiyorsa alan adı yine eklenir (DNS sonradan düzeltilebilir), ama uyarı döner.
+    const dnsServer = getServer(app.server_id);
+    const dns = await checkDomain(input.host, dnsServer.public_ip).catch(() => null);
     db.prepare("INSERT INTO domains (app_id, host, https, generated, created_at) VALUES (?, ?, ?, 0, ?)").run(app.id, input.host, input.https ? 1 : 0, Date.now());
     const server = getServer(app.server_id);
     if (server.status === "ready") await applyCaddyConfig(server);
-    return c.json({ app: publicApp(loadApp(app.id)) }, 201);
+    return c.json({ app: publicApp(loadApp(app.id)), dns, note: "Ortam değişkenlerindeki alan adı listeleri bir sonraki deploy'da güncellenir." }, 201);
+  })
+
+  // Alan adlarının DNS durumu (sunucuyu gösteriyor mu).
+  .get("/:id/domains/check", async (c) => {
+    const app = loadApp(idParam(c));
+    const server = getServer(app.server_id);
+    const domains = db.prepare("SELECT host, generated FROM domains WHERE app_id = ?").all(app.id) as { host: string; generated: number }[];
+    const results = await Promise.all(domains.filter((d) => !d.generated || server.apps_domain).map((d) => checkDomain(d.host, server.public_ip)));
+    return c.json({ results });
   })
 
   .post("/:id/domains/generate", async (c) => {
