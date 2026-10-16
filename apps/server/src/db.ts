@@ -337,6 +337,43 @@ const migrations: string[] = [
   ALTER TABLE apps ADD COLUMN uptime_enabled INTEGER NOT NULL DEFAULT 1;
   ALTER TABLE servers ADD COLUMN log_inode TEXT;
   `,
+  // Proje yetkileri, işlem kaydı, API anahtarları.
+  `
+  CREATE TABLE project_members (
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'developer',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (project_id, user_id)
+  );
+  -- Mevcut üyeler şimdiye kadar her şeyi görüyordu; davranış değişmesin diye tüm projelere eklenir.
+  INSERT INTO project_members (project_id, user_id, role, created_at)
+    SELECT p.id, u.id, 'developer', CAST(strftime('%s','now') AS INTEGER) * 1000 FROM projects p CROSS JOIN users u WHERE u.role = 'member';
+  CREATE TABLE audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER,
+    user_email TEXT,
+    action     TEXT NOT NULL,
+    method     TEXT,
+    path       TEXT,
+    status     INTEGER,
+    ip         TEXT,
+    via        TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX audit_log_created ON audit_log (created_at);
+  CREATE TABLE api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    prefix       TEXT NOT NULL,
+    read_only    INTEGER NOT NULL DEFAULT 0,
+    last_used_at INTEGER,
+    expires_at   INTEGER,
+    created_at   INTEGER NOT NULL
+  );
+  `,
 ];
 
 function migrate() {

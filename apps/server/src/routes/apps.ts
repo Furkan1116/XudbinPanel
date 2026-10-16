@@ -32,6 +32,7 @@ import { getServer } from "../services/servers.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor.js";
 import { scanApp } from "../services/scan.js";
 import { uptimeSummary } from "../services/uptime.js";
+import { accessibleAppIds, accessibleProjectIds, canWriteProject } from "../services/access.js";
 
 const parseJson = (raw: string | null) => {
   try {
@@ -132,9 +133,16 @@ function loadApp(id: number) {
 }
 
 export const appRoutes = new Hono<AppEnv>()
+  // Erişilebilen tüm uygulamalar (CLI ve API anahtarlarıyla otomasyon için).
+  .get("/", (c) => {
+    const ids = accessibleAppIds(c.get("user"));
+    const apps = ids.length ? (db.prepare(`SELECT * FROM apps WHERE id IN (${ids.join(",")}) ORDER BY project_id, name`).all() as AppRow[]) : [];
+    return c.json({ apps: apps.map((a) => { const p = publicApp(a); return { id: p.id, projectId: p.projectId, name: p.name, slug: p.slug, status: p.status, sourceType: p.sourceType, framework: p.framework, domains: p.domains.map((d) => d.url) }; }) });
+  })
   .post("/", async (c) => {
     const input = await body(c, appInput);
     must(db.prepare("SELECT id FROM projects WHERE id = ?").get(input.projectId), "Proje bulunamadı");
+    if (!canWriteProject(c.get("user"), input.projectId)) throw new HttpError(403, "Bu projeye uygulama ekleme yetkin yok");
     const server = getServer(input.serverId);
     validateSource(input);
 
@@ -528,13 +536,14 @@ export const appRoutes = new Hono<AppEnv>()
     });
   });
 
-export const deploymentRoutes = new Hono()
+export const deploymentRoutes = new Hono<AppEnv>()
   .get("/", (c) => {
     const deployments = db
       .prepare(
         `SELECT d.id, d.status, d.trigger, d.title, d.commit_sha AS commitSha, d.started_at AS startedAt, d.finished_at AS finishedAt,
                 a.id AS appId, a.name AS appName
-         FROM deployments d JOIN apps a ON a.id = d.app_id ORDER BY d.id DESC LIMIT 8`,
+         FROM deployments d JOIN apps a ON a.id = d.app_id
+         WHERE a.project_id IN (${accessibleProjectIds(c.get("user")).join(",") || "-1"}) ORDER BY d.id DESC LIMIT 8`,
       )
       .all();
     return c.json({ deployments });
@@ -573,7 +582,7 @@ export const deploymentRoutes = new Hono()
     });
   });
 
-export const projectRoutes = new Hono()
+export const projectRoutes = new Hono<AppEnv>()
   .get("/", (c) => {
     const projects = db
       .prepare(
@@ -581,7 +590,7 @@ export const projectRoutes = new Hono()
                 (SELECT COUNT(*) FROM apps a WHERE a.project_id = p.id) AS apps,
                 (SELECT COUNT(*) FROM databases d WHERE d.project_id = p.id) AS databases,
                 (SELECT COUNT(*) FROM apps a WHERE a.project_id = p.id AND a.status = 'running') AS running
-         FROM projects p ORDER BY p.id DESC`,
+         FROM projects p WHERE p.id IN (${accessibleProjectIds(c.get("user")).join(",") || "-1"}) ORDER BY p.id DESC`,
       )
       .all();
     return c.json({ projects });
@@ -589,6 +598,9 @@ export const projectRoutes = new Hono()
   .post("/", async (c) => {
     const input = await body(c, z.object({ name: z.string().trim().min(1, "İsim gerekli").max(60), description: z.string().trim().max(300).default("") }));
     const res = db.prepare("INSERT INTO projects (name, description, created_at) VALUES (?, ?, ?)").run(input.name, input.description, Date.now());
+    // Projeyi oluşturan üye, projeye geliştirici olarak eklenir.
+    const user = c.get("user");
+    if (user.role !== "admin") db.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'developer', ?)").run(Number(res.lastInsertRowid), user.id, Date.now());
     return c.json({ project: { id: Number(res.lastInsertRowid), ...input } }, 201);
   })
   .get("/:id", (c) => {
@@ -605,6 +617,31 @@ export const projectRoutes = new Hono()
       )
       .all(id);
     return c.json({ project, apps, databases });
+  })
+  // Proje üyeleri (yalnız yönetici yönetir).
+  .get("/:id/members", (c) => {
+    const id = idParam(c);
+    const members = db
+      .prepare("SELECT u.id, u.name, u.email, m.role FROM project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = ? ORDER BY u.name")
+      .all(id);
+    return c.json({ members });
+  })
+  .put("/:id/members/:userId", async (c) => {
+    if (c.get("user").role !== "admin") throw new HttpError(403, "Üyeleri yalnız yönetici değiştirebilir");
+    const id = idParam(c);
+    const userId = idParam(c, "userId");
+    const { role } = await body(c, z.object({ role: z.enum(["developer", "viewer"]) }));
+    const u = must(db.prepare("SELECT role FROM users WHERE id = ?").get(userId) as { role: string } | undefined, "Kullanıcı bulunamadı");
+    if (u.role === "admin") throw new HttpError(422, "Yöneticiler zaten tüm projeleri görür");
+    db.prepare(
+      "INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(project_id, user_id) DO UPDATE SET role = excluded.role",
+    ).run(id, userId, role, Date.now());
+    return c.json({ ok: true });
+  })
+  .delete("/:id/members/:userId", (c) => {
+    if (c.get("user").role !== "admin") throw new HttpError(403, "Üyeleri yalnız yönetici değiştirebilir");
+    db.prepare("DELETE FROM project_members WHERE project_id = ? AND user_id = ?").run(idParam(c), idParam(c, "userId"));
+    return c.json({ ok: true });
   })
   .patch("/:id", async (c) => {
     const id = idParam(c);
@@ -656,7 +693,7 @@ export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
 });
 
 /** Framework kataloğu ve repo algılama. */
-export const frameworkRoutes = new Hono()
+export const frameworkRoutes = new Hono<AppEnv>()
   .get("/", (c) => c.json({ frameworks: publicCatalog() }))
   .post("/detect", async (c) => {
     const input = await body(
@@ -675,6 +712,7 @@ export const frameworkRoutes = new Hono()
     let context = input.buildContext;
     if (input.appId) {
       const app = loadApp(input.appId);
+      if (!accessibleAppIds(c.get("user")).includes(app.id)) throw new HttpError(404, "Uygulama bulunamadı");
       url = url || app.git_url || undefined;
       branch = input.gitUrl ? branch : app.git_branch;
       token = token || decrypt(app.git_token);

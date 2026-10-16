@@ -8,6 +8,7 @@ import { checkSetupToken, clearSetupToken } from "../auth/setup-token.js";
 import { totpCounter } from "../auth/totp.js";
 import { decrypt } from "../lib/crypto.js";
 import { recordPanelEvent } from "../services/security.js";
+import { recordAudit } from "../services/audit.js";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { clientIp } from "../lib/client-ip.js";
@@ -92,6 +93,7 @@ export const authRoutes = new Hono()
     const valid = await verifyPassword(parsed.data.password, user?.password_hash ?? DUMMY_HASH);
     if (!user || !valid) {
       recordPanelEvent(ip, "panel_login", "/api/auth/login", c.req.header("user-agent"));
+      recordAudit({ userId: user?.id ?? null, email: parsed.data.email, action: "Başarısız giriş denemesi", method: "POST", path: "/api/auth/login", status: 401, ip, via: "panel" });
       return c.json({ error: "E-posta veya şifre hatalı" }, 401);
     }
     if (user.totp_secret) {
@@ -107,6 +109,7 @@ export const authRoutes = new Hono()
 
     loginLimiter.reset(ip);
     startSession(c, user.id);
+    recordAudit({ userId: user.id, email: parsed.data.email, action: "Giriş yaptı", method: "POST", path: "/api/auth/login", status: 200, ip, via: "panel" });
     return c.json({ ok: true });
   })
 

@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { useSearchParams } from "react-router";
+import { ApiTokens } from "@/components/ApiTokens";
+import { AuditLog } from "@/components/AuditLog";
 import { BackupSettings } from "@/components/BackupSettings";
 import { Button, ConfirmDialog, CopyField, Dialog, Field, Notice, PageHeader, PageLoading, Section, Tabs, Toggle, useAction } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -8,7 +10,7 @@ import { useAuthStatus } from "@/lib/auth";
 import { timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
-type Tab = "panel" | "account" | "users" | "notifications" | "backup" | "keys";
+type Tab = "panel" | "account" | "users" | "notifications" | "backup" | "keys" | "audit";
 
 export function SettingsPage() {
   const [params, setParams] = useSearchParams();
@@ -30,6 +32,7 @@ export function SettingsPage() {
                 { id: "notifications", label: t("Bildirimler") },
                 { id: "backup", label: t("Yedekleme") },
                 { id: "keys", label: t("SSH anahtarları") },
+                { id: "audit", label: t("İşlem kaydı") },
               ]
             : [{ id: "account", label: t("Hesap") }]
         }
@@ -40,6 +43,7 @@ export function SettingsPage() {
       {tab === "notifications" && admin && <Notifications />}
       {tab === "backup" && admin && <BackupSettings />}
       {tab === "keys" && admin && <SshKeys />}
+      {tab === "audit" && admin && <AuditLog />}
     </>
   );
 }
@@ -90,6 +94,7 @@ function Account() {
       <Password />
       <TwoFactor enabled={data.totpEnabled} />
       <Sessions sessions={data.sessions} />
+      <ApiTokens />
     </div>
   );
 }

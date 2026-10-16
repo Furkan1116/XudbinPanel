@@ -6,6 +6,7 @@ import { CreateAppWizard } from "@/components/CreateAppWizard";
 import { FrameworkLogo } from "@/components/FrameworkLogo";
 import { Button, ConfirmDialog, Dialog, Empty, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, useAction } from "@/components/ui";
 import { api, type App, type Server } from "@/lib/api";
+import { useAuthStatus } from "@/lib/auth";
 import { t } from "@/lib/i18n";
 
 type ProjectApp = Pick<App, "id" | "name" | "sourceType" | "status" | "server" | "domains" | "gitUrl" | "image" | "framework">;
@@ -88,6 +89,8 @@ export function ProjectDetailPage() {
           </div>
         )}
       </Section>
+
+      <Members projectId={id} />
 
       {apps.length === 0 && databases.length === 0 && (
         <Section title={t("Projeyi sil")}>
@@ -227,5 +230,76 @@ function EditProjectDialog({ open, onClose, project }: { open: boolean; onClose:
         </div>
       </form>
     </Dialog>
+  );
+}
+
+type Member = { id: number; name: string; email: string; role: "developer" | "viewer" };
+
+/** Projeyi görebilen üyeler (yöneticiler her projeyi zaten görür); yalnız yönetici değiştirir. */
+function Members({ projectId }: { projectId: number }) {
+  const admin = useAuthStatus().data?.user?.role === "admin";
+  const members = useQuery({ queryKey: ["project", projectId, "members"], queryFn: () => api.get<{ members: Member[] }>(`/projects/${projectId}/members`) });
+  const users = useQuery({
+    queryKey: ["users"],
+    queryFn: () => api.get<{ users: { id: number; name: string; email: string; role: string }[] }>("/users"),
+    enabled: admin,
+  });
+  const [pick, setPick] = useState({ userId: "", role: "developer" });
+  const save = useAction((v: { userId: number; role: string }) => api.put(`/projects/${projectId}/members/${v.userId}`, { role: v.role }), {
+    success: t("Üye güncellendi"),
+    invalidate: [["project", projectId, "members"]],
+    onSuccess: () => setPick({ userId: "", role: "developer" }),
+  });
+  const remove = useAction((userId: number) => api.del(`/projects/${projectId}/members/${userId}`), { success: t("Üye projeden çıkarıldı"), invalidate: [["project", projectId, "members"]] });
+  const list = members.data?.members ?? [];
+  const candidates = (users.data?.users ?? []).filter((u) => u.role === "member" && !list.some((m) => m.id === u.id));
+  if (!admin && list.length === 0) return null;
+
+  return (
+    <Section title={t("Üyeler")} description={t("Yöneticiler her projeyi görür. Üyeler yalnız eklendikleri projeleri görür; izleyiciler hiçbir şeyi değiştiremez.")}>
+      <div className="panel divide-y divide-line">
+        {list.length === 0 && <div className="px-5 py-4 text-[14px] text-muted">{t("Bu projeye eklenmiş üye yok.")}</div>}
+        {list.map((m) => (
+          <div key={m.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+            <div className="min-w-0">
+              <div className="truncate font-medium">{m.name}</div>
+              <div className="truncate text-[13px] text-muted">{m.email}</div>
+            </div>
+            {admin ? (
+              <div className="flex items-center gap-2">
+                <select className="input w-auto" value={m.role} onChange={(e) => save.mutate({ userId: m.id, role: e.target.value })} aria-label={t("Rol")}>
+                  <option value="developer">{t("Geliştirici")}</option>
+                  <option value="viewer">{t("İzleyici")}</option>
+                </select>
+                <Button size="sm" variant="ghost" onClick={() => remove.mutate(m.id)}>{t("Çıkar")}</Button>
+              </div>
+            ) : (
+              <span className="text-[13px] text-muted">{m.role === "viewer" ? t("İzleyici") : t("Geliştirici")}</span>
+            )}
+          </div>
+        ))}
+        {admin && candidates.length > 0 && (
+          <form
+            className="flex flex-wrap items-center gap-2 px-5 py-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (pick.userId) save.mutate({ userId: Number(pick.userId), role: pick.role });
+            }}
+          >
+            <select className="input w-auto min-w-48" value={pick.userId} onChange={(e) => setPick({ ...pick, userId: e.target.value })} aria-label={t("Kullanıcı")}>
+              <option value="">{t("Üye seç")}</option>
+              {candidates.map((u) => (
+                <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+              ))}
+            </select>
+            <select className="input w-auto" value={pick.role} onChange={(e) => setPick({ ...pick, role: e.target.value })} aria-label={t("Rol")}>
+              <option value="developer">{t("Geliştirici")}</option>
+              <option value="viewer">{t("İzleyici")}</option>
+            </select>
+            <Button type="submit" disabled={!pick.userId} loading={save.isPending}>{t("Ekle")}</Button>
+          </form>
+        )}
+      </div>
+    </Section>
   );
 }

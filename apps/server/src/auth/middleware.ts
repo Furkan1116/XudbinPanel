@@ -1,11 +1,25 @@
 import { getCookie } from "hono/cookie";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../lib/types.js";
+import { validateApiToken } from "./api-tokens.js";
 import { validateSession } from "./session.js";
 
 export const SESSION_COOKIE = "xudbin_session";
 
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
+  // API anahtarı (CI/CD, CLI): Authorization: Bearer xb_...
+  const bearer = c.req.header("authorization")?.match(/^Bearer\s+(xb_[\w-]+)$/)?.[1];
+  if (bearer) {
+    const found = validateApiToken(bearer);
+    if (!found) return c.json({ error: "API anahtarı geçersiz veya süresi dolmuş" }, 401);
+    if (found.readOnly && c.req.method !== "GET") return c.json({ error: "Bu API anahtarı salt okunur" }, 403);
+    // Anahtarla yeni anahtar üretilemez, hesap ayarları değiştirilemez.
+    if (/^\/api\/settings\/account/.test(c.req.path) && c.req.method !== "GET") return c.json({ error: "Hesap ayarları API anahtarıyla değiştirilemez" }, 403);
+    c.set("user", found.user);
+    c.set("viaToken", true);
+    c.set("tokenReadOnly", found.readOnly);
+    return next();
+  }
   const token = getCookie(c, SESSION_COOKIE);
   const user = token ? validateSession(token) : null;
   if (!user) return c.json({ error: "Oturum açmanız gerekiyor" }, 401);
@@ -17,7 +31,7 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
  * Üye rolündeki kullanıcılar uygulama, proje ve veritabanlarını yönetir; sunucular, güvenlik,
  * panel ayarları, bildirimler, SSH anahtarları ve kullanıcılar yalnız yöneticiye açıktır.
  */
-const ADMIN_ANY = [/^\/api\/ssh-keys/, /^\/api\/users/, /^\/api\/settings\/(panel|notifications|backup)/];
+const ADMIN_ANY = [/^\/api\/ssh-keys/, /^\/api\/users/, /^\/api\/settings\/(panel|notifications|backup|audit)/, /^\/api\/security/];
 const ADMIN_WRITE = [/^\/api\/servers/, /^\/api\/security/];
 
 export const enforceRoles = createMiddleware<AppEnv>(async (c, next) => {

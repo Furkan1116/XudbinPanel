@@ -25,6 +25,8 @@ import {
 } from "../services/databases.js";
 import { demuxLogs } from "../services/deploy.js";
 import { offsiteTarget } from "../services/offsite.js";
+import { canWriteProject } from "../services/access.js";
+import type { AppEnv } from "../lib/types.js";
 import { s3Delete } from "../lib/s3.js";
 import { dockerFor } from "../services/docker.js";
 import { getServer } from "../services/servers.js";
@@ -59,7 +61,7 @@ function publicDb(d: DatabaseRow) {
 
 const load = (id: number) => must(getDatabase(id), "Veritabanı bulunamadı");
 
-export const databaseRoutes = new Hono()
+export const databaseRoutes = new Hono<AppEnv>()
   .get("/engines", (c) =>
     c.json({ engines: Object.entries(ENGINES).map(([id, e]) => ({ id, label: e.label, versions: e.versions, port: e.port })) }),
   )
@@ -76,6 +78,7 @@ export const databaseRoutes = new Hono()
         externalPort: z.number().int().min(1024).max(65535).nullable().optional(),
       }),
     );
+    if (!canWriteProject(c.get("user"), input.projectId)) throw new HttpError(403, "Bu projeye veritabanı ekleme yetkin yok");
     must(db.prepare("SELECT id FROM projects WHERE id = ?").get(input.projectId), "Proje bulunamadı");
     const server = getServer(input.serverId);
     if (server.status !== "ready") throw new HttpError(422, "Sunucu hazır değil");

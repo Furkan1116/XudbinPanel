@@ -14,6 +14,7 @@ import { decrypt, encrypt } from "../lib/crypto.js";
 import { body, HttpError, idParam } from "../lib/http.js";
 import { getSettings, updateSettings } from "../lib/settings.js";
 import { VERSION } from "../lib/version.js";
+import { createApiToken } from "../auth/api-tokens.js";
 import type { AppEnv } from "../lib/types.js";
 import { applyCaddyConfig } from "../services/caddy.js";
 import { NOTIFY_EVENTS, sendTo } from "../services/notify.js";
@@ -173,6 +174,36 @@ export const settingsRoutes = new Hono<AppEnv>()
       throw new HttpError(400, `Gönderilemedi: ${(err as Error).message}`);
     }
     return c.json({ ok: true });
+  })
+
+  // --- API anahtarları -------------------------------------------------------------------------
+  .get("/account/tokens", (c) => {
+    const tokens = db
+      .prepare("SELECT id, name, prefix, read_only AS readOnly, last_used_at AS lastUsedAt, expires_at AS expiresAt, created_at AS createdAt FROM api_tokens WHERE user_id = ? ORDER BY id DESC")
+      .all(c.get("user").id);
+    return c.json({ tokens });
+  })
+  .post("/account/tokens", async (c) => {
+    const input = await body(c, z.object({ name: z.string().trim().min(1, "Ad gerekli").max(60), readOnly: z.boolean().default(false), expiresInDays: z.number().int().min(1).max(3650).nullable().default(null) }));
+    const created = createApiToken(c.get("user").id, input.name, input);
+    return c.json({ id: created.id, token: created.token }, 201);
+  })
+  .delete("/account/tokens/:id", (c) => {
+    db.prepare("DELETE FROM api_tokens WHERE id = ? AND user_id = ?").run(idParam(c), c.get("user").id);
+    return c.json({ ok: true });
+  })
+
+  // --- İşlem kaydı (yalnız yönetici) ---------------------------------------------------------
+  .get("/audit", (c) => {
+    const q = c.req.query("q")?.trim();
+    const before = Number(c.req.query("before")) || Number.MAX_SAFE_INTEGER;
+    const rows = db
+      .prepare(
+        `SELECT id, user_email AS email, action, method, path, status, ip, via, created_at AS createdAt FROM audit_log
+         WHERE id < ? ${q ? "AND (user_email LIKE ? OR action LIKE ? OR path LIKE ? OR ip LIKE ?)" : ""} ORDER BY id DESC LIMIT 100`,
+      )
+      .all(before, ...(q ? [`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`] : []));
+    return c.json({ entries: rows });
   })
 
   // --- Yedekleme: uzak depolama, panel yedeği, doğrulama sıklığı ---------------------------

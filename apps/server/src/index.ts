@@ -7,6 +7,8 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import { enforceRoles, requireAuth } from "./auth/middleware.js";
+import { projectAccess } from "./services/access.js";
+import { auditTrail, pruneAudit } from "./services/audit.js";
 import { purgeExpiredSessions } from "./auth/session.js";
 import { ensureSetupToken } from "./auth/setup-token.js";
 import { config } from "./config.js";
@@ -75,6 +77,8 @@ app.use("/api/*", sameOrigin);
 app.route("/api/auth", authRoutes);
 app.use("/api/*", requireAuth);
 app.use("/api/*", enforceRoles);
+app.use("/api/*", projectAccess);
+app.use("/api/*", auditTrail);
 app.route("/api/servers", serverRoutes);
 app.route("/api/ssh-keys", sshKeyRoutes);
 app.route("/api/projects", projectRoutes);
@@ -122,6 +126,7 @@ startFirewallKeeper();
 startMaintenance();
 startUptimeMonitor();
 startAnalyticsJobs();
+setInterval(pruneAudit, 24 * 3_600_000).unref();
 startServerMonitor((s, ok) =>
   ok ? notify("server_down", `${s.name} yeniden erişilebilir`, "Sunucuyla bağlantı geri geldi.") : notify("server_down", `${s.name} sunucusuna ulaşılamıyor`, "SSH bağlantısı 20 saniye içinde kurulamadı."),
 );
