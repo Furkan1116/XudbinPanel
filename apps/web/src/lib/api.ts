@@ -119,6 +119,7 @@ export type App = {
   cpuLimit: number | null;
   memoryLimit: number | null;
   httpCheck: boolean;
+  uptimeEnabled: boolean;
   scan: {
     status: "running" | "success" | "failed" | null;
     at: number | null;

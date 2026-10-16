@@ -5,6 +5,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router";
 import { DeployDoctor } from "@/components/DeployDoctor";
 import { DropZone, uploadZip } from "@/components/DropZone";
 import { ImageScan } from "@/components/ImageScan";
+import { UptimeCard } from "@/components/UptimeCard";
 import { FrameworkLogo } from "@/components/FrameworkLogo";
 import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frameworkById, useFrameworks } from "@/components/FrameworkSetup";
 import { LogViewer } from "@/components/LogViewer";
@@ -167,6 +168,7 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
         <Row label={t("İç adres")} value={`${app.internalHost}:${app.port}`} hint={t("Aynı sunucudaki diğer uygulamalar bu adresle ulaşır.")} mono />
       </dl>
 
+      <UptimeCard app={app} />
       <DeployDoctor app={app} last={last} />
       <ImageScan app={app} />
 
@@ -462,6 +464,7 @@ function Settings({ app }: { app: App }) {
     cpuLimit: app.cpuLimit ? String(app.cpuLimit) : "",
     memoryLimit: app.memoryLimit ? String(app.memoryLimit) : "",
     httpCheck: app.httpCheck,
+    uptimeEnabled: app.uptimeEnabled,
     healthPath: app.healthPath ?? "",
     volumes: app.volumes,
   });
@@ -489,6 +492,7 @@ function Settings({ app }: { app: App }) {
         cpuLimit: Number(form.cpuLimit) || null,
         memoryLimit: Number(form.memoryLimit) || null,
         httpCheck: form.httpCheck,
+        uptimeEnabled: form.uptimeEnabled,
         healthPath: form.healthPath.trim() || null,
         volumes: form.volumes.filter((v) => v.name && v.path),
       }),
@@ -579,6 +583,7 @@ function Settings({ app }: { app: App }) {
           )}
           {app.sourceType !== "compose" && (
             <>
+              <Toggle checked={form.uptimeEnabled} onChange={(v) => setForm({ ...form, uptimeEnabled: v })} label={t("Erişilebilirlik izleme")} description={t("Site dakikada bir dışarıdan denenir; art arda iki denemede yanıt vermezse bildirim kanallarına \"site çöktü\", düzelince \"yeniden çalışıyor\" bildirimi gider.")} />
               <Toggle checked={form.httpCheck} onChange={(v) => setForm({ ...form, httpCheck: v })} label={t("Deploy'da HTTP kontrolü")} description={t("Yeni sürüme trafik geçmeden önce alan adıyla istek atılır; 400 veya 5xx dönerse eski sürüm yayında kalır ve Deploy Doktoru sebebi gösterir.")} />
               {form.httpCheck && (
                 <Field label={t("Sağlık kontrolü yolu")} hint={t("Boşsa / kullanılır ve 404 de kabul edilir. Verilirse 2xx/3xx dönmeli, ör. /health.")}>

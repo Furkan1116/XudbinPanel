@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { Link } from "react-router";
 import { ResourceChart } from "@/components/ResourceChart";
 import { ServerMeters } from "@/components/ServerMeters";
-import { Empty, PageHeader, PageLoading, Section, StatusBadge } from "@/components/ui";
+import { Empty, Notice, PageHeader, PageLoading, Section, StatusBadge } from "@/components/ui";
 import { api, type Deployment, type ServerOverview } from "@/lib/api";
 import { duration, formatUptime, timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -15,6 +15,7 @@ export function DashboardPage() {
   const servers = useQuery({ queryKey: ["servers", "overview"], queryFn: () => api.get<{ servers: ServerOverview[] }>("/servers/overview"), refetchInterval: 5000 });
   const deployments = useQuery({ queryKey: ["deployments", "recent"], queryFn: () => api.get<{ deployments: RecentDeployment[] }>("/deployments"), refetchInterval: 5000 });
   const security = useQuery({ queryKey: ["security", "summary", 24], queryFn: () => api.get<SecuritySummary>("/security/summary?hours=24"), refetchInterval: 30_000 });
+  const down = useQuery({ queryKey: ["analytics", "down"], queryFn: () => api.get<{ down: { appId: number; name: string; since: number; reason: string }[] }>("/analytics/down"), refetchInterval: 30_000 });
 
   if (!servers.data) return <PageLoading />;
   const local = servers.data.servers.find((s) => s.kind === "local");
@@ -23,6 +24,21 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader title={t("Genel bakış")} description={t("{n} sunucu yönetiliyor", { n: servers.data.servers.length })} />
+
+      {down.data && down.data.down.length > 0 && (
+        <div className="mb-6">
+          <Notice tone="danger" title={t("{n} site şu an erişilemiyor", { n: down.data.down.length })}>
+            <ul className="mt-1 space-y-0.5">
+              {down.data.down.map((d) => (
+                <li key={d.appId}>
+                  <Link to={`/apps/${d.appId}`} className="font-medium hover:underline">{d.name}</Link>{" "}
+                  <span className="text-muted">· {d.reason} · {timeAgo(d.since)}</span>
+                </li>
+              ))}
+            </ul>
+          </Notice>
+        </div>
+      )}
 
       {local?.stats?.history && (
         <section className="panel px-5 pt-4 pb-5" aria-label={t("Panel sunucusunun kaynak kullanımı")}>

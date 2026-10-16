@@ -247,8 +247,8 @@ function describeAgent(ua: string | null) {
 
 // ---------------------------------------------------------------------------
 
-type Channel = { id: number; name: string; kind: "discord" | "telegram" | "slack" | "webhook"; events: string[]; enabled: boolean };
-const KINDS = { discord: t("Discord"), telegram: t("Telegram"), slack: t("Slack"), webhook: t("Webhook") };
+type Channel = { id: number; name: string; kind: "discord" | "telegram" | "slack" | "webhook" | "email"; events: string[]; enabled: boolean };
+const KINDS = { email: t("E-posta"), discord: t("Discord"), telegram: t("Telegram"), slack: t("Slack"), webhook: t("Webhook") };
 
 function Notifications() {
   const { data } = useQuery({ queryKey: ["notifications"], queryFn: () => api.get<{ notifications: Channel[]; events: Record<string, string> }>("/settings/notifications") });
@@ -284,8 +284,27 @@ function Notifications() {
 }
 
 function AddChannel({ open, onClose, events }: { open: boolean; onClose: () => void; events: Record<string, string> }) {
-  const [form, setForm] = useState({ name: "", kind: "discord" as Channel["kind"], url: "", botToken: "", chatId: "", events: Object.keys(events) });
-  const config = form.kind === "telegram" ? { botToken: form.botToken, chatId: form.chatId } : { url: form.url };
+  const [form, setForm] = useState({
+    name: "",
+    kind: "email" as Channel["kind"],
+    url: "",
+    botToken: "",
+    chatId: "",
+    smtpHost: "",
+    smtpPort: "587",
+    smtpUser: "",
+    smtpPass: "",
+    from: "",
+    to: "",
+    events: Object.keys(events),
+  });
+  const config =
+    form.kind === "telegram"
+      ? { botToken: form.botToken, chatId: form.chatId }
+      : form.kind === "email"
+        ? { host: form.smtpHost, port: form.smtpPort, user: form.smtpUser, pass: form.smtpPass, from: form.from, to: form.to }
+        : { url: form.url };
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value.trim() });
   const test = useAction(() => api.post("/settings/notifications/test", { kind: form.kind, config }), { success: t("Test bildirimi gönderildi") });
   const create = useAction(() => api.post("/settings/notifications", { name: form.name || KINDS[form.kind], kind: form.kind, config, events: form.events }), {
     success: t("Kanal eklendi"),
@@ -313,7 +332,32 @@ function AddChannel({ open, onClose, events }: { open: boolean; onClose: () => v
             <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={KINDS[form.kind]} />
           </Field>
         </div>
-        {form.kind === "telegram" ? (
+        {form.kind === "email" ? (
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-[1fr_6rem]">
+              <Field label={t("SMTP sunucusu")} hint={t("Ör. smtp.gmail.com, smtp.office365.com, smtp.yandex.com")}>
+                <input className="input font-mono text-[13px]" required value={form.smtpHost} onChange={set("smtpHost")} />
+              </Field>
+              <Field label={t("Port")} hint={t("587 veya 465")}>
+                <input className="input" inputMode="numeric" value={form.smtpPort} onChange={set("smtpPort")} />
+              </Field>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={t("Kullanıcı adı")}>
+                <input className="input" autoComplete="off" value={form.smtpUser} onChange={set("smtpUser")} />
+              </Field>
+              <Field label={t("Şifre")} hint={t("Gmail'de uygulama şifresi kullan.")}>
+                <input className="input" type="password" autoComplete="new-password" value={form.smtpPass} onChange={(e) => setForm({ ...form, smtpPass: e.target.value })} />
+              </Field>
+              <Field label={t("Gönderen")}>
+                <input className="input" required placeholder="Xudbin <panel@ornek.com>" value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} />
+              </Field>
+              <Field label={t("Alıcılar")} hint={t("Virgülle ayır.")}>
+                <input className="input" required placeholder="sen@ornek.com" value={form.to} onChange={set("to")} />
+              </Field>
+            </div>
+          </div>
+        ) : form.kind === "telegram" ? (
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label={t("Bot token")} hint={t("@BotFather'dan alınır.")}>
               <input className="input font-mono text-[13px]" required value={form.botToken} onChange={(e) => setForm({ ...form, botToken: e.target.value.trim() })} />

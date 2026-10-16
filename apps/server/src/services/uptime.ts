@@ -14,7 +14,7 @@ import { getServer, listServers, getServerStats } from "./servers.js";
 type AppRow = { id: number; name: string; server_id: number; container: string | null; port: number; health_path: string | null; status: string; source_type: string; uptime_enabled: number };
 
 const FAIL_THRESHOLD = 2;
-const state = new Map<number, { fails: number; down: boolean; since: number; reason: string }>();
+const state = new Map<number, { fails: number; down: boolean; since: number; firstFail: number; reason: string }>();
 
 async function checkUrl(url: string): Promise<{ ok: boolean; status: number | null; ms: number; error?: string }> {
   const started = Date.now();
@@ -49,26 +49,33 @@ async function checkApp(app: AppRow) {
   }
   db.prepare("INSERT INTO uptime_checks (app_id, at, ok, status, ms, error) VALUES (?, ?, ?, ?, ?, ?)").run(app.id, Date.now(), r.ok ? 1 : 0, r.status, r.ms, r.error ?? null);
 
-  const s = state.get(app.id) ?? { fails: 0, down: false, since: 0, reason: "" };
+  const s = state.get(app.id) ?? { fails: 0, down: false, since: 0, firstFail: 0, reason: "" };
   if (r.ok) {
     if (s.down) {
       const minutes = Math.max(1, Math.round((Date.now() - s.since) / 60_000));
       db.prepare("UPDATE uptime_incidents SET ended_at = ? WHERE app_id = ? AND ended_at IS NULL").run(Date.now(), app.id);
       notify("site_up", `${app.name} yeniden çalışıyor`, `${target.url} yaklaşık ${minutes} dakika erişilemedi, şimdi yanıt veriyor (${r.status}, ${r.ms} ms).`);
     }
-    state.set(app.id, { fails: 0, down: false, since: 0, reason: "" });
+    state.set(app.id, { fails: 0, down: false, since: 0, firstFail: 0, reason: "" });
     return;
   }
   s.fails++;
+  if (s.fails === 1) s.firstFail = Date.now() - r.ms;
   const reason = r.status ? `HTTP ${r.status}` : (r.error ?? "yanıt yok");
   if (!s.down && s.fails >= FAIL_THRESHOLD) {
     s.down = true;
-    s.since = Date.now();
+    // Kesinti ilk başarısız denemeden başlar.
+    s.since = s.firstFail || Date.now();
     s.reason = reason;
     db.prepare("INSERT INTO uptime_incidents (app_id, started_at, reason) VALUES (?, ?, ?)").run(app.id, s.since, reason);
     notify("site_down", `${app.name} çöktü`, `${target.url} art arda ${s.fails} denemede yanıt vermedi (${reason}). Düzelince ayrıca haber verilecek.`);
   }
   state.set(app.id, s);
+}
+
+/** Şu an erişilemeyen uygulamalar (Genel bakış uyarısı için). */
+export function downApps() {
+  return [...state.entries()].filter(([, s]) => s.down).map(([appId, s]) => ({ appId, since: s.since, reason: s.reason }));
 }
 
 /** Uygulamanın erişilebilirlik özeti: 24 saat / 7 gün / 30 gün oranları, son yanıt süreleri, olaylar. */

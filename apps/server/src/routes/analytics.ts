@@ -5,6 +5,7 @@ import { HttpError } from "../lib/http.js";
 import type { AppEnv } from "../lib/types.js";
 import { accessibleAppIds } from "../services/access.js";
 import { analyticsReport, type Range } from "../services/analytics.js";
+import { downApps } from "../services/uptime.js";
 
 export const analyticsRoutes = new Hono<AppEnv>()
   .get("/sites", (c) => {
@@ -31,4 +32,13 @@ export const analyticsRoutes = new Hono<AppEnv>()
       ids = [id];
     }
     return c.json(analyticsReport(ids, range));
+  })
+  // Şu an erişilemeyen siteler (Genel bakıştaki uyarı).
+  .get("/down", (c) => {
+    const allowed = new Set(accessibleAppIds(c.get("user")));
+    const rows = downApps().filter((d) => allowed.has(d.appId));
+    const names = new Map(
+      rows.length ? (db.prepare(`SELECT id, name FROM apps WHERE id IN (${rows.map(() => "?").join(",")})`).all(...rows.map((r) => r.appId)) as { id: number; name: string }[]).map((r) => [r.id, r.name]) : [],
+    );
+    return c.json({ down: rows.map((r) => ({ ...r, name: names.get(r.appId) ?? "?" })) });
   });
