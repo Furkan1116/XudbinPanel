@@ -1,7 +1,7 @@
 {
   "name": "xudbin",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Kendi sunucunu y\u00f6net: otomatik domain, \u00fccretsiz HTTPS ve yerle\u015fik sald\u0131r\u0131 korumas\u0131 olan self-hosted panel.",
   "license": "MIT",
   "workspaces": [

@@ -33,18 +33,19 @@ done
 /** Geliştirmede (Mac + OrbStack) kapalı; sunucuda XUDBIN_DOCKER_FIREWALL=0 ile kapatılabilir. */
 export const dockerFirewallEnabled = () => config.isProd && process.env.XUDBIN_DOCKER_FIREWALL !== "0";
 
-/** Sunucunun kendi kabuğunda root olarak komut çalıştırır: Caddy imajından, sunucunun köküne chroot eden kısa ömürlü bir konteyner. */
+/** Sunucunun kendi kabuğunda root olarak komut çalıştırır: Caddy imajından kısa ömürlü bir konteyner, sunucunun köküne chroot edip PID 1'in ad alanlarına girer. */
 export async function hostExec(server: ServerRow, script: string, timeoutMs = 60_000) {
   const docker = dockerFor(server);
   if (!(await imageExists(docker, config.caddyImage))) throw new Error("Caddy imajı yok; önce sunucu kurulumunu tamamla");
   const container = await docker.createContainer({
     Image: config.caddyImage,
-    Entrypoint: ["chroot", "/host", "sh", "-c", script],
+    // Sunucunun PID 1'inin (systemd) ad alanlarına girilir: yalnız chroot'ta systemctl/systemd-run systemd'ye bağlanamaz.
+    Entrypoint: ["chroot", "/host", "nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", script],
     Cmd: [],
     // TTY: çıktı Docker'ın çoklama başlıkları olmadan, düz metin gelir.
     Tty: true,
     Labels: { "xudbin.managed": "true", "xudbin.task": "host-exec" },
-    HostConfig: { AutoRemove: false, Privileged: true, NetworkMode: "host", Binds: ["/:/host"] },
+    HostConfig: { AutoRemove: false, Privileged: true, NetworkMode: "host", PidMode: "host", Binds: ["/:/host"] },
   });
   try {
     await container.start();
