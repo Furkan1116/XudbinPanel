@@ -421,7 +421,20 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
   }
 
   const tag = `xudbin/${app.slug}:${deploymentId}`;
-  const context = tarFs.pack(contextDir, { ignore: (name) => name.split(path.sep).includes(".git") });
+  const pack = () => tarFs.pack(contextDir, { ignore: (name) => name.split(path.sep).includes(".git") });
+  // Temel imaj günde bir tazelenir (güvenlik yamaları aynı etikette gelir); kayıt deposuna ulaşılamazsa önbellektekiyle derlenir.
+  const build = async (target: ServerRow) => {
+    const pull = shouldPullBase(`${target.id}:${app.slug}`);
+    if (pull) log("Temel imajın güncel sürümü kontrol ediliyor (günde bir).");
+    try {
+      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal, pull }, log);
+    } catch (err) {
+      if (!pull || !/pull access denied|toomanyrequests|rate limit|manifest unknown|i\/o timeout|TLS handshake|no such host|connection refused/i.test((err as Error).message)) throw err;
+      basePulledAt.delete(`${target.id}:${app.slug}`);
+      log("Temel imaj tazelenemedi; sunucudaki kopyayla yeniden derleniyor.");
+      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal }, log);
+    }
+  };
   // Ayrı derleme sunucusu: ağır derlemeler canlı uygulamaların sunucusunu yormasın; imaj sonra aktarılır.
   const builder = app.build_server_id && app.build_server_id !== server.id ? getServer(app.build_server_id) : null;
   if (builder) {
@@ -432,7 +445,7 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
       throw new Error(`Derleme sunucusu ${norm(bInfo.Architecture as string)}, hedef sunucu ${norm(tInfo.Architecture as string)}; imaj çalışmaz. Aynı mimaride bir derleme sunucusu seç.`);
     }
     log(`İmaj derleme sunucusunda derleniyor (${builder.name}): ${tag}`);
-    await buildImage(dockerFor(builder), context, { tag, dockerfile, signal }, log);
+    await build(builder);
     log(`İmaj ${server.name} sunucusuna aktarılıyor...`);
     const stream = await dockerFor(builder).getImage(tag).get();
     const res = await dockerFor(server).loadImage(stream);
@@ -442,9 +455,17 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
     log("İmaj aktarıldı.");
   } else {
     log(`İmaj derleniyor: ${tag}`);
-    await buildImage(dockerFor(server), context, { tag, dockerfile, signal }, log);
+    await build(server);
   }
   return tag;
+}
+
+const basePulledAt = new Map<string, number>();
+function shouldPullBase(key: string) {
+  const last = basePulledAt.get(key) ?? 0;
+  if (Date.now() - last < 86_400_000) return false;
+  basePulledAt.set(key, Date.now());
+  return true;
 }
 
 /** Framework'ün zorunlu ve alan adına bağlı env değişkenlerinden eksik olanları uygulamaya kalıcı olarak ekler. */

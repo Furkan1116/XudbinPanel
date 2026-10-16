@@ -154,7 +154,7 @@ async function buildCpus(docker: Docker): Promise<number | null> {
 export async function buildImage(
   docker: Docker,
   context: Readable,
-  opts: { tag: string; dockerfile?: string; buildargs?: Record<string, string>; signal?: AbortSignal },
+  opts: { tag: string; dockerfile?: string; buildargs?: Record<string, string>; signal?: AbortSignal; pull?: boolean },
   log: (line: string) => void,
 ) {
   // Derleme, sunucudaki canlı uygulamalara en az bir çekirdek bırakır.
@@ -166,6 +166,7 @@ export async function buildImage(
     rm: true,
     forcerm: true,
     labels: { "xudbin.managed": "true" },
+    ...(opts.pull ? { pull: true } : {}),
     ...(cpus ? { cpuperiod: 100_000, cpuquota: cpus * 100_000 } : {}),
   });
   let failure: string | null = null;
