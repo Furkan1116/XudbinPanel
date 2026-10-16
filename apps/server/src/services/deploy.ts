@@ -69,6 +69,7 @@ export type AppRow = {
   volume_backup_interval_h: number;
   volume_backup_keep: number;
   last_volume_backup_at: number | null;
+  build_server_id: number | null;
   created_at: number;
 };
 
@@ -415,9 +416,29 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
   }
 
   const tag = `xudbin/${app.slug}:${deploymentId}`;
-  log(`İmaj derleniyor: ${tag}`);
   const context = tarFs.pack(contextDir, { ignore: (name) => name.split(path.sep).includes(".git") });
-  await buildImage(dockerFor(server), context, { tag, dockerfile, signal }, log);
+  // Ayrı derleme sunucusu: ağır derlemeler canlı uygulamaların sunucusunu yormasın; imaj sonra aktarılır.
+  const builder = app.build_server_id && app.build_server_id !== server.id ? getServer(app.build_server_id) : null;
+  if (builder) {
+    if (builder.status !== "ready") throw new Error(`Derleme sunucusu "${builder.name}" hazır değil`);
+    const [bInfo, tInfo] = await Promise.all([dockerFor(builder).info(), dockerFor(server).info()]);
+    const norm = (a: string) => ({ x86_64: "amd64", aarch64: "arm64" })[a] ?? a;
+    if (norm(bInfo.Architecture as string) !== norm(tInfo.Architecture as string)) {
+      throw new Error(`Derleme sunucusu ${norm(bInfo.Architecture as string)}, hedef sunucu ${norm(tInfo.Architecture as string)}; imaj çalışmaz. Aynı mimaride bir derleme sunucusu seç.`);
+    }
+    log(`İmaj derleme sunucusunda derleniyor (${builder.name}): ${tag}`);
+    await buildImage(dockerFor(builder), context, { tag, dockerfile, signal }, log);
+    log(`İmaj ${server.name} sunucusuna aktarılıyor...`);
+    const stream = await dockerFor(builder).getImage(tag).get();
+    const res = await dockerFor(server).loadImage(stream);
+    await new Promise<void>((resolve, reject) => dockerFor(server).modem.followProgress(res, (err) => (err ? reject(err) : resolve())));
+    // Derleme sunucusunda yer kaplamasın (katman önbelleği kalır, sonraki derlemeler hızlı).
+    await dockerFor(builder).getImage(tag).remove({ force: true }).catch(() => {});
+    log("İmaj aktarıldı.");
+  } else {
+    log(`İmaj derleniyor: ${tag}`);
+    await buildImage(dockerFor(server), context, { tag, dockerfile, signal }, log);
+  }
   return tag;
 }
 

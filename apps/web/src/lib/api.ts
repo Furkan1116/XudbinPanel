@@ -125,6 +125,7 @@ export type App = {
   kind: "web" | "worker";
   replicas: number;
   previewsEnabled: boolean;
+  buildServerId: number | null;
   parentAppId: number | null;
   previewPr: number | null;
   previews: { id: number; name: string; pr: number; branch: string; status: string; url: string | null }[];

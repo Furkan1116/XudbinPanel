@@ -104,6 +104,7 @@ function publicApp(a: AppRow) {
     kind: a.kind,
     replicas: a.replicas,
     previewsEnabled: Boolean(a.previews_enabled),
+    buildServerId: a.build_server_id,
     parentAppId: a.parent_app_id,
     previewPr: a.preview_pr,
     previews: (db.prepare("SELECT id, name, preview_pr AS pr, git_branch AS branch, status FROM apps WHERE parent_app_id = ? ORDER BY preview_pr").all(a.id) as { id: number }[]).map((p) => ({
@@ -267,6 +268,7 @@ export const appRoutes = new Hono<AppEnv>()
         previewsEnabled: z.boolean().optional(),
         volumeBackupIntervalH: z.number().int().min(0).max(24 * 30).optional(),
         volumeBackupKeep: z.number().int().min(1).max(100).optional(),
+        buildServerId: z.number().int().nullable().optional(),
         healthPath: z.string().trim().max(200).regex(/^\/[\w\-./?=&%~]*$/, "Sağlık yolu / ile başlamalı, ör. /health").nullable().optional(),
         memoryLimit: z.number().int().min(32).max(1024 * 1024).nullable().optional(),
         volumes: z
@@ -312,6 +314,7 @@ export const appRoutes = new Hono<AppEnv>()
       previews_enabled: input.previewsEnabled === undefined ? undefined : input.previewsEnabled ? 1 : 0,
       volume_backup_interval_h: input.volumeBackupIntervalH,
       volume_backup_keep: input.volumeBackupKeep,
+      build_server_id: input.buildServerId,
       health_path: input.healthPath,
       memory_limit: input.memoryLimit,
       volumes: input.volumes ? JSON.stringify(input.volumes) : undefined,

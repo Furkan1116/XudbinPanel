@@ -431,6 +431,10 @@ const migrations: string[] = [
   ALTER TABLE servers ADD COLUMN apps_domain TEXT;
   ALTER TABLE servers ADD COLUMN tunnel_token TEXT;
   `,
+  // Ayrı derleme sunucusu.
+  `
+  ALTER TABLE apps ADD COLUMN build_server_id INTEGER REFERENCES servers(id) ON DELETE SET NULL;
+  `,
 ];
 
 function migrate() {

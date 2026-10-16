@@ -13,7 +13,7 @@ import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frame
 import { LogSearch } from "@/components/LogSearch";
 import { LogViewer } from "@/components/LogViewer";
 import { Button, ConfirmDialog, CopyField, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, Toggle, useAction } from "@/components/ui";
-import { api, type App, type DetectResult, type Deployment } from "@/lib/api";
+import { api, type App, type DetectResult, type Deployment, type Server } from "@/lib/api";
 import { useAuthStatus } from "@/lib/auth";
 import { dateTime, duration, formatBytes, timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -522,11 +522,13 @@ function Settings({ app }: { app: App }) {
     kind: app.kind,
     replicas: String(app.replicas),
     previewsEnabled: app.previewsEnabled,
+    buildServerId: app.buildServerId ? String(app.buildServerId) : "",
     healthPath: app.healthPath ?? "",
     volumes: app.volumes,
   });
   const isAdmin = useAuthStatus().data?.user?.role === "admin";
   const [confirm, setConfirm] = useState(false);
+  const servers = useQuery({ queryKey: ["servers"], queryFn: () => api.get<{ servers: Server[] }>("/servers") });
   const save = useAction(
     () =>
       api.patch(`/apps/${app.id}`, {
@@ -552,6 +554,7 @@ function Settings({ app }: { app: App }) {
         uptimeEnabled: form.uptimeEnabled,
         ...(app.sourceType !== "compose" ? { kind: form.kind, replicas: Number(form.replicas) || 1 } : {}),
         ...(app.sourceType === "git" && !app.parentAppId ? { previewsEnabled: form.previewsEnabled } : {}),
+        ...(app.sourceType === "git" || app.sourceType === "upload" ? { buildServerId: form.buildServerId ? Number(form.buildServerId) : null } : {}),
         healthPath: form.healthPath.trim() || null,
         volumes: form.volumes.filter((v) => v.name && v.path),
       }),
@@ -637,6 +640,16 @@ function Settings({ app }: { app: App }) {
             )}
           </div>
           {app.sourceType !== "image" && <Toggle checked={form.autoDeploy} onChange={(v) => setForm({ ...form, autoDeploy: v })} label={t("Push'ta otomatik deploy")} description={t("Webhook çağrıldığında yeni sürüm otomatik yayınlanır.")} />}
+          {(app.sourceType === "git" || app.sourceType === "upload") && (servers.data?.servers.filter((x) => x.status === "ready").length ?? 0) > 1 && (
+            <Field label={t("Derleme sunucusu")} hint={t("Derleme başka bir sunucuda yapılır, hazır imaj bu sunucuya aktarılır; canlı uygulamalar derleme sırasında yavaşlamaz. Sunucular aynı işlemci mimarisinde olmalı.")}>
+              <select className="input" value={form.buildServerId} onChange={(e) => setForm({ ...form, buildServerId: e.target.value })}>
+                <option value="">{t("Uygulamanın kendi sunucusu")}</option>
+                {servers.data!.servers.filter((x) => x.status === "ready" && x.id !== app.server.id).map((x) => (
+                  <option key={x.id} value={x.id}>{x.name}</option>
+                ))}
+              </select>
+            </Field>
+          )}
           {app.sourceType === "git" && !app.parentAppId && (
             <Toggle
               checked={form.previewsEnabled}
