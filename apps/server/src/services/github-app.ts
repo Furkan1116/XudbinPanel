@@ -1,6 +1,6 @@
-import { createHmac, randomBytes, sign, timingSafeEqual } from "node:crypto";
+import { createHmac, sign, timingSafeEqual } from "node:crypto";
 import { db } from "../db.js";
-import { decrypt, encrypt } from "../lib/crypto.js";
+import { decrypt, encrypt, signedToken, verifySignedToken } from "../lib/crypto.js";
 import { getSettings, updateSettings } from "../lib/settings.js";
 
 /**
@@ -46,20 +46,12 @@ export function appManifest(origin: string, name: string) {
   };
 }
 
-// Manifest akışının state değerleri (tek kullanımlık, 1 saat).
-const states = new Map<string, number>();
-export function newManifestState() {
-  for (const [k, at] of states) if (Date.now() - at > 3_600_000) states.delete(k);
-  const s = randomBytes(18).toString("base64url");
-  states.set(s, Date.now());
-  return s;
-}
+// Manifest akışının state değeri: imzalı ve 1 saat geçerli (panel bu arada yeniden başlasa da doğrulanır).
+export const newManifestState = () => signedToken("github-manifest");
 
 /** GitHub'ın döndürdüğü kodla App bilgilerini (özel anahtar dahil) alır ve şifreli saklar. */
 export async function completeManifest(code: string, state: string) {
-  const at = states.get(state);
-  states.delete(state);
-  if (!at || Date.now() - at > 3_600_000) throw new Error("İsteğin süresi doldu; panelden tekrar başlat");
+  if (!verifySignedToken("github-manifest", state, 3_600_000)) throw new Error("İsteğin süresi doldu veya geçersiz; panelden tekrar başlat");
   if (!/^[\w-]{1,100}$/.test(code)) throw new Error("Geçersiz kod");
   const res = await fetch(`${API}/app-manifests/${code}/conversions`, {
     method: "POST",

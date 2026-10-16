@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -248,10 +248,11 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
     const input = await body(c, z.object({ org: z.string().trim().regex(/^[\w-]{0,39}$/, "Geçersiz organizasyon adı").default("") }));
     const origin = publicOrigin(c);
     if (!/^https:\/\//.test(origin)) throw new HttpError(400, "GitHub'ın webhook gönderebilmesi için panele https:// ile, internetten erişilebilir bir adresle girmelisin");
-    const host = new URL(origin).hostname.replace(/[^a-z0-9]+/gi, "-").slice(0, 20);
+    // App adı tüm GitHub'da benzersiz olmalı (en çok 34 karakter); her denemede rastgele ek alır.
+    const host = new URL(origin).hostname.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 20);
     const state = newManifestState();
     const base = input.org ? `https://github.com/organizations/${input.org}/settings/apps/new` : "https://github.com/settings/apps/new";
-    return c.json({ action: `${base}?state=${state}`, manifest: JSON.stringify(appManifest(origin, `Xudbin ${host}`.slice(0, 34))) });
+    return c.json({ action: `${base}?state=${state}`, manifest: JSON.stringify(appManifest(origin, `Xudbin-${host}-${randomBytes(3).toString("hex")}`.slice(0, 34))) });
   })
   .delete("/github", (c) => {
     disconnectGithubApp();

@@ -60,7 +60,8 @@ app.use(
       connectSrc: ["'self'"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
-      formAction: ["'self'"],
+      // GitHub App oluşturma: manifest GitHub'a form olarak gönderilir (yalnız github.com'a izin).
+      formAction: ["'self'", "https://github.com"],
       frameAncestors: ["'none'"],
     },
     xFrameOptions: "DENY",

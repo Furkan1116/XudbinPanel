@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
@@ -36,4 +36,18 @@ export function randomAlnum(length: number) {
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   const bytes = randomBytes(length);
   return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
+/** Sunucuda tutulmayan, imzalı ve süreli değer (ör. OAuth state); panel yeniden başlasa da doğrulanır. */
+export function signedToken(purpose: string) {
+  const body = `${Date.now()}.${randomBytes(12).toString("base64url")}`;
+  return `${body}.${createHmac("sha256", KEY).update(`${purpose}:${body}`).digest("base64url")}`;
+}
+
+export function verifySignedToken(purpose: string, token: string, maxAgeMs: number) {
+  const [ts, rand, sig] = token.split(".");
+  if (!ts || !rand || !sig) return false;
+  const expected = Buffer.from(createHmac("sha256", KEY).update(`${purpose}:${ts}.${rand}`).digest("base64url"));
+  const got = Buffer.from(sig);
+  return got.length === expected.length && timingSafeEqual(got, expected) && Date.now() - Number(ts) < maxAgeMs;
 }
