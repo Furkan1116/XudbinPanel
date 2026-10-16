@@ -24,6 +24,11 @@ import { SettingsPage } from "@/pages/Settings";
 import { SetupPage } from "@/pages/Setup";
 import { ChangePasswordPage } from "@/pages/ChangePassword";
 import { t } from "@/lib/i18n";
+import { DemoBanner } from "@/demo/DemoBanner";
+
+const DEMO = import.meta.env.VITE_DEMO === "1";
+// Alt yolda yayınlanınca (ör. xudbin.com/demo/) yönlendirme o yolun altında çalışsın.
+const BASENAME = import.meta.env.BASE_URL.replace(/\/+$/, "") || undefined;
 
 export function App() {
   const { data, isLoading, error } = useAuthStatus();
@@ -41,7 +46,8 @@ export function App() {
       ) : data.user.mustChangePassword ? (
         <ChangePasswordPage />
       ) : (
-        <BrowserRouter>
+        <BrowserRouter basename={BASENAME}>
+          {DEMO && <DemoBanner />}
           <Layout>
             <Routes>
               <Route path="/" element={<DashboardPage />} />

@@ -15,10 +15,16 @@ const queryClient = new QueryClient({
   }),
 });
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </StrictMode>,
-);
+async function boot() {
+  // Demo derlemesi (VITE_DEMO=1): API istekleri tarayıcıdaki örnek verilerle yanıtlanır.
+  // Koşul derleme anında sabitlendiği için normal pakete demo kodu girmez.
+  if (import.meta.env.VITE_DEMO === "1") (await import("./demo")).installDemo();
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+void boot();

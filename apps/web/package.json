@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:demo": "VITE_DEMO=1 vite build --base=/demo/ --outDir dist-demo",
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {

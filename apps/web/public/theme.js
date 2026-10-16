@@ -1,3 +1,8 @@
+// ?lang=tr|en ile açılınca arayüz dili ona ayarlanır (ör. xudbin.com'daki demo kendi dilini iletir).
+try {
+  var lang = new URLSearchParams(location.search).get("lang");
+  if (lang === "tr" || lang === "en") localStorage.setItem("xudbin-lang", lang);
+} catch (e) {}
 // Sayfa çizilmeden önce temayı uygula ki açılışta yanlış renk yanıp sönmesin.
 // Ayrı dosyada: panelin CSP'si satır içi betiklere izin vermez.
 try {
