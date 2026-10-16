@@ -374,6 +374,33 @@ const migrations: string[] = [
     created_at   INTEGER NOT NULL
   );
   `,
+  // Uygulama türü (web / arka plan işçisi), kopya sayısı, zamanlanmış görevler.
+  `
+  ALTER TABLE apps ADD COLUMN kind TEXT NOT NULL DEFAULT 'web';
+  ALTER TABLE apps ADD COLUMN replicas INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE apps ADD COLUMN replica_containers TEXT NOT NULL DEFAULT '[]';
+  CREATE TABLE cron_jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_id      INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    schedule    TEXT NOT NULL,
+    command     TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    timeout_min INTEGER NOT NULL DEFAULT 60,
+    last_run_at INTEGER,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE TABLE cron_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      INTEGER NOT NULL REFERENCES cron_jobs(id) ON DELETE CASCADE,
+    started_at  INTEGER NOT NULL,
+    finished_at INTEGER,
+    status      TEXT NOT NULL,
+    exit_code   INTEGER,
+    output      TEXT,
+    trigger     TEXT NOT NULL DEFAULT 'schedule'
+  );
+  `,
 ];
 
 function migrate() {

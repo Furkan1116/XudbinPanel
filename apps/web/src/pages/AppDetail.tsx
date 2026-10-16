@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
+import { CronJobs } from "@/components/CronJobs";
 import { DeployDoctor } from "@/components/DeployDoctor";
 import { DropZone, uploadZip } from "@/components/DropZone";
 import { ImageScan } from "@/components/ImageScan";
@@ -15,7 +16,7 @@ import { useAuthStatus } from "@/lib/auth";
 import { dateTime, duration, formatBytes, timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
-type Tab = "overview" | "deployments" | "logs" | "env" | "domains" | "security" | "settings";
+type Tab = "overview" | "deployments" | "logs" | "env" | "domains" | "cron" | "security" | "settings";
 type AppData = { app: App; env: string; deployments: Deployment[] };
 
 export function AppDetailPage() {
@@ -76,6 +77,7 @@ export function AppDetailPage() {
           { id: "logs", label: t("Loglar") },
           { id: "env", label: t("Ortam değişkenleri") },
           { id: "domains", label: t("Domainler") },
+          { id: "cron", label: t("Zamanlanmış görevler") },
           { id: "security", label: t("Güvenlik") },
           { id: "settings", label: t("Ayarlar") },
         ]}
@@ -85,6 +87,7 @@ export function AppDetailPage() {
       {tab === "logs" && <LogViewer url={`/api/apps/${id}/logs/stream`} emptyText={t("Log bekleniyor...")} />}
       {tab === "env" && <Env data={data} />}
       {tab === "domains" && <Domains app={app} />}
+      {tab === "cron" && <CronJobs app={app} />}
       {tab === "security" && <Security app={app} />}
       {tab === "settings" && <Settings app={app} />}
     </>
@@ -465,6 +468,8 @@ function Settings({ app }: { app: App }) {
     memoryLimit: app.memoryLimit ? String(app.memoryLimit) : "",
     httpCheck: app.httpCheck,
     uptimeEnabled: app.uptimeEnabled,
+    kind: app.kind,
+    replicas: String(app.replicas),
     healthPath: app.healthPath ?? "",
     volumes: app.volumes,
   });
@@ -493,6 +498,7 @@ function Settings({ app }: { app: App }) {
         memoryLimit: Number(form.memoryLimit) || null,
         httpCheck: form.httpCheck,
         uptimeEnabled: form.uptimeEnabled,
+        ...(app.sourceType !== "compose" ? { kind: form.kind, replicas: Number(form.replicas) || 1 } : {}),
         healthPath: form.healthPath.trim() || null,
         volumes: form.volumes.filter((v) => v.name && v.path),
       }),
@@ -583,6 +589,17 @@ function Settings({ app }: { app: App }) {
           )}
           {app.sourceType !== "compose" && (
             <>
+              <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
+                <Field label={t("Uygulama türü")} hint={t("Arka plan işçisi: web sunucusu olmayan, kuyruk/iş işleyen süreç (ör. Celery, Sidekiq, queue:work). Alan adı ve HTTP kontrolü kullanılmaz.")}>
+                  <select className="input" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as App["kind"] })}>
+                    <option value="web">{t("Web uygulaması")}</option>
+                    <option value="worker">{t("Arka plan işçisi")}</option>
+                  </select>
+                </Field>
+                <Field label={t("Kopya sayısı")} hint={t("1-10. Trafik kopyalara dağıtılır; bir sonraki deploy'da geçerli olur.")}>
+                  <input className="input" inputMode="numeric" value={form.replicas} onChange={(e) => setForm({ ...form, replicas: e.target.value.replace(/\D/g, "").slice(0, 2) })} />
+                </Field>
+              </div>
               <Toggle checked={form.uptimeEnabled} onChange={(v) => setForm({ ...form, uptimeEnabled: v })} label={t("Erişilebilirlik izleme")} description={t("Site dakikada bir dışarıdan denenir; art arda iki denemede yanıt vermezse bildirim kanallarına \"site çöktü\", düzelince \"yeniden çalışıyor\" bildirimi gider.")} />
               <Toggle checked={form.httpCheck} onChange={(v) => setForm({ ...form, httpCheck: v })} label={t("Deploy'da HTTP kontrolü")} description={t("Yeni sürüme trafik geçmeden önce alan adıyla istek atılır; 400 veya 5xx dönerse eski sürüm yayında kalır ve Deploy Doktoru sebebi gösterir.")} />
               {form.httpCheck && (

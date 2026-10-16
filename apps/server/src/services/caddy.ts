@@ -189,6 +189,8 @@ type DomainRow = {
   port: number;
   security: string;
   status: string;
+  kind: string;
+  replica_containers: string;
 };
 
 const WAF_DIRECTIVES = [
@@ -272,11 +274,18 @@ function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; ha
   return { routes, handlers };
 }
 
-function upstreamFor(d: DomainRow): string | null {
-  if (d.source_type === "compose") {
-    return d.compose_service ? `xb-${d.app_slug}-${d.compose_service}-1:${d.port}` : null;
-  }
-  return d.container ? `${d.container}:${d.port}` : null;
+function upstreamsFor(d: DomainRow): string[] {
+  if (d.kind === "worker") return [];
+  if (d.source_type === "compose") return d.compose_service ? [`xb-${d.app_slug}-${d.compose_service}-1:${d.port}`] : [];
+  if (!d.container) return [];
+  const replicas = (() => {
+    try {
+      return JSON.parse(d.replica_containers || "[]") as string[];
+    } catch {
+      return [];
+    }
+  })();
+  return [d.container, ...replicas].map((c) => `${c}:${d.port}`);
 }
 
 export function buildCaddyConfig(server: ServerRow) {
@@ -285,7 +294,7 @@ export function buildCaddyConfig(server: ServerRow) {
   const domains = db
     .prepare(
       `SELECT d.host, d.https, a.id AS app_id, a.slug AS app_slug, a.source_type, a.container, a.compose_service,
-              a.port, a.security, a.status
+              a.port, a.security, a.status, a.kind, a.replica_containers
        FROM domains d JOIN apps a ON a.id = d.app_id
        WHERE a.server_id = ? ORDER BY d.id`,
     )
@@ -335,12 +344,24 @@ export function buildCaddyConfig(server: ServerRow) {
   }
 
   for (const d of domains) {
-    const upstream = upstreamFor(d);
+    const upstreams = upstreamsFor(d);
     const sec = parseSecurity(d.security);
     const { routes: secRoutes, handlers } = securityHandlers(sec, `app_${d.app_id}`);
     const final: Route =
-      upstream && d.status !== "stopped"
-        ? { handle: [...handlers, { handler: "reverse_proxy", upstreams: [{ dial: upstream }] }] }
+      upstreams.length && d.status !== "stopped"
+        ? {
+            handle: [
+              ...handlers,
+              {
+                handler: "reverse_proxy",
+                upstreams: upstreams.map((dial) => ({ dial })),
+                // Birden çok kopyada: sırayla dağıt, hata veren kopyayı 30 sn devre dışı bırak, isteği diğerine yeniden dene.
+                ...(upstreams.length > 1
+                  ? { load_balancing: { selection_policy: { policy: "round_robin" }, retries: 2 }, health_checks: { passive: { fail_duration: "30s", max_fails: 3, unhealthy_status: [502, 503, 504] } } }
+                  : {}),
+              },
+            ],
+          }
         : {
             handle: [
               {

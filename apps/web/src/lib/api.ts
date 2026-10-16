@@ -120,6 +120,8 @@ export type App = {
   memoryLimit: number | null;
   httpCheck: boolean;
   uptimeEnabled: boolean;
+  kind: "web" | "worker";
+  replicas: number;
   scan: {
     status: "running" | "success" | "failed" | null;
     at: number | null;

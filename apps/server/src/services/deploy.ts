@@ -60,6 +60,9 @@ export type AppRow = {
   scan_summary: string | null;
   scanned_at: number | null;
   uptime_enabled: number;
+  kind: "web" | "worker";
+  replicas: number;
+  replica_containers: string;
   created_at: number;
 };
 
@@ -451,84 +454,112 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   const filled = fillPlaceholders(parseEnv(decrypt(fresh.env)), app.id, server.https_mode !== "off");
   const env = { PORT: String(fresh.port), XUDBIN_URL: filled.values.XUDBIN_URL!, XUDBIN_DOMAINS: filled.values.XUDBIN_DOMAINS!, ...filled.env };
   const volumes = JSON.parse(fresh.volumes || "[]") as Volume[];
-  const name = `xb-${app.slug}-${deploymentId}`;
-
+  const worker = fresh.kind === "worker";
+  // Kopyalar (replica) aynı imajla çalışır; Caddy aralarında yük dağıtır. İşçiler ve kalıcı klasörlü uygulamalar
+  // da birden çok kopya çalıştırabilir, ama klasörü paylaşırlar.
+  const count = Math.max(1, Math.min(fresh.replicas || 1, 10));
+  const base = `xb-${app.slug}-${deploymentId}`;
+  const names = Array.from({ length: count }, (_, i) => (i === 0 ? base : `${base}-${i + 1}`));
   const network = await ensureProjectNetwork(server, app.project_id);
-  log(`Konteyner başlatılıyor: ${name}`);
-  const container = await docker.createContainer({
-    name,
-    Image: image,
-    Env: Object.entries(env).map(([k, v]) => `${k}=${v}`),
-    Cmd: fresh.command ? ["sh", "-c", fresh.command] : undefined,
-    Labels: { "xudbin.managed": "true", "xudbin.app": app.slug, "xudbin.deployment": String(deploymentId) },
-    HostConfig: {
-      NetworkMode: network,
-      RestartPolicy: { Name: "unless-stopped" },
-      Binds: volumes.map((v) => `xb-${app.slug}-${v.name}:${v.path}`),
-      // Sınır yoksa tek bir uygulama tüm sunucuyu (panel dahil) belleksiz bırakabilir.
-      ...(fresh.memory_limit ? { Memory: fresh.memory_limit * 1024 * 1024, MemorySwap: fresh.memory_limit * 1024 * 1024 } : {}),
-      ...(fresh.cpu_limit ? { NanoCpus: Math.round(fresh.cpu_limit * 1e9) } : {}),
-      LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
-    },
-    NetworkingConfig: { EndpointsConfig: { [network]: { Aliases: [`xb-${app.slug}`] } } },
-  });
-  await container.start();
-
-  // Sağlık kontrolü: trafik, yeni konteyner portunu gerçekten dinlemeye başlayana kadar eski sürümde kalır.
-  // Kontrol, ortak ağdaki Caddy konteynerinden yapılır (uygulama imajında araç olması gerekmez).
   const hosts = (db.prepare("SELECT host FROM domains WHERE app_id = ? ORDER BY generated, id").all(app.id) as { host: string }[]).map((d) => d.host);
-  const failWithLogs = async (message: string, extra: { status?: number | null } = {}): Promise<never> => {
-    const logs = await container.logs({ stdout: true, stderr: true, tail: 300 }).catch(() => Buffer.from(""));
-    const lines = demuxLogs(logs);
+
+  const created: string[] = [];
+  const failWithLogs = async (name: string, message: string, extra: { status?: number | null } = {}): Promise<never> => {
+    const logs = await docker.getContainer(name).logs({ stdout: true, stderr: true, tail: 300 }).catch(() => Buffer.from(""));
+    const lines = demuxLogs(logs as Buffer);
     if (lines.length) {
-      log("Uygulamanın son çıktısı:");
+      log(`Uygulamanın son çıktısı${count > 1 ? ` (${name})` : ""}:`);
       lines.slice(-60).forEach((l) => log(`  ${l}`));
     }
     const state = await containerState(docker, name);
     recordDiagnosis(deploymentId, diagnose(lines, { framework: app.framework, env: filled.env, hosts, status: extra.status, exitCode: state.running ? null : state.exitCode }), log);
-    await removeContainer(docker, name);
+    for (const n of created) await removeContainer(docker, n);
     throw new Error(`${message} Eski sürüm yayında kalmaya devam ediyor.`);
   };
-  const started = Date.now();
-  const limitMs = 120_000;
-  let announced = false;
-  let inspected = false;
-  for (;;) {
-    if (signal.aborted) await failWithLogs(String(signal.reason));
-    const state = await containerState(docker, name);
-    if (!state.running) await failWithLogs(`Konteyner kapandı (çıkış kodu ${state.exitCode}).`);
-    const probe = await execIn(docker, CADDY_CONTAINER, ["nc", "-z", "-w", "2", name, String(fresh.port)], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1 }));
-    if (probe.exitCode === 0) break;
-    // Uygulama başka bir portu dinliyorsa (ör. kodda sabitlenmiş) ayarı kendisi düzelt.
-    if (!inspected && Date.now() - started > 8000) {
-      inspected = true;
-      const ports = await listeningPorts(docker, name);
-      const external = ports.filter((p) => !p.localOnly).map((p) => p.port);
-      const found = external[0];
-      if (external.length === 1 && found !== undefined && found !== fresh.port) {
-        log(`Uygulama ${fresh.port} yerine ${found} portunu dinliyor; port ayarı ${found} olarak güncellendi.`);
-        db.prepare("UPDATE apps SET port = ? WHERE id = ?").run(found, app.id);
-        fresh.port = found;
-        continue;
-      }
-      if (!external.length && ports.some((p) => p.localOnly)) {
-        log(`Uyarı: Uygulama yalnız 127.0.0.1 adresini dinliyor (${ports.map((p) => p.port).join(", ")}). Dışarıdan erişilebilmesi için 0.0.0.0 dinlemeli.`);
-      }
-    }
-    if (Date.now() - started > limitMs) {
-      await failWithLogs(`Uygulama 2 dakika içinde ${fresh.port} portunu dinlemeye başlamadı. Port ayarını ve uygulamanın PORT değişkenini kullandığını kontrol et.`);
-    }
-    if (!announced && Date.now() - started > 5000) {
-      log(`Uygulamanın ${fresh.port} portunu açması bekleniyor...`);
-      announced = true;
-    }
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  log(`Konteyner çalışıyor, ${fresh.port} portu ${Math.round((Date.now() - started) / 1000)} sn içinde yanıt verdi.`);
 
-  // Port açık olması uygulamanın çalıştığı anlamına gelmez (ör. Django alan adını tanımayıp 400 döndürür).
-  // Trafik yeni sürüme geçmeden önce gerçek alan adıyla bir HTTP isteği atılır.
-  if (fresh.http_check && fresh.source_type !== "compose") {
+  for (const name of names) {
+    log(`Konteyner başlatılıyor: ${name}`);
+    const container = await docker.createContainer({
+      name,
+      Image: image,
+      Env: Object.entries({ ...env, XUDBIN_REPLICA: String(names.indexOf(name) + 1) }).map(([k, v]) => `${k}=${v}`),
+      Cmd: fresh.command ? ["sh", "-c", fresh.command] : undefined,
+      Labels: { "xudbin.managed": "true", "xudbin.app": app.slug, "xudbin.deployment": String(deploymentId) },
+      HostConfig: {
+        NetworkMode: network,
+        RestartPolicy: { Name: "unless-stopped" },
+        Binds: volumes.map((v) => `xb-${app.slug}-${v.name}:${v.path}`),
+        // Sınır yoksa tek bir uygulama tüm sunucuyu (panel dahil) belleksiz bırakabilir.
+        ...(fresh.memory_limit ? { Memory: fresh.memory_limit * 1024 * 1024, MemorySwap: fresh.memory_limit * 1024 * 1024 } : {}),
+        ...(fresh.cpu_limit ? { NanoCpus: Math.round(fresh.cpu_limit * 1e9) } : {}),
+        LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
+      },
+      NetworkingConfig: { EndpointsConfig: { [network]: { Aliases: [`xb-${app.slug}`] } } },
+    });
+    created.push(name);
+    await container.start();
+  }
+
+  for (const name of names) {
+    if (worker) {
+      // Arka plan işçisi: dinlediği port yok; birkaç saniye sonra hâlâ çalışıyorsa başarılı sayılır.
+      log(`İşçi kontrolü: ${name} 10 sn çalışmaya devam etmeli...`);
+      for (let i = 0; i < 10; i++) {
+        if (signal.aborted) await failWithLogs(name, String(signal.reason));
+        await new Promise((r) => setTimeout(r, 1000));
+        const state = await containerState(docker, name);
+        if (!state.running) await failWithLogs(name, `İşçi kapandı (çıkış kodu ${state.exitCode}).`);
+      }
+      continue;
+    }
+    await waitForPort(name);
+    if (fresh.http_check && fresh.source_type !== "compose") await httpCheck(name);
+  }
+
+  async function waitForPort(name: string) {
+    // Sağlık kontrolü: trafik, yeni konteyner portunu gerçekten dinlemeye başlayana kadar eski sürümde kalır.
+    // Kontrol, ortak ağdaki Caddy konteynerinden yapılır (uygulama imajında araç olması gerekmez).
+    const started = Date.now();
+    const limitMs = 120_000;
+    let announced = false;
+    let inspected = false;
+    for (;;) {
+      if (signal.aborted) await failWithLogs(name, String(signal.reason));
+      const state = await containerState(docker, name);
+      if (!state.running) await failWithLogs(name, `Konteyner kapandı (çıkış kodu ${state.exitCode}).`);
+      const probe = await execIn(docker, CADDY_CONTAINER, ["nc", "-z", "-w", "2", name, String(fresh.port)], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1 }));
+      if (probe.exitCode === 0) break;
+      // Uygulama başka bir portu dinliyorsa (ör. kodda sabitlenmiş) ayarı kendisi düzelt.
+      if (!inspected && Date.now() - started > 8000) {
+        inspected = true;
+        const ports = await listeningPorts(docker, name);
+        const external = ports.filter((p) => !p.localOnly).map((p) => p.port);
+        const found = external[0];
+        if (external.length === 1 && found !== undefined && found !== fresh.port) {
+          log(`Uygulama ${fresh.port} yerine ${found} portunu dinliyor; port ayarı ${found} olarak güncellendi.`);
+          db.prepare("UPDATE apps SET port = ? WHERE id = ?").run(found, app.id);
+          fresh.port = found;
+          continue;
+        }
+        if (!external.length && ports.some((p) => p.localOnly)) {
+          log(`Uyarı: Uygulama yalnız 127.0.0.1 adresini dinliyor (${ports.map((p) => p.port).join(", ")}). Dışarıdan erişilebilmesi için 0.0.0.0 dinlemeli.`);
+        }
+      }
+      if (Date.now() - started > limitMs) {
+        await failWithLogs(name, `Uygulama 2 dakika içinde ${fresh.port} portunu dinlemeye başlamadı. Port ayarını ve uygulamanın PORT değişkenini kullandığını kontrol et. Web sunucusu değilse uygulama türünü "arka plan işçisi" yap.`);
+      }
+      if (!announced && Date.now() - started > 5000) {
+        log(`Uygulamanın ${fresh.port} portunu açması bekleniyor...`);
+        announced = true;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    log(`${name} çalışıyor, ${fresh.port} portu ${Math.round((Date.now() - started) / 1000)} sn içinde yanıt verdi.`);
+  }
+
+  async function httpCheck(name: string) {
+    // Port açık olması uygulamanın çalıştığı anlamına gelmez (ör. Django alan adını tanımayıp 400 döndürür).
+    // Trafik yeni sürüme geçmeden önce gerçek alan adıyla bir HTTP isteği atılır.
     const host = hosts[0] ?? `xb-${app.slug}`;
     const pathToCheck = fresh.health_path || "/";
     const strict = Boolean(fresh.health_path);
@@ -536,16 +567,17 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     const deadline = Date.now() + 45_000;
     let clientErrors = 0;
     for (;;) {
-      if (signal.aborted) await failWithLogs(String(signal.reason));
+      if (signal.aborted) await failWithLogs(name, String(signal.reason));
       const probe = await probeHttp(docker, name, fresh.port, host, pathToCheck);
       if (probe.status !== null && isHealthy(probe.status, strict)) {
         log(`HTTP kontrolü geçti: ${probe.statusLine}`);
-        break;
+        return;
       }
       // 4xx uygulama ısındıkça değişmez; art arda üç kez aynıysa beklemeye gerek yok. 5xx ve yanıtsızlık için süre tanınır.
       clientErrors = probe.status !== null && probe.status < 500 ? clientErrors + 1 : 0;
       if (Date.now() > deadline || clientErrors >= 3) {
         await failWithLogs(
+          name,
           probe.status !== null
             ? `Uygulama çalışıyor ama ${pathToCheck} isteğine ${probe.status} döndürüyor (${probe.statusLine}).`
             : `Uygulama ${fresh.port} portunu açtı ama HTTP isteğine yanıt vermedi. Bu port bir web sunucusu değilse uygulama ayarlarından doğru portu seç ya da HTTP kontrolünü kapat.`,
@@ -556,16 +588,16 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     }
   }
 
-  const previous = fresh.container;
-  db.prepare("UPDATE apps SET container = ?, current_image = ? WHERE id = ?").run(name, image, app.id);
-  log("Trafik yeni sürüme yönlendiriliyor...");
+  const previous = [fresh.container, ...(JSON.parse(fresh.replica_containers || "[]") as string[])].filter((n): n is string => Boolean(n) && !names.includes(n!));
+  db.prepare("UPDATE apps SET container = ?, replica_containers = ?, current_image = ? WHERE id = ?").run(names[0]!, JSON.stringify(names.slice(1)), image, app.id);
+  log(count > 1 ? `Trafik ${count} kopyaya dağıtılıyor...` : "Trafik yeni sürüme yönlendiriliyor...");
   await applyCaddyConfig(server);
 
-  if (previous && previous !== name) {
-    log(`Eski konteyner kaldırılıyor: ${previous}`);
-    await removeContainer(docker, previous);
+  for (const p of previous) {
+    log(`Eski konteyner kaldırılıyor: ${p}`);
+    await removeContainer(docker, p);
   }
-  await waitForCertificates(server, app.id, log);
+  if (!worker) await waitForCertificates(server, app.id, log);
 }
 
 /** HTTPS'li alan adlarının sertifikası alınana kadar (en fazla 90 sn) bekler; alınamazsa sebebini söyler. */

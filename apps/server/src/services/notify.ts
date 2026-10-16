@@ -13,6 +13,7 @@ export const NOTIFY_EVENTS = {
   site_up: "Site yeniden çalışıyor",
   cert_expiring: "HTTPS sertifikası bitmek üzere",
   server_resource: "Sunucuda disk veya bellek doluyor",
+  cron_failed: "Zamanlanmış görev başarısız",
 } as const;
 export type NotifyEvent = keyof typeof NOTIFY_EVENTS;
 

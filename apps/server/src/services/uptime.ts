@@ -151,7 +151,7 @@ export function startUptimeMonitor() {
     running = true;
     try {
       const apps = db
-        .prepare("SELECT id, name, server_id, container, port, health_path, status, source_type, uptime_enabled FROM apps WHERE status = 'running' AND uptime_enabled = 1")
+        .prepare("SELECT id, name, server_id, container, port, health_path, status, source_type, uptime_enabled FROM apps WHERE status = 'running' AND uptime_enabled = 1 AND kind = 'web'")
         .all() as AppRow[];
       // Aynı anda en fazla 8 kontrol.
       for (let i = 0; i < apps.length; i += 8) await Promise.all(apps.slice(i, i + 8).map((a) => checkApp(a).catch(() => {})));

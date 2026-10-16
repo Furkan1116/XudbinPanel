@@ -32,6 +32,9 @@ import { getServer } from "../services/servers.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor.js";
 import { scanApp } from "../services/scan.js";
 import { uptimeSummary } from "../services/uptime.js";
+import { runCronJob, type CronJob } from "../services/cron.js";
+import { nextRun, parseCron } from "../lib/cron.js";
+import { timeZone } from "../services/analytics.js";
 import { accessibleAppIds, accessibleProjectIds, canWriteProject } from "../services/access.js";
 
 const parseJson = (raw: string | null) => {
@@ -92,6 +95,8 @@ function publicApp(a: AppRow) {
     cpuLimit: a.cpu_limit,
     httpCheck: Boolean(a.http_check),
     uptimeEnabled: Boolean(a.uptime_enabled),
+    kind: a.kind,
+    replicas: a.replicas,
     scan: { status: a.scan_status, at: a.scanned_at, summary: parseJson(a.scan_summary) },
     healthPath: a.health_path,
     memoryLimit: a.memory_limit,
@@ -126,6 +131,22 @@ function validateSource(a: { sourceType: string; gitUrl?: string | null; image?:
   if (a.gitUrl && !/^https:\/\/[^\s]+$/.test(a.gitUrl)) throw new HttpError(400, "Git adresi https:// ile başlamalı");
   if (a.sourceType === "image" && !a.image) throw new HttpError(400, "Docker imajı gerekli");
   if (a.sourceType === "compose" && !a.gitUrl && !a.composeFile?.trim()) throw new HttpError(400, "Compose dosyası veya git adresi gerekli");
+}
+
+const cronInput = z.object({
+  name: z.string().trim().min(1, "Ad gerekli").max(60),
+  schedule: z.string().trim().min(1).max(100),
+  command: z.string().trim().min(1, "Komut gerekli").max(2000),
+  enabled: z.boolean().default(true),
+  timeoutMin: z.number().int().min(1).max(24 * 60).default(60),
+});
+
+function validateCron(expr: string) {
+  try {
+    parseCron(expr);
+  } catch (err) {
+    throw new HttpError(400, (err as Error).message);
+  }
 }
 
 function loadApp(id: number) {
@@ -228,6 +249,8 @@ export const appRoutes = new Hono<AppEnv>()
         cpuLimit: z.number().min(0.1).max(256).nullable().optional(),
         httpCheck: z.boolean().optional(),
         uptimeEnabled: z.boolean().optional(),
+        kind: z.enum(["web", "worker"]).optional(),
+        replicas: z.number().int().min(1).max(10).optional(),
         healthPath: z.string().trim().max(200).regex(/^\/[\w\-./?=&%~]*$/, "Sağlık yolu / ile başlamalı, ör. /health").nullable().optional(),
         memoryLimit: z.number().int().min(32).max(1024 * 1024).nullable().optional(),
         volumes: z
@@ -268,6 +291,8 @@ export const appRoutes = new Hono<AppEnv>()
       cpu_limit: input.cpuLimit,
       http_check: input.httpCheck === undefined ? undefined : input.httpCheck ? 1 : 0,
       uptime_enabled: input.uptimeEnabled === undefined ? undefined : input.uptimeEnabled ? 1 : 0,
+      kind: input.kind,
+      replicas: input.replicas,
       health_path: input.healthPath,
       memory_limit: input.memoryLimit,
       volumes: input.volumes ? JSON.stringify(input.volumes) : undefined,
@@ -291,6 +316,59 @@ export const appRoutes = new Hono<AppEnv>()
     const { env } = await body(c, z.object({ env: z.string().max(200_000) }));
     db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(env.trim() ? encrypt(env) : null, app.id);
     return c.json({ ok: true, note: "Değişikliklerin geçerli olması için yeniden deploy et." });
+  })
+
+  // --- Zamanlanmış görevler ---------------------------------------------------------------
+  .get("/:id/cron", (c) => {
+    const app = loadApp(idParam(c));
+    const jobs = (db.prepare("SELECT * FROM cron_jobs WHERE app_id = ? ORDER BY id").all(app.id) as CronJob[]).map((j) => {
+      const last = db.prepare("SELECT id, status, exit_code AS exitCode, started_at AS startedAt, finished_at AS finishedAt, trigger FROM cron_runs WHERE job_id = ? ORDER BY id DESC LIMIT 1").get(j.id);
+      let next: number | null = null;
+      try {
+        next = nextRun(j.schedule, Date.now(), timeZone());
+      } catch {}
+      return { id: j.id, name: j.name, schedule: j.schedule, command: j.command, enabled: Boolean(j.enabled), timeoutMin: j.timeout_min, lastRun: last ?? null, nextRun: j.enabled ? next : null };
+    });
+    return c.json({ jobs });
+  })
+  .post("/:id/cron", async (c) => {
+    const app = loadApp(idParam(c));
+    const input = await body(c, cronInput);
+    validateCron(input.schedule);
+    const res = db
+      .prepare("INSERT INTO cron_jobs (app_id, name, schedule, command, enabled, timeout_min, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(app.id, input.name, input.schedule, input.command, input.enabled ? 1 : 0, input.timeoutMin, Date.now());
+    return c.json({ id: Number(res.lastInsertRowid) }, 201);
+  })
+  .put("/:id/cron/:jobId", async (c) => {
+    const app = loadApp(idParam(c));
+    const input = await body(c, cronInput);
+    validateCron(input.schedule);
+    db.prepare("UPDATE cron_jobs SET name = ?, schedule = ?, command = ?, enabled = ?, timeout_min = ? WHERE id = ? AND app_id = ?").run(
+      input.name, input.schedule, input.command, input.enabled ? 1 : 0, input.timeoutMin, idParam(c, "jobId"), app.id,
+    );
+    return c.json({ ok: true });
+  })
+  .delete("/:id/cron/:jobId", (c) => {
+    const app = loadApp(idParam(c));
+    db.prepare("DELETE FROM cron_jobs WHERE id = ? AND app_id = ?").run(idParam(c, "jobId"), app.id);
+    return c.json({ ok: true });
+  })
+  .post("/:id/cron/:jobId/run", (c) => {
+    const app = loadApp(idParam(c));
+    const job = must(db.prepare("SELECT id FROM cron_jobs WHERE id = ? AND app_id = ?").get(idParam(c, "jobId"), app.id) as { id: number } | undefined, "Görev bulunamadı");
+    runCronJob(job.id, "manual").catch(() => {});
+    return c.json({ ok: true }, 202);
+  })
+  .get("/:id/cron/:jobId/runs", (c) => {
+    const app = loadApp(idParam(c));
+    const runs = db
+      .prepare(
+        `SELECT r.id, r.status, r.exit_code AS exitCode, r.started_at AS startedAt, r.finished_at AS finishedAt, r.trigger, r.output
+         FROM cron_runs r JOIN cron_jobs j ON j.id = r.job_id WHERE j.id = ? AND j.app_id = ? ORDER BY r.id DESC`,
+      )
+      .all(idParam(c, "jobId"), app.id);
+    return c.json({ runs });
   })
 
   .get("/:id/uptime", (c) => {
@@ -435,14 +513,16 @@ export const appRoutes = new Hono<AppEnv>()
       await composeCommand(app, action);
     } else {
       if (!app.container) throw new HttpError(422, "Uygulama henüz deploy edilmedi");
-      const container = dockerFor(server).getContainer(app.container);
-      try {
-        if (action === "start") await container.start();
-        if (action === "stop") await container.stop({ t: 10 });
-        if (action === "restart") await container.restart({ t: 10 });
-      } catch (err) {
-        const msg = (err as { statusCode?: number }).statusCode === 304 ? null : (err as Error).message;
-        if (msg) throw new HttpError(500, msg);
+      for (const name of [app.container, ...(JSON.parse(app.replica_containers || "[]") as string[])]) {
+        const container = dockerFor(server).getContainer(name);
+        try {
+          if (action === "start") await container.start();
+          if (action === "stop") await container.stop({ t: 10 });
+          if (action === "restart") await container.restart({ t: 10 });
+        } catch (err) {
+          const msg = (err as { statusCode?: number }).statusCode === 304 ? null : (err as Error).message;
+          if (msg) throw new HttpError(500, msg);
+        }
       }
     }
     db.prepare("UPDATE apps SET status = ? WHERE id = ?").run(action === "stop" ? "stopped" : "running", app.id);
@@ -513,7 +593,7 @@ export const appRoutes = new Hono<AppEnv>()
       app.source_type === "compose"
         ? (await docker.listContainers({ all: true, filters: { label: [`com.docker.compose.project=xb-${app.slug}`] } })).map((ct) => ct.Names[0]!.slice(1))
         : app.container
-          ? [app.container]
+          ? [app.container, ...(JSON.parse(app.replica_containers || "[]") as string[])]
           : [];
     return streamSSE(c, async (stream) => {
       if (!names.length) {
