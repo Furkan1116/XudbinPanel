@@ -70,3 +70,11 @@ test("env metni birleştirme ve ayrıştırma", () => {
   assert.equal(mergeEnvText("# c\nA=1\nB=2\n\n", { B: "3", C: "4" }), "# c\nA=1\nB=3\nC=4\n");
   assert.deepEqual(parseEnv('A="x y"\n# yorum\nB=2'), { A: "x y", B: "2" });
 });
+
+test("sürüm karşılaştırma", async () => {
+  const { newer } = await import("../src/lib/update-check.js");
+  assert.equal(newer("1.10.0", "1.9.9"), true);
+  assert.equal(newer("1.1.0", "1.1.0"), false);
+  assert.equal(newer("v2.0.0", "1.99.99"), true);
+  assert.equal(newer("1.0.9", "1.1.0"), false);
+});

@@ -14,6 +14,7 @@ import { decrypt, encrypt } from "../lib/crypto.js";
 import { body, HttpError, idParam } from "../lib/http.js";
 import { getSettings, updateSettings } from "../lib/settings.js";
 import { VERSION } from "../lib/version.js";
+import { updateInfo } from "../lib/update-check.js";
 import { createApiToken } from "../auth/api-tokens.js";
 import type { AppEnv } from "../lib/types.js";
 import { applyCaddyConfig } from "../services/caddy.js";
@@ -31,6 +32,8 @@ export const settingsRoutes = new Hono<AppEnv>()
     const local = listServers().find((x) => x.kind === "local");
     return c.json({ panelDomain: s.panelDomain, panelHttps: s.panelHttps, localServerIp: local?.public_ip ?? null, version: VERSION, timezone: s.timezone, uptimeEnabled: s.uptimeEnabled });
   })
+
+  .get("/update", async (c) => c.json(await updateInfo()))
 
   .put("/panel", async (c) => {
     const input = await body(

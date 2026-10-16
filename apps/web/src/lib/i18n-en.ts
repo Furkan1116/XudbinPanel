@@ -428,6 +428,7 @@ export const en: Record<string, string> = {
   "Güvenlik ayarlarını değiştirdi": "Changed security settings",
   "Başarısız giriş denemesi": "Failed login attempt",
   "Giriş yaptı": "Signed in",
+  "Xudbin {v} yayında": "Xudbin {v} is available",
   "Gerekenlerin hepsini ekle": "Add all required",
   "Geri dönüş": "Rollback",
   "Geri dönüş başladı": "Rollback started",

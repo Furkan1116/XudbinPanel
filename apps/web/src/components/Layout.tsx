@@ -1,6 +1,8 @@
 import { ChartLine, FolderKanban, LayoutGrid, LogOut, Server, Settings, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
-import { NavLink } from "react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Link, NavLink } from "react-router";
+import { api } from "@/lib/api";
 import { useAuthStatus, useLogout } from "@/lib/auth";
 import { Logo } from "./Logo";
 import { LangSwitch } from "./LangSwitch";
@@ -55,6 +57,7 @@ export function Layout({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
+        {user?.role === "admin" && <UpdateBadge />}
         {user && (
           <div className="hidden space-y-3 border-t border-line px-5 py-4 md:block">
             <div className="flex items-center gap-2">
@@ -78,5 +81,17 @@ export function Layout({ children }: { children: ReactNode }) {
         <div className="mx-auto max-w-5xl">{children}</div>
       </main>
     </div>
+  );
+}
+
+/** Yeni Xudbin sürümü varsa yöneticiye kenar çubuğunda küçük bir bağlantı. */
+function UpdateBadge() {
+  const { data } = useQuery({ queryKey: ["update"], queryFn: () => api.get<{ updateAvailable: boolean; latest: string | null }>("/settings/update"), staleTime: 3_600_000 });
+  if (!data?.updateAvailable) return null;
+  return (
+    <Link to="/settings?tab=panel" className="mx-3 mb-3 hidden items-center gap-2 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-[13px] text-fg hover:bg-accent/15 md:flex">
+      <span className="size-1.5 rounded-full bg-accent" />
+      {t("Xudbin {v} yayında", { v: data.latest ?? "" })}
+    </Link>
   );
 }

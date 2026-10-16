@@ -131,7 +131,44 @@ Kurulum linkini kaçırırsan `xudbin link` komutunu çalıştır.
 
 ## Hazır imajlar
 
-Repo GitHub'a gönderildiğinde `.github/workflows/images.yml` panel ve Caddy imajlarını (amd64 + arm64) `ghcr.io/<sahip>/xudbin` ve `ghcr.io/<sahip>/xudbin-caddy` olarak yayınlar. İlk yayından sonra GitHub > Packages'ta iki paketi de **Public** yap; kurulumlar derleme yapmadan bu imajları kullanır.
+Repo GitHub'a gönderildiğinde `.github/workflows/ci.yml` testleri çalıştırır; geçerse panel ve Caddy imajlarını (amd64 + arm64, her biri kendi mimarisinde) `ghcr.io/<sahip>/xudbin` ve `ghcr.io/<sahip>/xudbin-caddy` olarak imzalı yayınlar. İlk yayından sonra GitHub > Packages'ta iki paketi de **Public** yap; kurulumlar derleme yapmadan bu imajları kullanır.
+
+## Komut satırı (xb) ve CI/CD
+
+Panelde **Ayarlar > Hesap > API anahtarları** bölümünden bir anahtar oluştur (CI için salt okunur değil, süreli bir anahtar önerilir).
+
+```bash
+sudo curl -fsSL https://raw.githubusercontent.com/Furkan1116/XudbinPanel/main/cli/xb.mjs -o /usr/local/bin/xb && sudo chmod +x /usr/local/bin/xb
+xb login https://panel.ornek.com xb_...
+xb apps                      # uygulamalar
+xb deploy blog --wait        # deploy et, logu izle; başarısızsa çıkış kodu 2
+xb logs blog                 # canlı loglar
+xb rollback blog 42          # #42 numaralı deploy'a dön
+```
+
+GitHub Actions'ta (anahtarı depo ayarlarında `XUDBIN_TOKEN` gizli değişkeni olarak sakla):
+
+```yaml
+- name: Xudbin'e deploy
+  run: |
+    curl -fsSL https://raw.githubusercontent.com/Furkan1116/XudbinPanel/main/cli/xb.mjs -o xb.mjs
+    node xb.mjs deploy blog --wait
+  env:
+    XUDBIN_URL: https://panel.ornek.com
+    XUDBIN_TOKEN: ${{ secrets.XUDBIN_TOKEN }}
+```
+
+API'yi doğrudan da kullanabilirsin: `curl -X POST -H "Authorization: Bearer xb_..." -H "Content-Type: application/json" -d '{}' https://panel.ornek.com/api/apps/<no>/deploy`
+
+## İmajların doğrulanması
+
+Yayınlanan imajlar GitHub Actions'ta derlenip [Sigstore](https://www.sigstore.dev) ile imzalanır; SBOM ve köken (provenance) bilgisi imajla birlikte yayınlanır. İmzayı doğrulamak için:
+
+```bash
+cosign verify ghcr.io/furkan1116/xudbin:latest \
+  --certificate-identity-regexp '^https://github.com/Furkan1116/XudbinPanel/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 ## Uzak sunucu eklemek
 
