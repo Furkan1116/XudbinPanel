@@ -938,9 +938,9 @@ export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
   .get("/github/manifest", async (c) => {
     try {
       await completeManifest(c.req.query("code") ?? "", c.req.query("state") ?? "");
-      return c.redirect("/settings?tab=github&created=1");
+      return c.redirect("/git?created=1");
     } catch (err) {
-      return c.redirect(`/settings?tab=github&error=${encodeURIComponent((err as Error).message)}`);
+      return c.redirect(`/git?error=${encodeURIComponent((err as Error).message)}`);
     }
   });
 

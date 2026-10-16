@@ -38,7 +38,7 @@ export function appManifest(origin: string, name: string) {
     url: origin,
     hook_attributes: { url: `${origin}/api/webhooks/github`, active: true },
     redirect_url: `${origin}/api/webhooks/github/manifest`,
-    setup_url: `${origin}/settings?tab=github`,
+    setup_url: `${origin}/git`,
     setup_on_update: true,
     public: false,
     default_permissions: { contents: "read", metadata: "read", pull_requests: "write" },
@@ -59,7 +59,11 @@ export async function completeManifest(code: string, state: string) {
     signal: AbortSignal.timeout(15_000),
   });
   const b = (await res.json().catch(() => ({}))) as Record<string, any>;
-  if (!res.ok || !b.id || !b.pem) throw new Error(`GitHub App oluşturulamadı: ${b.message ?? res.status}`);
+  if (!res.ok) {
+    throw new Error(`GitHub App bilgileri alınamadı (${b.message ?? res.status}). App GitHub'da oluşmuş olabilir; github.com/settings/apps sayfasından silip tekrar dene.`);
+  }
+  const missing = ["id", "slug", "pem", "webhook_secret", "client_id", "client_secret"].filter((k) => !b[k]);
+  if (missing.length) throw new Error(`GitHub eksik bilgi döndürdü (${missing.join(", ")}); tekrar dene.`);
   const cfg: GithubAppConfig = {
     id: Number(b.id),
     slug: String(b.slug),

@@ -60,6 +60,16 @@ export function GithubSettings() {
           <p className="text-[13px] text-muted">
             {t("İzinler: kod okuma (contents: read), PR yorumu (pull_requests: write). Olaylar: push, pull_request. Panele https:// ile, internetten erişilebilir bir adresle girmiş olmalısın.")}
           </p>
+          <ul className="list-disc space-y-1 pl-5 text-[13px] text-muted">
+            <li>{t("Önce bu tarayıcıda GitHub'a giriş yap (organizasyonda SSO varsa onu da onayla).")}</li>
+            <li>{t("GitHub'da açılan sayfada yalnız \"Create GitHub App\" düğmesine bas; ayarlar hazır gelir.")}</li>
+            <li>
+              {t("Daha önce denediysen yarım kalan App'ler olabilir:")}{" "}
+              <a className="underline hover:text-fg" href={org ? `https://github.com/organizations/${org}/settings/apps` : "https://github.com/settings/apps"} target="_blank" rel="noreferrer">
+                {t("GitHub'daki App'lerini gör")}
+              </a>
+            </li>
+          </ul>
           <div className="flex justify-end">
             <Button variant="primary" loading={create.isPending} onClick={() => create.mutate()}>
               <GithubIcon /> {t("GitHub App oluştur")}

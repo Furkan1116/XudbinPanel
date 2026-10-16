@@ -248,6 +248,11 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
     const input = await body(c, z.object({ org: z.string().trim().regex(/^[\w-]{0,39}$/, "Geçersiz organizasyon adı").default("") }));
     const origin = publicOrigin(c);
     if (!/^https:\/\//.test(origin)) throw new HttpError(400, "GitHub'ın webhook gönderebilmesi için panele https:// ile, internetten erişilebilir bir adresle girmelisin");
+    // GitHub, internetten erişilemeyen webhook adreslerini reddeder; GitHub sayfasında belirsiz bir hata yerine burada açıkla.
+    const hostname = new URL(origin).hostname;
+    if (hostname === "localhost" || !hostname.includes(".") || /\.(local|internal|lan|test)$/.test(hostname) || /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(hostname)) {
+      throw new HttpError(400, `${hostname} internetten erişilebilir bir adres değil; GitHub webhook gönderemez. Panele genel alan adı veya sslip.io adresiyle gir.`);
+    }
     // App adı tüm GitHub'da benzersiz olmalı (en çok 34 karakter); her denemede rastgele ek alır.
     const host = new URL(origin).hostname.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 20);
     const state = newManifestState();
