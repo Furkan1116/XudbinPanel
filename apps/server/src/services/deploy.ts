@@ -75,10 +75,11 @@ export function fillPlaceholders(env: Record<string, string>, appId: number, htt
   const url = (h: { host: string; https: number }) => `${h.https && httpsOn ? "https" : "http"}://${h.host}`;
   const values: Record<string, string> = {
     XUDBIN_URL: hosts[0] ? url(hosts[0]) : "",
+    XUDBIN_HOST: hosts[0]?.host ?? "",
     XUDBIN_DOMAINS: hosts.map((h) => h.host).join(","),
     XUDBIN_ORIGINS: hosts.map(url).join(","),
   };
-  for (const k of Object.keys(env)) env[k] = env[k]!.replace(/\{\{(XUDBIN_URL|XUDBIN_DOMAINS|XUDBIN_ORIGINS)\}\}/g, (_, n: string) => values[n] ?? "");
+  for (const k of Object.keys(env)) env[k] = env[k]!.replace(/\{\{(XUDBIN_URL|XUDBIN_HOST|XUDBIN_DOMAINS|XUDBIN_ORIGINS)\}\}/g, (_, n: string) => values[n] ?? "");
   return { env, values };
 }
 
@@ -709,7 +710,11 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
   };
   const overridePath = path.join(dir, "docker-compose.xudbin.yml");
   fs.writeFileSync(overridePath, YAML.stringify(override));
-  fs.writeFileSync(path.join(dir, ".env"), decrypt(app.env));
+  // Compose, .env dosyasındaki değişkenleri ${AD} biçimindeki yerlere koyar; yer tutucular önce doldurulur.
+  const composeVars = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off").env;
+  // Tek tırnak: Compose içini olduğu gibi okur ($ işareti değişken sanılmaz). Tek tırnak içeren değerler çift tırnakla.
+  const quote = (v: string) => (v.includes("'") || v.includes("\n") ? JSON.stringify(v) : `'${v}'`);
+  fs.writeFileSync(path.join(dir, ".env"), Object.entries(composeVars).map(([k, v]) => `${k}=${quote(v)}`).join("\n") + "\n", { mode: 0o600 });
 
   const env = composeEnv(server, workdir);
   const args = ["compose", "-p", `xb-${app.slug}`, "-f", composePath, "-f", overridePath];

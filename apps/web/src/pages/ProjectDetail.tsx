@@ -3,6 +3,7 @@ import { Database as DbIcon, ExternalLink, FolderUp, GitBranch, Layers, Package 
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { CreateAppWizard } from "@/components/CreateAppWizard";
+import { TemplateDialog } from "@/components/TemplateDialog";
 import { FrameworkLogo } from "@/components/FrameworkLogo";
 import { Button, ConfirmDialog, Dialog, Empty, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, useAction } from "@/components/ui";
 import { api, type App, type Server } from "@/lib/api";
@@ -18,7 +19,7 @@ const SOURCE_ICON = { git: GitBranch, image: Package, compose: Layers, upload: F
 export function ProjectDetailPage() {
   const id = Number(useParams().id);
   const navigate = useNavigate();
-  const [dialog, setDialog] = useState<"app" | "db" | "delete" | "edit" | null>(null);
+  const [dialog, setDialog] = useState<"app" | "db" | "delete" | "edit" | "template" | null>(null);
   const { data } = useQuery({ queryKey: ["project", id], queryFn: () => api.get<ProjectData>(`/projects/${id}`), refetchInterval: 5000 });
   const del = useAction(() => api.del(`/projects/${id}`), { success: t("Proje silindi"), invalidate: [["projects"]], onSuccess: () => navigate("/projects") });
   if (!data) return <PageLoading />;
@@ -34,6 +35,7 @@ export function ProjectDetailPage() {
           <>
             <Button variant="ghost" onClick={() => setDialog("edit")}>{t("Düzenle")}</Button>
             <Button onClick={() => setDialog("db")}>{t("Veritabanı ekle")}</Button>
+            <Button onClick={() => setDialog("template")}>{t("Hazır uygulama")}</Button>
             <Button variant="primary" onClick={() => setDialog("app")}>{t("Uygulama ekle")}</Button>
           </>
         }
@@ -99,6 +101,7 @@ export function ProjectDetailPage() {
       )}
 
       <CreateAppWizard open={dialog === "app"} onClose={() => setDialog(null)} projectId={id} />
+      <TemplateDialog open={dialog === "template"} onClose={() => setDialog(null)} projectId={id} />
       <CreateDbDialog open={dialog === "db"} onClose={() => setDialog(null)} projectId={id} />
       <EditProjectDialog open={dialog === "edit"} onClose={() => setDialog(null)} project={project} />
       <ConfirmDialog open={dialog === "delete"} onClose={() => setDialog(null)} title={t("Proje silinsin mi?")} description={t("Proje boş; silmek hiçbir uygulamayı etkilemez.")} confirmLabel={t("Sil")} loading={del.isPending} onConfirm={() => del.mutate()} />
