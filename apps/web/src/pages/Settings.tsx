@@ -1,10 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Navigate, useSearchParams } from "react-router";
 import { ApiTokens } from "@/components/ApiTokens";
 import { AuditLog } from "@/components/AuditLog";
 import { BackupSettings } from "@/components/BackupSettings";
-import { GithubSettings } from "@/components/GithubSettings";
 import { SsoSettings } from "@/components/SsoSettings";
 import { Button, ConfirmDialog, CopyField, Dialog, Field, Notice, PageHeader, PageLoading, Section, Tabs, Toggle, useAction } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -12,13 +11,16 @@ import { useAuthStatus } from "@/lib/auth";
 import { timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
-type Tab = "panel" | "account" | "users" | "notifications" | "backup" | "github" | "keys" | "audit";
+type Tab = "panel" | "account" | "users" | "notifications" | "backup" | "audit";
 
 export function SettingsPage() {
   const [params, setParams] = useSearchParams();
   const auth = useAuthStatus();
   const admin = auth.data?.user?.role === "admin";
   const tab = (params.get("tab") as Tab) || (admin ? "panel" : "account");
+  // Eski bağlantılar (ve GitHub'ın App kurulumundan dönüşü) yeni sayfalara yönlenir.
+  if ((params.get("tab") as string) === "github") return <Navigate to={`/git?${params.toString()}`} replace />;
+  if ((params.get("tab") as string) === "keys") return <Navigate to="/ssh-keys" replace />;
   return (
     <>
       <PageHeader title={t("Ayarlar")} />
@@ -33,8 +35,6 @@ export function SettingsPage() {
                 { id: "users", label: t("Kullanıcılar") },
                 { id: "notifications", label: t("Bildirimler") },
                 { id: "backup", label: t("Yedekleme") },
-                { id: "github", label: "GitHub" },
-                { id: "keys", label: t("SSH anahtarları") },
                 { id: "audit", label: t("İşlem kaydı") },
               ]
             : [{ id: "account", label: t("Hesap") }]
@@ -45,8 +45,7 @@ export function SettingsPage() {
       {tab === "account" && <Account />}
       {tab === "notifications" && admin && <Notifications />}
       {tab === "backup" && admin && <BackupSettings />}
-      {tab === "github" && admin && <GithubSettings />}
-      {tab === "keys" && admin && <SshKeys />}
+
       {tab === "audit" && admin && <AuditLog />}
     </>
   );
@@ -477,7 +476,7 @@ function AddChannel({ open, onClose, events }: { open: boolean; onClose: () => v
 
 type Key = { id: number; name: string; publicKey: string; createdAt: number; servers: number };
 
-function SshKeys() {
+export function SshKeys() {
   const { data } = useQuery({ queryKey: ["ssh-keys"], queryFn: () => api.get<{ keys: Key[] }>("/ssh-keys") });
   const [del, setDel] = useState<Key | null>(null);
   const remove = useAction((id: number) => api.del(`/ssh-keys/${id}`), { success: t("Anahtar silindi"), invalidate: [["ssh-keys"]], onSuccess: () => setDel(null) });

@@ -1,5 +1,5 @@
-import { ChartLine, FolderKanban, LayoutGrid, LogOut, Server, Settings, ShieldCheck } from "lucide-react";
-import type { ReactNode } from "react";
+import { Activity, ArchiveRestore, CalendarClock, ChartLine, Database, FolderKanban, GitBranch, KeyRound, LayoutGrid, LayoutTemplate, LogOut, Rocket, Server, Settings, ShieldCheck } from "lucide-react";
+import { Fragment, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, NavLink } from "react-router";
 import { api } from "@/lib/api";
@@ -9,14 +9,78 @@ import { LangSwitch } from "./LangSwitch";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { t } from "@/lib/i18n";
 
-const NAV = [
-  { to: "/", label: t("Genel bakış"), icon: LayoutGrid, end: true },
-  { to: "/projects", label: t("Projeler"), icon: FolderKanban },
-  { to: "/analytics", label: t("Analitik"), icon: ChartLine },
-  { to: "/servers", label: t("Sunucular"), icon: Server, admin: true },
-  { to: "/security", label: t("Güvenlik"), icon: ShieldCheck, admin: true },
-  { to: "/settings", label: t("Ayarlar"), icon: Settings },
+type NavItem = { to: string; label: string; icon: typeof LayoutGrid; end?: boolean; admin?: boolean };
+
+// Gruplar: günlük kullanılan kaynaklar, işletme (izleme/yedek/güvenlik), altyapı. Ayarlar en altta.
+const NAV: { title?: string; items: NavItem[] }[] = [
+  {
+    items: [
+      { to: "/", label: t("Genel bakış"), icon: LayoutGrid, end: true },
+      { to: "/projects", label: t("Projeler"), icon: FolderKanban },
+    ],
+  },
+  {
+    title: t("Kaynaklar"),
+    items: [
+      { to: "/deployments", label: t("Dağıtımlar"), icon: Rocket },
+      { to: "/databases", label: t("Veritabanları"), icon: Database },
+      { to: "/templates", label: t("Şablonlar"), icon: LayoutTemplate },
+    ],
+  },
+  {
+    title: t("İşletme"),
+    items: [
+      { to: "/monitoring", label: t("İzleme"), icon: Activity },
+      { to: "/analytics", label: t("Analitik"), icon: ChartLine },
+      { to: "/backups", label: t("Yedekler"), icon: ArchiveRestore },
+      { to: "/schedules", label: t("Zamanlanmış görevler"), icon: CalendarClock },
+      { to: "/security", label: t("Güvenlik"), icon: ShieldCheck, admin: true },
+    ],
+  },
+  {
+    title: t("Altyapı"),
+    items: [
+      { to: "/servers", label: t("Sunucular"), icon: Server, admin: true },
+      { to: "/git", label: t("Git kaynakları"), icon: GitBranch, admin: true },
+      { to: "/ssh-keys", label: t("SSH anahtarları"), icon: KeyRound, admin: true },
+    ],
+  },
 ];
+const SETTINGS: NavItem = { to: "/settings", label: t("Ayarlar"), icon: Settings };
+
+const linkClass = ({ isActive }: { isActive: boolean }) =>
+  `relative flex shrink-0 items-center gap-2.5 rounded-md px-3 py-1.5 text-[14px] transition-colors ${
+    isActive
+      ? "bg-surface-2 font-medium text-fg md:before:absolute md:before:inset-y-1.5 md:before:-left-3 md:before:w-[3px] md:before:rounded-full md:before:bg-accent"
+      : "text-muted hover:bg-surface-2 hover:text-fg"
+  }`;
+
+function Item({ item, badge }: { item: NavItem; badge?: ReactNode }) {
+  return (
+    <NavLink to={item.to} end={item.end} className={linkClass}>
+      <item.icon className="size-4" strokeWidth={1.8} />
+      <span className="flex-1">{item.label}</span>
+      {badge}
+    </NavLink>
+  );
+}
+
+/** Süren deploy sayısı (Dağıtımlar bağlantısında küçük rozet). */
+function RunningBadge() {
+  const { data } = useQuery({
+    queryKey: ["overview", "deployments", "running-count"],
+    queryFn: () => api.get<{ deployments: unknown[] }>("/overview/deployments?status=running&limit=20"),
+    refetchInterval: 10_000,
+  });
+  const n = data?.deployments.length ?? 0;
+  if (!n) return null;
+  return (
+    <span className="ml-1 inline-flex min-w-5 items-center justify-center gap-1 rounded-full bg-warn/15 px-1.5 text-[12px] font-medium text-warn" title={t("{n} deploy sürüyor", { n })}>
+      <span className="size-1.5 animate-pulse rounded-full bg-current" />
+      {n}
+    </span>
+  );
+}
 
 export function Layout({ children }: { children: ReactNode }) {
   const { data } = useAuthStatus();
@@ -37,24 +101,22 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
 
-        <nav className="flex gap-0.5 overflow-x-auto px-2 pb-2 md:flex-1 md:flex-col md:px-3 md:pb-0">
-          {NAV.filter((item) => !item.admin || user?.role === "admin").map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `relative flex shrink-0 items-center gap-2.5 rounded-md px-3 py-2 text-[14px] transition-colors ${
-                  isActive
-                    ? "bg-surface-2 font-medium text-fg md:before:absolute md:before:inset-y-2 md:before:-left-3 md:before:w-[3px] md:before:rounded-full md:before:bg-accent"
-                    : "text-muted hover:bg-surface-2 hover:text-fg"
-                }`
-              }
-            >
-              <item.icon className="size-4" strokeWidth={1.8} />
-              {item.label}
-            </NavLink>
-          ))}
+        <nav className="flex gap-0.5 overflow-x-auto px-2 pb-2 md:flex-1 md:flex-col md:overflow-y-auto md:px-3 md:pb-3">
+          {NAV.map((group, gi) => {
+            const items = group.items.filter((item) => !item.admin || user?.role === "admin");
+            if (!items.length) return null;
+            return (
+              <Fragment key={gi}>
+                {group.title && <div className="hidden px-3 pt-4 pb-1 text-[11px] font-medium tracking-wide text-faint uppercase md:block">{group.title}</div>}
+                {items.map((item) => (
+                  <Item key={item.to} item={item} badge={item.to === "/deployments" ? <RunningBadge /> : undefined} />
+                ))}
+              </Fragment>
+            );
+          })}
+          <div className="md:mt-auto md:pt-3">
+            <Item item={SETTINGS} />
+          </div>
         </nav>
 
         {user?.role === "admin" && <UpdateBadge />}

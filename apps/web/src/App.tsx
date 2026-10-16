@@ -12,6 +12,14 @@ import { ProjectsPage } from "@/pages/Projects";
 import { SecurityPage } from "@/pages/Security";
 import { ServerDetailPage } from "@/pages/ServerDetail";
 import { ServersPage } from "@/pages/Servers";
+import { DeploymentsPage } from "./pages/Deployments";
+import { DatabasesPage } from "./pages/Databases";
+import { TemplatesPage } from "./pages/Templates";
+import { MonitoringPage } from "./pages/Monitoring";
+import { BackupsPage } from "./pages/Backups";
+import { SchedulesPage } from "./pages/Schedules";
+import { GitSourcesPage } from "./pages/GitSources";
+import { SshKeysPage } from "./pages/SshKeysPage";
 import { SettingsPage } from "@/pages/Settings";
 import { SetupPage } from "@/pages/Setup";
 import { ChangePasswordPage } from "@/pages/ChangePassword";
@@ -46,6 +54,14 @@ export function App() {
               <Route path="/security" element={<SecurityPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/deployments" element={<DeploymentsPage />} />
+              <Route path="/databases" element={<DatabasesPage />} />
+              <Route path="/templates" element={<TemplatesPage />} />
+              <Route path="/monitoring" element={<MonitoringPage />} />
+              <Route path="/backups" element={<BackupsPage />} />
+              <Route path="/schedules" element={<SchedulesPage />} />
+              <Route path="/git" element={<GitSourcesPage />} />
+              <Route path="/ssh-keys" element={<SshKeysPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Layout>

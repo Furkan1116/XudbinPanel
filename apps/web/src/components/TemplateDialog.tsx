@@ -6,7 +6,7 @@ import { Button, Dialog, Field, useAction } from "@/components/ui";
 import { api, type Server } from "@/lib/api";
 import { t } from "@/lib/i18n";
 
-type Template = { id: string; name: string; description: string; category: string; icon?: string; notes?: string; vars: { key: string; label: string; secret: boolean }[] };
+export type Template = { id: string; name: string; description: string; category: string; icon?: string; notes?: string; vars: { key: string; label: string; secret: boolean }[] };
 
 // Yalnız kullanılan logolar içe aktarılır (tüm paket arayüzü megabaytlarca büyütürdü).
 const ICONS: Record<string, { path: string; hex: string }> = {
@@ -20,7 +20,7 @@ const dark = (hex: string) => {
   return ((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114 < 60;
 };
 
-function Logo({ icon, name }: { icon?: string; name: string }) {
+export function TemplateLogo({ icon, name }: { icon?: string; name: string }) {
   const si = icon ? ICONS[icon] : undefined;
   if (!si) return <span className="grid size-9 place-items-center rounded-md bg-surface-2 text-[14px] font-semibold text-muted">{name.slice(0, 1)}</span>;
   return (
@@ -33,11 +33,16 @@ function Logo({ icon, name }: { icon?: string; name: string }) {
 }
 
 /** Tek tıkla kurulan hazır uygulamalar (WordPress, n8n, Nextcloud...). */
-export function TemplateDialog({ open, onClose, projectId }: { open: boolean; onClose: () => void; projectId: number }) {
+export function TemplateDialog({ open, onClose, projectId: fixedProject, initial }: { open: boolean; onClose: () => void; projectId?: number; initial?: Template | null }) {
   const navigate = useNavigate();
   const templates = useQuery({ queryKey: ["templates"], queryFn: () => api.get<{ templates: Template[] }>("/templates"), enabled: open });
   const servers = useQuery({ queryKey: ["servers"], queryFn: () => api.get<{ servers: Server[] }>("/servers"), enabled: open });
-  const [picked, setPicked] = useState<Template | null>(null);
+  // Şablonlar sayfasından açılınca proje burada seçilir.
+  const projects = useQuery({ queryKey: ["projects"], queryFn: () => api.get<{ projects: { id: number; name: string }[] }>("/projects"), enabled: open && !fixedProject });
+  const [chosenProject, setChosenProject] = useState<number | null>(null);
+  const projectId = fixedProject ?? chosenProject ?? projects.data?.projects[0]?.id ?? 0;
+  const [pickedState, setPicked] = useState<Template | null>(null);
+  const picked = pickedState ?? initial ?? null;
   const [name, setName] = useState("");
   const [serverId, setServerId] = useState<number | null>(null);
   const ready = servers.data?.servers.filter((s) => s.status === "ready") ?? [];
@@ -47,6 +52,7 @@ export function TemplateDialog({ open, onClose, projectId }: { open: boolean; on
   );
   const close = () => {
     setPicked(null);
+    setChosenProject(null);
     setName("");
     onClose();
   };
@@ -63,7 +69,7 @@ export function TemplateDialog({ open, onClose, projectId }: { open: boolean; on
               <div className="grid gap-2 sm:grid-cols-2">
                 {list.map((tpl) => (
                   <button key={tpl.id} type="button" onClick={() => setPicked(tpl)} className="panel flex items-start gap-3 p-3 text-left transition-colors hover:border-line-strong">
-                    <Logo icon={tpl.icon} name={tpl.name} />
+                    <TemplateLogo icon={tpl.icon} name={tpl.name} />
                     <span className="min-w-0">
                       <span className="block font-medium">{tpl.name}</span>
                       <span className="block text-[13px] leading-snug text-muted">{t(tpl.description)}</span>
@@ -83,9 +89,22 @@ export function TemplateDialog({ open, onClose, projectId }: { open: boolean; on
           }}
         >
           <div className="flex items-start gap-3">
-            <Logo icon={picked.icon} name={picked.name} />
+            <TemplateLogo icon={picked.icon} name={picked.name} />
             <p className="text-[14px] text-muted">{t(picked.description)}</p>
           </div>
+          {!fixedProject && (
+            <Field label={t("Proje")}>
+              {projects.data?.projects.length ? (
+                <select className="input" value={projectId} onChange={(e) => setChosenProject(Number(e.target.value))}>
+                  {projects.data.projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-[13px] text-muted">{t("Önce bir proje oluştur.")}</p>
+              )}
+            </Field>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label={t("Ad")}>
               <input className="input" placeholder={picked.name} value={name} onChange={(e) => setName(e.target.value)} />
@@ -105,8 +124,8 @@ export function TemplateDialog({ open, onClose, projectId }: { open: boolean; on
           )}
           {picked.notes && <p className="rounded-md border border-line bg-surface-2/50 p-3 text-[13px]">{t(picked.notes)}</p>}
           <div className="flex justify-between gap-2">
-            <Button type="button" variant="ghost" onClick={() => setPicked(null)}>{t("Geri")}</Button>
-            <Button type="submit" variant="primary" loading={install.isPending} disabled={!ready.length}>{t("Kur")}</Button>
+            {initial ? <span /> : <Button type="button" variant="ghost" onClick={() => setPicked(null)}>{t("Geri")}</Button>}
+            <Button type="submit" variant="primary" loading={install.isPending} disabled={!ready.length || !projectId}>{t("Kur")}</Button>
           </div>
         </form>
       )}
