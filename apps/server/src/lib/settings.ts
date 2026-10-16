@@ -1,3 +1,4 @@
+import type { GithubAppConfig } from "../services/github-app.js";
 import { db } from "../db.js";
 
 export type Settings = {
@@ -25,6 +26,7 @@ export type Settings = {
   uptimeEnabled: boolean;
   /** OpenID Connect ile giriş; clientSecret şifreli. */
   oidc: { issuer: string; clientId: string; clientSecret: string; label: string; autoCreate: boolean; allowedDomains: string } | null;
+  githubApp: GithubAppConfig | null;
 };
 
 const DEFAULTS: Settings = {
@@ -46,6 +48,7 @@ const DEFAULTS: Settings = {
   geoDbMonth: null,
   uptimeEnabled: true,
   oidc: null,
+  githubApp: null,
 };
 
 export function getSettings(): Settings {

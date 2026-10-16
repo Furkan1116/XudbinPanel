@@ -31,6 +31,13 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
   const [serverId, setServerId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [git, setGit] = useState({ url: "", branch: "main", token: "", context: "." });
+  const githubRepos = useQuery({
+    queryKey: ["github-repos"],
+    queryFn: () => api.get<{ connected: boolean; repos: { fullName: string; url: string; defaultBranch: string; private: boolean }[] }>("/settings/github/repos"),
+    enabled: open && (source === "git" || source === "compose"),
+    staleTime: 60_000,
+    retry: false,
+  });
   const [image, setImage] = useState("");
   const [composeFile, setComposeFile] = useState("");
   const [packed, setPacked] = useState<Packed | null>(null);
@@ -179,6 +186,29 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
 
             {(source === "git" || source === "compose") && (
               <>
+                {githubRepos.data?.repos.length ? (
+                  <Field label={t("GitHub'dan seç")} hint={t("GitHub App'e erişim verilen repolar; token gerekmez.")}>
+                    <select
+                      className="input"
+                      value={githubRepos.data.repos.find((r) => r.url === git.url)?.url ?? ""}
+                      onChange={(e) => {
+                        const r = githubRepos.data!.repos.find((x) => x.url === e.target.value);
+                        if (r) {
+                          setGit({ ...git, url: r.url, branch: r.defaultBranch, token: "" });
+                          if (!name) setName(r.fullName.split("/")[1]!);
+                        }
+                      }}
+                    >
+                      <option value="">{t("Repo seç...")}</option>
+                      {githubRepos.data.repos.map((r) => (
+                        <option key={r.url} value={r.url}>
+                          {r.fullName}
+                          {r.private ? " 🔒" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : null}
                 <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
                   <Field label={t("Repo adresi")} hint={source === "compose" ? t("Boş bırakırsan compose dosyasını sonraki adımda yapıştırırsın.") : t("https:// ile başlamalı.")}>
                     <input className="input" required={source === "git"} value={git.url} onChange={(e) => setGit({ ...git, url: e.target.value.trim() })} placeholder={t("https://github.com/kullanici/repo")} />

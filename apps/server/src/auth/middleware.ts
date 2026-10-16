@@ -31,7 +31,7 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
  * Üye rolündeki kullanıcılar uygulama, proje ve veritabanlarını yönetir; sunucular, güvenlik,
  * panel ayarları, bildirimler, SSH anahtarları ve kullanıcılar yalnız yöneticiye açıktır.
  */
-const ADMIN_ANY = [/^\/api\/ssh-keys/, /^\/api\/users/, /^\/api\/settings\/(panel|notifications|backup|audit|sso)/, /^\/api\/security/];
+const ADMIN_ANY = [/^\/api\/ssh-keys/, /^\/api\/users/, /^\/api\/settings\/(panel|notifications|backup|audit|sso|github(?!\/repos))/, /^\/api\/security/];
 const ADMIN_WRITE = [/^\/api\/servers/, /^\/api\/security/];
 
 export const enforceRoles = createMiddleware<AppEnv>(async (c, next) => {

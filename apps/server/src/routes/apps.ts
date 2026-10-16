@@ -40,6 +40,7 @@ import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
 import { accessibleAppIds, accessibleProjectIds, canWriteProject } from "../services/access.js";
+import { appsForRepo, completeManifest, gitTokenFor, verifyGithubSignature } from "../services/github-app.js";
 
 const parseJson = (raw: string | null) => {
   try {
@@ -876,7 +877,41 @@ export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
   }
   const id = enqueueDeploy(app.id, "webhook", { title: payload.head_commit?.message?.split("\n")[0] ?? "" });
   return c.json({ ok: true, deploymentId: id }, 202);
-});
+})
+  // GitHub App: tek adres, olay repo'ya bağlı tüm uygulamalara dağıtılır. App'in gizli anahtarıyla imzalı olmalı.
+  .post("/github", async (c) => {
+    const raw = await c.req.text();
+    if (!verifyGithubSignature(raw, c.req.header("x-hub-signature-256"))) return c.json({ error: "İmza doğrulanamadı" }, 401);
+    const event = c.req.header("x-github-event");
+    let payload: Record<string, any> = {};
+    try {
+      payload = JSON.parse(raw);
+    } catch {}
+    const repo = String(payload.repository?.full_name ?? "");
+    if (event === "ping" || !repo) return c.json({ ok: true });
+    const apps = appsForRepo(repo).map((id) => getApp(id)!).filter(Boolean);
+    const results: unknown[] = [];
+    if (event === "push") {
+      if (payload.deleted) return c.json({ ok: true, results });
+      for (const app of apps) {
+        if (!app.auto_deploy || payload.ref !== `refs/heads/${app.git_branch}`) continue;
+        results.push({ appId: app.id, deploymentId: enqueueDeploy(app.id, "webhook", { title: payload.head_commit?.message?.split("\n")[0] ?? "" }) });
+      }
+    } else if (event === "pull_request") {
+      const pr = parsePrEvent((h) => c.req.header(h), payload);
+      if (pr) for (const app of apps) if (app.previews_enabled) results.push({ appId: app.id, ...(await handlePrEvent(app, { ...pr, repo })) });
+    }
+    return c.json({ ok: true, results }, 202);
+  })
+  // Manifest akışının dönüşü: GitHub App oluşturuldu, bilgileri al. state ile korunur (çerez gelmez: siteler arası yönlendirme).
+  .get("/github/manifest", async (c) => {
+    try {
+      await completeManifest(c.req.query("code") ?? "", c.req.query("state") ?? "");
+      return c.redirect("/settings?tab=github&created=1");
+    } catch (err) {
+      return c.redirect(`/settings?tab=github&error=${encodeURIComponent((err as Error).message)}`);
+    }
+  });
 
 /** Framework kataloğu ve repo algılama. */
 export const frameworkRoutes = new Hono<AppEnv>()
@@ -905,6 +940,7 @@ export const frameworkRoutes = new Hono<AppEnv>()
       context = input.gitUrl ? context : app.build_context;
     }
     if (!url || !/^https:\/\//.test(url)) throw new HttpError(400, "https:// ile başlayan bir repo adresi gerekli");
+    token = await gitTokenFor(url, token);
     const dest = path.join(config.dataDir, "builds", `detect-${randomAlnum(10)}`);
     try {
       await shallowClone(url, branch || "main", token, dest);

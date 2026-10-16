@@ -11,12 +11,7 @@ import { recordPanelEvent } from "../services/security.js";
 import { recordAudit } from "../services/audit.js";
 import { finishLogin, oidcConfig, startLogin } from "../auth/oidc.js";
 
-/** Panelin dışarıdan görünen adresi (Caddy arkasında X-Forwarded-* başlıklarından). */
-function publicOrigin(c: Context) {
-  const proto = (config.trustProxy && c.req.header("x-forwarded-proto")) || new URL(c.req.url).protocol.replace(":", "");
-  const host = (config.trustProxy && c.req.header("x-forwarded-host")) || c.req.header("host") || new URL(c.req.url).host;
-  return `${proto}://${host}`;
-}
+import { publicOrigin } from "../lib/origin.js";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { clientIp } from "../lib/client-ip.js";

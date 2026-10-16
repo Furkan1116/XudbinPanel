@@ -66,7 +66,7 @@ test("PR olayları: GitHub, GitLab ve fork koruması", async () => {
     number: 7,
     pull_request: { number: 7, title: "Yeni sayfa", head: { ref: "ozellik", repo: { full_name: "a/b" } }, base: { repo: { full_name: "a/b" } } },
   });
-  assert.deepEqual({ ...ev, commentUrl: undefined }, { action: "update", number: 7, branch: "ozellik", title: "Yeni sayfa", sameRepo: true, commentUrl: undefined });
+  assert.deepEqual({ ...ev, commentUrl: undefined }, { action: "update", number: 7, branch: "ozellik", title: "Yeni sayfa", sameRepo: true, commentUrl: undefined, repo: "a/b" });
   const fork = parsePrEvent(gh({ "x-github-event": "pull_request" }), {
     action: "opened",
     pull_request: { number: 8, head: { ref: "x", repo: { full_name: "kotu/b" } }, base: { repo: { full_name: "a/b" } } },
@@ -75,4 +75,14 @@ test("PR olayları: GitHub, GitLab ve fork koruması", async () => {
   const gl = parsePrEvent(gh({ "x-gitlab-event": "Merge Request Hook" }), { object_attributes: { action: "merge", iid: 3, source_branch: "f", source_project_id: 1, target_project_id: 1 } });
   assert.equal(gl?.action, "close");
   assert.equal(parsePrEvent(gh({ "x-github-event": "push" }), { ref: "refs/heads/main" }), null);
+});
+
+test("GitHub App: repo adı eşleme ve webhook imzası", async () => {
+  const { githubRepoOf, verifyGithubSignature } = await import("../src/services/github-app.js");
+  assert.equal(githubRepoOf("https://github.com/Furkan1116/XudbinPanel.git"), "furkan1116/xudbinpanel");
+  assert.equal(githubRepoOf("https://x-access-token:t@github.com/a/b"), "a/b");
+  assert.equal(githubRepoOf("https://gitlab.com/a/b.git"), null);
+  assert.equal(githubRepoOf("https://github.com.evil.com/a/b"), null);
+  // App bağlı değilken hiçbir imza kabul edilmez.
+  assert.equal(verifyGithubSignature("{}", "sha256=00"), false);
 });

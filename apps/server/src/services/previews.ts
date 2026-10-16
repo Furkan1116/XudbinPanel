@@ -3,6 +3,7 @@ import { decrypt, randomToken } from "../lib/crypto.js";
 import { dockerFor, removeContainer } from "./docker.js";
 import { applyCaddyConfig } from "./caddy.js";
 import { enqueueDeploy, getApp, type AppRow } from "./deploy.js";
+import { commentAsApp } from "./github-app.js";
 import { getServer } from "./servers.js";
 
 /**
@@ -11,7 +12,7 @@ import { getServer } from "./servers.js";
  * ortam değişkenlerini kopyalar (XUDBIN_PREVIEW=1 eklenir); kalıcı klasörleri ayrıdır.
  * Güvenlik: yalnız aynı repodan açılan PR'lar; fork'tan gelen kod uygulamanın gizli bilgileriyle çalıştırılmaz.
  */
-export type PrEvent = { action: "open" | "update" | "close"; number: number; branch: string; title: string; sameRepo: boolean; commentUrl?: string };
+export type PrEvent = { action: "open" | "update" | "close"; number: number; branch: string; title: string; sameRepo: boolean; commentUrl?: string; repo?: string };
 
 /** GitHub / Gitea / Forgejo / GitLab PR olaylarını ortak biçime çevirir; PR olayı değilse null. */
 export function parsePrEvent(header: (n: string) => string | undefined, payload: Record<string, any>): PrEvent | null {
@@ -23,7 +24,7 @@ export function parsePrEvent(header: (n: string) => string | undefined, payload:
     if (!action) return null;
     const head = pr.head?.repo?.full_name ?? pr.head?.repo?.fullName;
     const base = pr.base?.repo?.full_name ?? pr.base?.repo?.fullName;
-    return { action, number: Number(pr.number ?? payload.number), branch: pr.head?.ref, title: pr.title ?? "", sameRepo: Boolean(head && head === base), commentUrl: pr.comments_url ?? pr.issue_url };
+    return { action, number: Number(pr.number ?? payload.number), branch: pr.head?.ref, title: pr.title ?? "", sameRepo: Boolean(head && head === base), commentUrl: pr.comments_url ?? pr.issue_url, repo: base };
   }
   if (header("x-gitlab-event") === "Merge Request Hook" && payload.object_attributes) {
     const mr = payload.object_attributes;
@@ -74,21 +75,22 @@ export async function handlePrEvent(parent: AppRow, ev: PrEvent) {
     db.prepare("UPDATE apps SET git_branch = ? WHERE id = ?").run(ev.branch, app.id);
   }
   const deploymentId = enqueueDeploy(app.id, "webhook", { title: `PR #${ev.number}: ${ev.title}`.slice(0, 200) });
-  if (!existing && ev.commentUrl) void commentOnPr(parent, ev, app.id);
+  if (!existing && (ev.commentUrl || ev.repo)) void commentOnPr(parent, ev, app.id).catch(() => {});
   return { ok: true, previewAppId: app.id, deploymentId };
 }
 
-/** GitHub'da PR'a önizleme adresini yorum olarak yazar (uygulamanın git token'ı varsa). */
+/** GitHub'da PR'a önizleme adresini yorum olarak yazar: GitHub App kuruluysa onun adına, değilse uygulamanın git token'ıyla. */
 async function commentOnPr(parent: AppRow, ev: PrEvent, previewId: number) {
-  const token = decrypt(parent.git_token);
-  if (!token || !ev.commentUrl?.startsWith("https://api.github.com/")) return;
   const d = db.prepare("SELECT host, https FROM domains WHERE app_id = ? LIMIT 1").get(previewId) as { host: string; https: number } | undefined;
   if (!d) return;
-  const url = `${d.https ? "https" : "http"}://${d.host}`;
+  const text = `🚀 **Xudbin önizlemesi** hazırlanıyor: ${d.https ? "https" : "http"}://${d.host}\n\nYeni commit'lerde otomatik güncellenir, PR kapanınca silinir.`;
+  if (ev.repo && (await commentAsApp(ev.repo, ev.number, text).catch(() => false))) return;
+  const token = decrypt(parent.git_token);
+  if (!token || !ev.commentUrl?.startsWith("https://api.github.com/")) return;
   await fetch(ev.commentUrl, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
-    body: JSON.stringify({ body: `🚀 **Xudbin önizlemesi** hazırlanıyor: ${url}\n\nYeni commit'lerde otomatik güncellenir, PR kapanınca silinir.` }),
+    body: JSON.stringify({ body: text }),
     signal: AbortSignal.timeout(10_000),
   }).catch(() => {});
 }

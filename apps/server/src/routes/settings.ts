@@ -24,6 +24,8 @@ import { NOTIFY_EVENTS, sendTo } from "../services/notify.js";
 import { listServers } from "../services/servers.js";
 import { createPanelBackup, PANEL_BACKUP_DIR } from "../services/panel-backup.js";
 import { s3Test } from "../lib/s3.js";
+import { publicOrigin } from "../lib/origin.js";
+import { appManifest, disconnectGithubApp, githubApp, listRepos, newManifestState } from "../services/github-app.js";
 
 const pendingTotp = new Map<number, string>();
 const sessionKey = (hash: string) => hash.slice(0, 16);
@@ -232,6 +234,37 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
   .delete("/sso", (c) => {
     updateSettings({ oidc: null });
     return c.json({ ok: true });
+  })
+
+  // --- GitHub App ------------------------------------------------------------------------------
+  .get("/github", async (c) => {
+    const g = githubApp();
+    if (!g) return c.json({ app: null, installations: [] });
+    const { installations } = await listRepos().catch(() => ({ installations: [] as { id: number; account: string; type: string; settingsUrl: string }[] }));
+    return c.json({ app: { id: g.id, slug: g.slug, name: g.name, htmlUrl: g.htmlUrl, owner: g.owner, installUrl: `https://github.com/apps/${g.slug}/installations/new` }, installations });
+  })
+  // Manifest akışını başlatır: tarayıcı dönen manifest'i GitHub'a form olarak gönderir.
+  .post("/github/manifest", async (c) => {
+    const input = await body(c, z.object({ org: z.string().trim().regex(/^[\w-]{0,39}$/, "Geçersiz organizasyon adı").default("") }));
+    const origin = publicOrigin(c);
+    if (!/^https:\/\//.test(origin)) throw new HttpError(400, "GitHub'ın webhook gönderebilmesi için panele https:// ile, internetten erişilebilir bir adresle girmelisin");
+    const host = new URL(origin).hostname.replace(/[^a-z0-9]+/gi, "-").slice(0, 20);
+    const state = newManifestState();
+    const base = input.org ? `https://github.com/organizations/${input.org}/settings/apps/new` : "https://github.com/settings/apps/new";
+    return c.json({ action: `${base}?state=${state}`, manifest: JSON.stringify(appManifest(origin, `Xudbin ${host}`.slice(0, 34))) });
+  })
+  .delete("/github", (c) => {
+    disconnectGithubApp();
+    return c.json({ ok: true });
+  })
+  // Uygulama oluştururken repo seçici (tüm üyeler; izleyiciler uygulama oluşturamaz ama listeyi görmeleri zararsız).
+  .get("/github/repos", async (c) => {
+    if (!githubApp()) return c.json({ connected: false, repos: [] });
+    try {
+      return c.json({ connected: true, ...(await listRepos()) });
+    } catch (err) {
+      throw new HttpError(503, (err as Error).message);
+    }
   })
 
   // --- API anahtarları -------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router";
 import { ApiTokens } from "@/components/ApiTokens";
 import { AuditLog } from "@/components/AuditLog";
 import { BackupSettings } from "@/components/BackupSettings";
+import { GithubSettings } from "@/components/GithubSettings";
 import { SsoSettings } from "@/components/SsoSettings";
 import { Button, ConfirmDialog, CopyField, Dialog, Field, Notice, PageHeader, PageLoading, Section, Tabs, Toggle, useAction } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -11,7 +12,7 @@ import { useAuthStatus } from "@/lib/auth";
 import { timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
-type Tab = "panel" | "account" | "users" | "notifications" | "backup" | "keys" | "audit";
+type Tab = "panel" | "account" | "users" | "notifications" | "backup" | "github" | "keys" | "audit";
 
 export function SettingsPage() {
   const [params, setParams] = useSearchParams();
@@ -32,6 +33,7 @@ export function SettingsPage() {
                 { id: "users", label: t("Kullanıcılar") },
                 { id: "notifications", label: t("Bildirimler") },
                 { id: "backup", label: t("Yedekleme") },
+                { id: "github", label: "GitHub" },
                 { id: "keys", label: t("SSH anahtarları") },
                 { id: "audit", label: t("İşlem kaydı") },
               ]
@@ -43,6 +45,7 @@ export function SettingsPage() {
       {tab === "account" && <Account />}
       {tab === "notifications" && admin && <Notifications />}
       {tab === "backup" && admin && <BackupSettings />}
+      {tab === "github" && admin && <GithubSettings />}
       {tab === "keys" && admin && <SshKeys />}
       {tab === "audit" && admin && <AuditLog />}
     </>
