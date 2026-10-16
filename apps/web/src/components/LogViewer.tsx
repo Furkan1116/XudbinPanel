@@ -8,6 +8,7 @@ import { t } from "@/lib/i18n";
 export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = t("Henüz çıktı yok.") }: { url: string; height?: string; onDone?: () => void; emptyText?: string }) {
   const [lines, setLines] = useState<string[]>([]);
   const [state, setState] = useState<"live" | "done" | "closed">("live");
+  const [filter, setFilter] = useState("");
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const doneRef = useRef(onDone);
@@ -31,6 +32,9 @@ export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = t("He
     return () => es.close();
   }, [url]);
 
+  const needle = filter.trim().toLowerCase();
+  const shown = needle ? lines.filter((l) => l.toLowerCase().includes(needle)) : lines;
+
   useEffect(() => {
     const el = box.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
@@ -38,8 +42,15 @@ export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = t("He
 
   return (
     <div className="overflow-hidden rounded-[10px] border border-line bg-[#141315] text-[#d9d6d8]">
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-2 text-[12px] text-[#8f8a8e]">
-        <span>{t("{n} satır", { n: lines.length })}</span>
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-[12px] text-[#8f8a8e]">
+        <span className="shrink-0">{filter ? t("{m} / {n} satır", { m: shown.length, n: lines.length }) : t("{n} satır", { n: lines.length })}</span>
+        <input
+          className="min-w-0 flex-1 rounded border border-white/10 bg-transparent px-2 py-0.5 text-[12px] text-[#d9d6d8] placeholder:text-[#6f6a6e] focus:border-white/30 focus:outline-none"
+          placeholder={t("Filtrele (ör. error)")}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          aria-label={t("Logları filtrele")}
+        />
         <span className="inline-flex items-center gap-1.5">
           <span className={`size-1.5 rounded-full ${state === "live" ? "bg-[#62c08a]" : "bg-[#5f5a5e]"}`} />
           {{ live: t("Canlı"), done: t("Tamamlandı"), closed: t("Bağlantı kesildi") }[state]}
@@ -56,7 +67,7 @@ export function LogViewer({ url, height = "h-[28rem]", onDone, emptyText = t("He
         {lines.length === 0 ? (
           <div className="text-[#8f8a8e]">{emptyText}</div>
         ) : (
-          lines.map((l, i) => (
+          shown.map((l, i) => (
             <div key={i} className={`break-all whitespace-pre-wrap ${/^Hata:|error|failed/i.test(l) ? "text-[#f0828c]" : ""}`}>
               {l}
             </div>

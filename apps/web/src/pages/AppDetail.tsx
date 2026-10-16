@@ -10,6 +10,7 @@ import { UptimeCard } from "@/components/UptimeCard";
 import { VolumeBackups } from "@/components/VolumeBackups";
 import { FrameworkLogo } from "@/components/FrameworkLogo";
 import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frameworkById, useFrameworks } from "@/components/FrameworkSetup";
+import { LogSearch } from "@/components/LogSearch";
 import { LogViewer } from "@/components/LogViewer";
 import { Button, ConfirmDialog, CopyField, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, Toggle, useAction } from "@/components/ui";
 import { api, type App, type DetectResult, type Deployment } from "@/lib/api";
@@ -85,7 +86,12 @@ export function AppDetailPage() {
       />
       {tab === "overview" && <Overview data={data} onDeploy={() => deploy.mutate()} />}
       {tab === "deployments" && <Deployments data={data} />}
-      {tab === "logs" && <LogViewer url={`/api/apps/${id}/logs/stream`} emptyText={t("Log bekleniyor...")} />}
+      {tab === "logs" && (
+        <div className="space-y-6">
+          <LogViewer url={`/api/apps/${id}/logs/stream`} emptyText={t("Log bekleniyor...")} />
+          <LogSearch appId={id} />
+        </div>
+      )}
       {tab === "env" && <Env data={data} />}
       {tab === "domains" && <Domains app={app} />}
       {tab === "cron" && <CronJobs app={app} />}

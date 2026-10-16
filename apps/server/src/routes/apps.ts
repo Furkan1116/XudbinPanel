@@ -661,6 +661,27 @@ export const appRoutes = new Hono<AppEnv>()
     }
   })
 
+  // Geçmiş loglarda arama: son N saatin logları (tüm kopyalar / Compose servisleri) sunucuda taranır.
+  .get("/:id/logs/search", async (c) => {
+    const app = loadApp(idParam(c));
+    const q = (c.req.query("q") ?? "").trim().toLowerCase();
+    const hours = Math.min(Math.max(Number(c.req.query("hours")) || 24, 1), 24 * 14);
+    if (q.length < 2) throw new HttpError(400, "En az 2 karakter ara");
+    const docker = dockerFor(getServer(app.server_id));
+    const names =
+      app.source_type === "compose"
+        ? (await docker.listContainers({ all: true, filters: { label: [`com.docker.compose.project=xb-${app.slug}`] } })).map((ct) => ct.Names[0]!.slice(1))
+        : [app.container, ...(JSON.parse(app.replica_containers || "[]") as string[])].filter((n): n is string => Boolean(n));
+    const since = Math.floor(Date.now() / 1000) - hours * 3600;
+    const matches: { container: string; line: string }[] = [];
+    for (const name of names) {
+      const raw = (await docker.getContainer(name).logs({ stdout: true, stderr: true, since, timestamps: true, tail: 50_000 }).catch(() => Buffer.from(""))) as Buffer;
+      for (const line of demuxLogs(raw)) if (line.toLowerCase().includes(q)) matches.push({ container: name, line });
+    }
+    matches.sort((a, b) => a.line.localeCompare(b.line));
+    return c.json({ matches: matches.slice(-2000), truncated: matches.length > 2000 });
+  })
+
   // Çalışan konteynerin logları, canlı (SSE).
   .get("/:id/logs/stream", async (c) => {
     const app = loadApp(idParam(c));
