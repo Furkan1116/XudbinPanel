@@ -95,8 +95,13 @@ function Account() {
 }
 
 function Profile({ user }: { user: AccountData["user"] }) {
-  const [form, setForm] = useState({ name: user.name, email: user.email });
-  const save = useAction(() => api.put("/settings/account/profile", form), { success: t("Profil güncellendi"), invalidate: [["account"], ["auth"]] });
+  const [form, setForm] = useState({ name: user.name, email: user.email, password: "" });
+  const emailChanged = form.email.trim() !== user.email;
+  const save = useAction(() => api.put("/settings/account/profile", { name: form.name, email: form.email, ...(emailChanged ? { password: form.password } : {}) }), {
+    success: t("Profil güncellendi"),
+    invalidate: [["account"], ["auth"]],
+    onSuccess: () => setForm((f) => ({ ...f, password: "" })),
+  });
   return (
     <Section title={t("Profil")} className="!mt-0">
       <form
@@ -113,6 +118,11 @@ function Profile({ user }: { user: AccountData["user"] }) {
           <input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         </Field>
         <Button type="submit" loading={save.isPending}>{t("Kaydet")}</Button>
+        {emailChanged && (
+          <Field label={t("Mevcut şifre")} hint={t("E-postanı değiştirmek için şifreni gir.")}>
+            <input className="input" type="password" autoComplete="current-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          </Field>
+        )}
       </form>
     </Section>
   );

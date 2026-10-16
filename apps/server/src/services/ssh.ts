@@ -1,11 +1,43 @@
-import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import ssh2 from "ssh2";
 
 const { Client, utils } = ssh2;
 import { db } from "../db.js";
 import { decrypt, encrypt } from "../lib/crypto.js";
 
-export type SshTarget = { host: string; port: number; username: string; privateKey: string };
+export type SshTarget = {
+  host: string;
+  port: number;
+  username: string;
+  privateKey: string;
+  /** Daha önce kaydedilmiş sunucu anahtarı ("tür base64"); boşsa ilk bağlantıda kaydedilir (TOFU). */
+  hostKey?: string | null;
+  onNewHostKey?: (key: string) => void;
+};
+
+/** SSH tel biçimindeki sunucu anahtarını "ssh-ed25519 AAAA..." biçimine çevirir. */
+export function formatHostKey(key: Buffer) {
+  const len = key.readUInt32BE(0);
+  return `${key.subarray(4, 4 + len).toString()} ${key.toString("base64")}`;
+}
+
+export const hostKeyFingerprint = (formatted: string) =>
+  `SHA256:${createHash("sha256").update(Buffer.from(formatted.split(" ")[1] ?? "", "base64")).digest("base64").replace(/=+$/, "")}`;
+
+/**
+ * ssh2 için sunucu anahtarı doğrulayıcı: kayıtlı anahtar yoksa ilk görüleni kaydeder, varsa birebir aynı olmalı.
+ * Aksi halde araya giren biri panelin root komutlarını kendi makinesine yönlendirebilirdi.
+ */
+export function hostVerifier(target: Pick<SshTarget, "hostKey" | "onNewHostKey">) {
+  return (key: Buffer) => {
+    const formatted = formatHostKey(key);
+    if (!target.hostKey) {
+      target.onNewHostKey?.(formatted);
+      return true;
+    }
+    return target.hostKey === formatted;
+  };
+}
 
 /**
  * Yeni bir ed25519 anahtar çifti üretir. Gizli anahtar OpenSSH biçiminde
@@ -111,6 +143,7 @@ export function sshExec(
         username: target.username,
         privateKey: target.privateKey,
         readyTimeout: 15_000,
+        hostVerifier: hostVerifier(target),
       });
   });
 }
@@ -118,6 +151,8 @@ export function sshExec(
 export function friendlySshError(err: Error & { level?: string; code?: string }) {
   if (err.level === "client-authentication")
     return new Error("SSH kimlik doğrulaması başarısız. Açık anahtarı sunucudaki ~/.ssh/authorized_keys dosyasına eklediğinden emin ol.");
+  if (/verification failed|Host denied/i.test(err.message))
+    return new Error("Sunucunun SSH anahtarı kayıtlı anahtarla eşleşmiyor. Sunucu yeniden kurulduysa sunucu ayarlarından anahtarı sıfırla; kurulmadıysa bağlantı araya giren biri tarafından yönlendiriliyor olabilir.");
   if (err.code === "ECONNREFUSED") return new Error("SSH bağlantısı reddedildi. Port doğru mu, sshd çalışıyor mu?");
   if (err.code === "ETIMEDOUT" || err.message.includes("Timed out")) return new Error("Sunucuya ulaşılamadı (zaman aşımı). IP ve güvenlik duvarını kontrol et.");
   if (err.code === "ENOTFOUND") return new Error("Sunucu adresi çözümlenemedi.");

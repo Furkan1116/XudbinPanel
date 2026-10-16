@@ -2,7 +2,8 @@ import { PassThrough, type Readable } from "node:stream";
 import Docker from "dockerode";
 import tarStream from "tar-stream";
 import { config } from "../config.js";
-import { getPrivateKey } from "./ssh.js";
+import { db } from "../db.js";
+import { getPrivateKey, hostVerifier } from "./ssh.js";
 
 export type ServerRow = {
   id: number;
@@ -12,6 +13,7 @@ export type ServerRow = {
   port: number;
   username: string;
   ssh_key_id: number | null;
+  host_key: string | null;
   public_ip: string | null;
   https_mode: "auto" | "internal" | "off";
   acme_email: string | null;
@@ -19,6 +21,7 @@ export type ServerRow = {
   status_detail: string | null;
   setup_log: string;
   log_offset: number;
+  log_inode: string | null;
   created_at: number;
 };
 
@@ -37,7 +40,17 @@ export function dockerFor(server: ServerRow): Docker {
       host: server.host,
       port: server.port,
       username: server.username,
-      sshOptions: { privateKey: getPrivateKey(server.ssh_key_id), readyTimeout: 15_000 },
+      sshOptions: {
+        privateKey: getPrivateKey(server.ssh_key_id),
+        readyTimeout: 15_000,
+        hostVerifier: hostVerifier({
+          hostKey: server.host_key,
+          onNewHostKey: (key) => {
+            db.prepare("UPDATE servers SET host_key = ? WHERE id = ? AND host_key IS NULL").run(key, server.id);
+            server.host_key = key;
+          },
+        }),
+      },
     } as Docker.DockerOptions);
   }
   clients.set(server.id, client);
@@ -124,6 +137,16 @@ export async function pullImage(docker: Docker, image: string, log: (line: strin
   });
 }
 
+const cpuCache = new WeakMap<Docker, number>();
+async function buildCpus(docker: Docker): Promise<number | null> {
+  let n = cpuCache.get(docker);
+  if (n === undefined) {
+    n = Number((await docker.info().catch(() => ({ NCPU: 0 })) as { NCPU?: number }).NCPU) || 0;
+    cpuCache.set(docker, n);
+  }
+  return n >= 2 ? n - 1 : null;
+}
+
 /** Tar akışından imaj derler, derleme çıktısını satır satır verir. Hata olursa fırlatır. */
 export async function buildImage(
   docker: Docker,
@@ -131,6 +154,8 @@ export async function buildImage(
   opts: { tag: string; dockerfile?: string; buildargs?: Record<string, string>; signal?: AbortSignal },
   log: (line: string) => void,
 ) {
+  // Derleme, sunucudaki canlı uygulamalara en az bir çekirdek bırakır.
+  const cpus = await buildCpus(docker);
   const stream = await docker.buildImage(context, {
     t: opts.tag,
     dockerfile: opts.dockerfile ?? "Dockerfile",
@@ -138,6 +163,7 @@ export async function buildImage(
     rm: true,
     forcerm: true,
     labels: { "xudbin.managed": "true" },
+    ...(cpus ? { cpuperiod: 100_000, cpuquota: cpus * 100_000 } : {}),
   });
   let failure: string | null = null;
   await new Promise<void>((resolve, reject) => {

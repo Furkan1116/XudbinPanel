@@ -7,7 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "DATA_DIR=./test/.data node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",

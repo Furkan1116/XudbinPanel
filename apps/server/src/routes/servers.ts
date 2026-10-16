@@ -17,7 +17,12 @@ import {
   startServerSetup,
   updateServer,
 } from "../services/servers.js";
-import { generateSshKey, sshExec } from "../services/ssh.js";
+import { generateSshKey, hostKeyFingerprint, sshExec } from "../services/ssh.js";
+import { forgetDockerClient } from "../services/docker.js";
+
+// Alan adı veya IP; boşluk ve satır sonu içeremez (SSH ayar dosyasına yazılıyor).
+const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^\[?[0-9a-f:.]+\]?$/i;
+const USER = /^[a-z_][a-z0-9_.-]{0,31}$/i;
 
 function publicServer(s: ServerRow) {
   const key = s.ssh_key_id
@@ -40,6 +45,7 @@ function publicServer(s: ServerRow) {
     statusDetail: s.status_detail,
     setupRunning: isSetupRunning(s.id),
     sshKey: key ? { id: key.id, name: key.name, publicKey: key.public_key } : null,
+    hostKeyFingerprint: s.host_key ? hostKeyFingerprint(s.host_key) : null,
     apps: usage.apps,
     databases: usage.dbs,
     createdAt: s.created_at,
@@ -48,9 +54,9 @@ function publicServer(s: ServerRow) {
 
 const serverInput = z.object({
   name: z.string().trim().min(1, "İsim gerekli").max(60),
-  host: z.string().trim().min(1, "Adres gerekli").max(255),
+  host: z.string().trim().min(1, "Adres gerekli").max(255).regex(HOST, "Geçerli bir alan adı veya IP adresi gir"),
   port: z.number().int().min(1).max(65535).default(22),
-  username: z.string().trim().min(1).max(32).default("root"),
+  username: z.string().trim().min(1).max(32).regex(USER, "Geçersiz kullanıcı adı").default("root"),
   sshKeyId: z.number().int().optional(),
 });
 
@@ -106,9 +112,9 @@ export const serverRoutes = new Hono()
       c,
       z.object({
         name: z.string().trim().min(1).max(60).optional(),
-        host: z.string().trim().min(1).max(255).optional(),
+        host: z.string().trim().min(1).max(255).regex(HOST, "Geçerli bir alan adı veya IP adresi gir").optional(),
         port: z.number().int().min(1).max(65535).optional(),
-        username: z.string().trim().min(1).max(32).optional(),
+        username: z.string().trim().min(1).max(32).regex(USER, "Geçersiz kullanıcı adı").optional(),
         sshKeyId: z.number().int().optional(),
         publicIp: z.union([z.ipv4(), z.literal("")]).optional(),
         httpsMode: z.enum(["auto", "internal", "off"]).optional(),
@@ -127,6 +133,11 @@ export const serverRoutes = new Hono()
       https_mode: input.httpsMode,
       acme_email: input.acmeEmail === "" ? null : input.acmeEmail,
     });
+    // Adres değiştiyse kayıtlı SSH anahtarı artık başka bir makineye ait; yeni bağlantıda yeniden kaydedilir.
+    if ((input.host && input.host !== s.host) || (input.port && input.port !== s.port)) {
+      db.prepare("UPDATE servers SET host_key = NULL WHERE id = ?").run(s.id);
+      forgetDockerClient(s.id);
+    }
     const updated = getServer(s.id);
     if (updated.status === "ready" && (input.httpsMode || input.acmeEmail !== undefined)) await applyCaddyConfig(updated);
     return c.json({ server: publicServer(updated) });
@@ -176,6 +187,14 @@ export const serverRoutes = new Hono()
       });
       while (!stream.aborted) await stream.sleep(15_000).then(() => stream.writeSSE({ event: "ping", data: "" }));
     });
+  })
+
+  // Sunucu yeniden kurulduysa: kayıtlı SSH anahtarı silinir, bir sonraki bağlantıda yenisi kaydedilir.
+  .post("/:id/reset-host-key", (c) => {
+    const s = getServer(idParam(c));
+    db.prepare("UPDATE servers SET host_key = NULL WHERE id = ?").run(s.id);
+    forgetDockerClient(s.id);
+    return c.json({ ok: true });
   })
 
   .post("/:id/harden", (c) => {

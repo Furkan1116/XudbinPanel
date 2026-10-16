@@ -59,6 +59,7 @@ export type Server = {
   statusDetail: string | null;
   setupRunning: boolean;
   sshKey: { id: number; name: string; publicKey: string } | null;
+  hostKeyFingerprint: string | null;
   apps: number;
   databases: number;
   createdAt: number;
@@ -149,7 +150,7 @@ export type Deployment = {
   diagnosis?: Finding[] | null;
 };
 
-export type Finding = { id: string; title: string; detail: string; fix?: { label: string; env: Record<string, string> } };
+export type Finding = { id: string; title: string; detail: string; fix?: { label: string; env?: Record<string, string>; buildOptions?: Record<string, string | boolean> } };
 
 export type Database = {
   id: number;

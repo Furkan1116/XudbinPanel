@@ -5,7 +5,8 @@ import type { Framework, Repo } from "./types.js";
 // PHP — FrankenPHP (Caddy + PHP tek süreçte; Nginx/PHP-FPM gerekmez)
 // ---------------------------------------------------------------------------
 
-const PHP_VERSIONS = ["8.4", "8.3", "8.2"].map((v) => ({ value: v, label: `PHP ${v}` }));
+const PHP_SUPPORTED = ["8.5", "8.4", "8.3", "8.2"];
+const PHP_VERSIONS = PHP_SUPPORTED.map((v) => ({ value: v, label: `PHP ${v}` }));
 
 /** Heroku Procfile'ındaki "heroku-php-apache2 web/" gibi kök klasör tanımı. */
 function procfileRoot(repo: Repo) {
@@ -13,10 +14,32 @@ function procfileRoot(repo: Repo) {
 }
 const phpRoot = (repo: Repo) => procfileRoot(repo) ?? (repo.has("public/index.php") ? "public" : repo.has("web/index.php") ? "web" : ".");
 
+/** Bir sürüm kısıtının (^8.2, >=8.4.1, ^8.2|^8.3, 8.1 - 8.5) izin verdiği en düşük 8.x alt sürümü. */
+function minPhp(constraint: string): number | null {
+  const alts = constraint
+    .split(/\|\|?/)
+    .map((alt) => alt.match(/8\.(\d+)/)?.[1]) // her seçenekte ilk sürüm alt sınırdır ("8.1 - 8.5" dahil)
+    .filter((x): x is string => x !== undefined)
+    .map(Number);
+  return alts.length ? Math.min(...alts) : null;
+}
+
+/**
+ * composer.json ve composer.lock'taki tüm paketlerin istediği en düşük PHP sürümünün en büyüğü.
+ * Ör. Laravel 13'ün kilitli Symfony 8 paketleri >=8.4 ister; composer.json ^8.3 dese bile 8.4 seçilir.
+ */
 function phpVersion(repo: Repo) {
-  const req = repo.json<{ require?: Record<string, string> }>("composer.json")?.require?.php ?? "";
-  const m = [...req.matchAll(/8\.(\d)/g)].map((x) => Number(x[1]));
-  return m.length ? `8.${Math.min(Math.max(...m, 2), 4)}` : undefined;
+  const constraints: string[] = [];
+  const root = repo.json<{ require?: Record<string, string>; config?: { platform?: { php?: string } } }>("composer.json");
+  if (root?.require?.php) constraints.push(root.require.php);
+  const lock = repo.json<{ packages?: { require?: Record<string, string> }[]; platform?: Record<string, string> }>("composer.lock");
+  for (const p of lock?.packages ?? []) if (p.require?.php) constraints.push(p.require.php);
+  if (lock?.platform?.php) constraints.push(lock.platform.php);
+  const mins = constraints.map(minPhp).filter((x): x is number => x !== null);
+  if (!mins.length) return undefined;
+  const need = Math.max(...mins);
+  const ok = PHP_SUPPORTED.map((v) => Number(v.split(".")[1])).filter((m) => m >= need).sort((a, b) => a - b);
+  return `8.${ok[0] ?? 5}`;
 }
 
 function phpBase(repo: Repo, version: string, extensions: string) {
@@ -24,7 +47,7 @@ function phpBase(repo: Repo, version: string, extensions: string) {
   const viteAssets = repo.has("package.json") && /"vite"|laravel-mix/.test(repo.read("package.json"));
   return {
     viteAssets,
-    text: `${viteAssets ? `FROM node:22-alpine AS assets
+    text: `${viteAssets ? `FROM node:24-alpine AS assets
 WORKDIR /app
 COPY . .
 RUN (npm ci || npm install) && npm run build
@@ -68,7 +91,7 @@ export const laravel: Framework = {
   ],
   detect: (repo) => (repo.has("artisan") && repo.has("composer.json") ? { score: 95, reason: "artisan dosyası bulundu", options: { phpVersion: phpVersion(repo) } } : null),
   build(repo, opts) {
-    const base = phpBase(repo, opt(opts.phpVersion, phpVersion(repo) ?? "8.3"), opt(opts.extensions, ""));
+    const base = phpBase(repo, opt(opts.phpVersion, phpVersion(repo) ?? "8.4"), opt(opts.extensions, ""));
     const start = [
       "php artisan storage:link >/dev/null 2>&1 || true",
       flag(opts.migrate, true) ? "php artisan migrate --force" : "",
@@ -98,7 +121,7 @@ export const php: Framework = {
   steps: ["Varsa composer install çalışır.", "Kök klasör FrankenPHP ile sunulur."],
   detect: (repo) => (repo.has("composer.json") || repo.has("index.php") ? { score: 50, reason: "PHP dosyaları bulundu", options: { documentRoot: phpRoot(repo), phpVersion: phpVersion(repo) } } : null),
   build(repo, opts) {
-    const base = phpBase(repo, opt(opts.phpVersion, phpVersion(repo) ?? "8.3"), opt(opts.extensions, ""));
+    const base = phpBase(repo, opt(opts.phpVersion, phpVersion(repo) ?? "8.4"), opt(opts.extensions, ""));
     const root = opt(opts.documentRoot, phpRoot(repo));
     return { port: 80, dockerfile: `${base.text}\nEXPOSE 80\n${shCmd(`exec frankenphp php-server --root /app/${root} --listen :80`)}\n` };
   },
@@ -295,6 +318,23 @@ ${shCmd("exec java $JAVA_OPTS -jar app.jar --server.port=$PORT --server.forward-
 // Ruby on Rails
 // ---------------------------------------------------------------------------
 
+/**
+ * database.yml'de üretim ortamı SQLite kullanıyor ama dosya yolu verilmemişse, yolu eksik veritabanlarının adları.
+ * (Tek veritabanında "primary", çoklu yapıda primary/cache/queue/cable.)
+ */
+export function railsProductionDatabases(yml: string): string[] | null {
+  if (!/adapter:\s*sqlite3/.test(yml)) return null;
+  const block = yml.split(/^production:\s*$/m)[1]?.split(/^\S/m)[0];
+  if (block === undefined) return null;
+  const entries = [...block.matchAll(/^  (\w+):\s*$/gm)].map((m) => m[1]!);
+  if (!entries.length) return /^\s+database:/m.test(block) ? null : ["primary"];
+  const missing = entries.filter((name) => {
+    const sub = block.split(new RegExp(`^  ${name}:\\s*$`, "m"))[1]?.split(/^  \w+:\s*$/m)[0] ?? "";
+    return !/^\s+(database|url):/m.test(sub);
+  });
+  return missing.length ? missing : null;
+}
+
 export const rails: Framework = {
   id: "rails",
   name: "Ruby on Rails",
@@ -311,6 +351,14 @@ export const rails: Framework = {
   ],
   steps: ["bundle install (development/test hariç) çalışır.", "assets:precompile çalışır.", "Başlarken db:prepare, ardından Puma başlar."],
   detect: (repo) => (repo.has("Gemfile") && repo.has("config/application.rb") ? { score: 90, reason: "Rails uygulaması bulundu" } : null),
+  autoConfig(repo) {
+    // Rails 8 yeni projelerde üretim SQLite dosyalarının yolunu bilerek boş bırakır; panel kalıcı bir klasöre bağlar.
+    const prod = railsProductionDatabases(repo.read("config/database.yml"));
+    if (!prod) return {};
+    const env: Record<string, string> = {};
+    for (const name of prod) env[name === "primary" ? "DATABASE_URL" : `${name.toUpperCase()}_DATABASE_URL`] = `sqlite3:storage/production${name === "primary" ? "" : `_${name}`}.sqlite3`;
+    return { env, volumes: [{ name: "storage", path: "/app/storage" }], notes: ["Üretim SQLite dosyaları kalıcı storage/ klasörüne bağlandı."] };
+  },
   build(repo, opts) {
     const v = (repo.read(".ruby-version").trim().match(/\d+\.\d+/)?.[0]) ?? "3.3";
     const start = [flag(opts.migrate, true) ? "bundle exec rails db:prepare" : "", "exec bundle exec rails server -b 0.0.0.0 -p $PORT"].filter(Boolean).join(" && ");

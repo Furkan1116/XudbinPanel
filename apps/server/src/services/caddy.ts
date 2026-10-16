@@ -139,6 +139,13 @@ async function copyCaddyImageFromLocal(server: ServerRow, log: (line: string) =>
 const pending = new Map<number, Promise<void>>();
 
 /** Sunucunun Caddy yapılandırmasını yeniden üretip uygular. Aynı sunucu için çağrılar sıraya girer. */
+/** Caddy'nin bu alan adı için sertifikası hazır mı (Let's Encrypt / ZeroSSL / iç CA). */
+export async function certificateReady(server: ServerRow, host: string) {
+  if (!/^[a-z0-9.-]+$/i.test(host)) return false;
+  const res = await execIn(dockerFor(server), CADDY_CONTAINER, ["sh", "-c", `ls /data/caddy/certificates/*/${host}/${host}.crt >/dev/null 2>&1`], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1 }));
+  return res.exitCode === 0;
+}
+
 export function applyCaddyConfig(server: ServerRow): Promise<void> {
   const prev = pending.get(server.id) ?? Promise.resolve();
   const next = prev.catch(() => {}).then(() => doApply(server));

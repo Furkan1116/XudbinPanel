@@ -12,6 +12,9 @@
 #   XUDBIN_IMAGE   Hazır panel imajı (varsayılan: ghcr.io/furkan1116/xudbin:latest; yoksa kaynaktan derlenir)
 #   XUDBIN_HARDEN  0 yapılırsa güvenlik duvarı ve fail2ban kurulmaz (varsayılan 1)
 #   XUDBIN_HTTPS   0 yapılırsa HTTPS kapalı kurulur (dış IP'si olmayan yerel ağ/test sunucuları için)
+# Betiğin tamamı bir fonksiyonun içinde ve en sonda çağrılıyor: "curl | bash" sırasında bağlantı kesilirse
+# yarım inmiş betiğin hiçbir satırı çalışmaz.
+xudbin_install() {
 set -euo pipefail
 
 INSTALL_DIR=/opt/xudbin
@@ -198,3 +201,6 @@ step "$([[ $MODE == update ]] && echo "Güncellendi" || echo "Xudbin hazır")"
 docker exec xudbin node dist/cli.js link || echo "   Panel: ${SCHEME}://${XUDBIN_DOMAIN}"
 echo "   ${D}Komutlar: xudbin link | xudbin status | xudbin user list | xudbin update | xudbin logs${X}"
 echo
+}
+
+xudbin_install "$@"

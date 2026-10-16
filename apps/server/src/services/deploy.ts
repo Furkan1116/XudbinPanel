@@ -10,10 +10,11 @@ import { decrypt, encrypt, randomAlnum } from "../lib/crypto.js";
 import { bus } from "../lib/events.js";
 import { resolveInside } from "../lib/paths.js";
 import { detectFrameworks, getFramework, missingDefaultEnv, openRepo, type Framework, type Options } from "./frameworks/index.js";
-import { applyCaddyConfig, CADDY_CONTAINER } from "./caddy.js";
+import { applyCaddyConfig, CADDY_CONTAINER, certificateReady } from "./caddy.js";
 import { composeHostAccessIssues } from "./compose-policy.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "./doctor.js";
 import { buildImage, containerState, dockerFor, execIn, pullImage, removeContainer, type ServerRow } from "./docker.js";
+import { ensureProjectNetwork } from "./networks.js";
 import { notify } from "./notify.js";
 import { imageScanEnabled, scanApp } from "./scan.js";
 import { getServer } from "./servers.js";
@@ -58,6 +59,7 @@ export type AppRow = {
   scan_status: string | null;
   scan_summary: string | null;
   scanned_at: number | null;
+  uptime_enabled: number;
   created_at: number;
 };
 
@@ -158,6 +160,15 @@ function pump() {
 }
 
 /** Sıradaki deploy'u siler, çalışan deploy'u durdurur (eski sürüm yayında kalır). */
+/** Bu sunucuda şu an derleme/deploy sürüyor mu (bakım işleri derlemenin ara katmanlarını silmesin diye). */
+export function serverBusy(serverId: number) {
+  for (const appId of activeApps) {
+    const row = db.prepare("SELECT server_id FROM apps WHERE id = ?").get(appId) as { server_id: number } | undefined;
+    if (row?.server_id === serverId) return true;
+  }
+  return false;
+}
+
 export function cancelDeployment(id: number) {
   const running = controllers.get(id);
   if (running) {
@@ -216,6 +227,9 @@ async function runDeployment(deploymentId: number) {
     const server = getServer(app.server_id);
     if (server.status !== "ready") throw new Error(`"${server.name}" sunucusu hazır değil. Önce sunucu kurulumunu tamamla.`);
     log(`${app.name} → ${server.name}`);
+    // İlk deploy: alan adları Caddy'ye şimdi eklenir ki HTTPS sertifikası derleme sürerken alınsın
+    // (aksi halde site yayına girdiği ilk saniyelerde sertifikasız kalıyordu).
+    if (!app.container && server.https_mode !== "off") await applyCaddyConfig(server).catch(() => {});
 
     if (app.source_type === "compose") {
       await deployCompose(app, server, workdir, log, signal);
@@ -372,7 +386,8 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
   } else {
     const fw = getFramework(frameworkId);
     if (!fw) throw new Error(`Bilinmeyen framework: ${frameworkId}`);
-    addDefaultEnv(app, fw, log, fw.envAliases?.(openRepo(contextDir), opts) ?? {});
+    const repoForConfig = openRepo(contextDir);
+    addDefaultEnv(app, fw, log, fw.envAliases?.(repoForConfig, opts) ?? {}, fw.autoConfig?.(repoForConfig, opts) ?? {});
     const env = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off").env;
     const result = fw.build(openRepo(contextDir), opts, env);
     dockerfile = "Dockerfile.xudbin";
@@ -397,10 +412,29 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
 }
 
 /** Framework'ün zorunlu ve alan adına bağlı env değişkenlerinden eksik olanları uygulamaya kalıcı olarak ekler. */
-function addDefaultEnv(app: AppRow, fw: Framework, log: (l: string) => void, aliases: Record<string, string>) {
+function addDefaultEnv(
+  app: AppRow,
+  fw: Framework,
+  log: (l: string) => void,
+  aliases: Record<string, string>,
+  auto: { env?: Record<string, string>; volumes?: Volume[]; notes?: string[] } = {},
+) {
   for (const [hint, name] of Object.entries(aliases)) log(`Proje ${hint} yerine ${name} değişkenini okuyor; değer bu adla verilecek.`);
+  // Projenin çalışması için gereken kalıcı klasörler (aynı yola bağlı bir volume yoksa eklenir).
+  const volumes = JSON.parse(app.volumes || "[]") as Volume[];
+  const newVolumes = (auto.volumes ?? []).filter((v) => !volumes.some((x) => x.path === v.path || x.name === v.name));
+  if (newVolumes.length) {
+    app.volumes = JSON.stringify([...volumes, ...newVolumes]);
+    db.prepare("UPDATE apps SET volumes = ? WHERE id = ?").run(app.volumes, app.id);
+    log(`Kalıcı klasör eklendi: ${newVolumes.map((v) => v.path).join(", ")}`);
+  }
+  auto.notes?.forEach((n) => log(n));
   const raw = decrypt(app.env);
-  const add = missingDefaultEnv(fw, parseEnv(raw), randomAlnum, aliases);
+  const current = parseEnv(raw);
+  const add = [
+    ...missingDefaultEnv(fw, current, randomAlnum, aliases),
+    ...Object.entries(auto.env ?? {}).filter(([k]) => !(k in current)).map(([key, value]) => ({ key, value })),
+  ];
   if (!add.length) return;
   const next = (raw.trim() ? `${raw.trimEnd()}\n` : "") + add.map((e) => `${e.key}=${e.value}`).join("\n") + "\n";
   app.env = encrypt(next);
@@ -418,6 +452,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   const volumes = JSON.parse(fresh.volumes || "[]") as Volume[];
   const name = `xb-${app.slug}-${deploymentId}`;
 
+  const network = await ensureProjectNetwork(server, app.project_id);
   log(`Konteyner başlatılıyor: ${name}`);
   const container = await docker.createContainer({
     name,
@@ -426,7 +461,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     Cmd: fresh.command ? ["sh", "-c", fresh.command] : undefined,
     Labels: { "xudbin.managed": "true", "xudbin.app": app.slug, "xudbin.deployment": String(deploymentId) },
     HostConfig: {
-      NetworkMode: config.network,
+      NetworkMode: network,
       RestartPolicy: { Name: "unless-stopped" },
       Binds: volumes.map((v) => `xb-${app.slug}-${v.name}:${v.path}`),
       // Sınır yoksa tek bir uygulama tüm sunucuyu (panel dahil) belleksiz bırakabilir.
@@ -434,7 +469,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
       ...(fresh.cpu_limit ? { NanoCpus: Math.round(fresh.cpu_limit * 1e9) } : {}),
       LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
     },
-    NetworkingConfig: { EndpointsConfig: { [config.network]: { Aliases: [`xb-${app.slug}`] } } },
+    NetworkingConfig: { EndpointsConfig: { [network]: { Aliases: [`xb-${app.slug}`] } } },
   });
   await container.start();
 
@@ -446,7 +481,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     const lines = demuxLogs(logs);
     if (lines.length) {
       log("Uygulamanın son çıktısı:");
-      lines.slice(-30).forEach((l) => log(`  ${l}`));
+      lines.slice(-60).forEach((l) => log(`  ${l}`));
     }
     const state = await containerState(docker, name);
     recordDiagnosis(deploymentId, diagnose(lines, { framework: app.framework, env: filled.env, hosts, status: extra.status, exitCode: state.running ? null : state.exitCode }), log);
@@ -512,7 +547,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
         await failWithLogs(
           probe.status !== null
             ? `Uygulama çalışıyor ama ${pathToCheck} isteğine ${probe.status} döndürüyor (${probe.statusLine}).`
-            : `Uygulama HTTP isteğine yanıt vermedi (${probe.error}).`,
+            : `Uygulama ${fresh.port} portunu açtı ama HTTP isteğine yanıt vermedi. Bu port bir web sunucusu değilse uygulama ayarlarından doğru portu seç ya da HTTP kontrolünü kapat.`,
           { status: probe.status },
         );
       }
@@ -529,6 +564,24 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     log(`Eski konteyner kaldırılıyor: ${previous}`);
     await removeContainer(docker, previous);
   }
+  await waitForCertificates(server, app.id, log);
+}
+
+/** HTTPS'li alan adlarının sertifikası alınana kadar (en fazla 90 sn) bekler; alınamazsa sebebini söyler. */
+async function waitForCertificates(server: ServerRow, appId: number, log: (l: string) => void) {
+  if (server.https_mode === "off") return;
+  const hosts = (db.prepare("SELECT host FROM domains WHERE app_id = ? AND https = 1").all(appId) as { host: string }[]).map((d) => d.host);
+  const pending = [];
+  for (const h of hosts) if (!(await certificateReady(server, h))) pending.push(h);
+  if (!pending.length) return;
+  log(`HTTPS sertifikası alınıyor: ${pending.join(", ")}`);
+  const deadline = Date.now() + 90_000;
+  while (pending.length && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 3000));
+    for (const h of [...pending]) if (await certificateReady(server, h)) pending.splice(pending.indexOf(h), 1);
+  }
+  if (pending.length) log(`Uyarı: ${pending.join(", ")} için sertifika henüz alınamadı. Alan adının DNS kaydı bu sunucuyu göstermiyor olabilir; Caddy denemeye devam ediyor.`);
+  else log("HTTPS sertifikaları hazır.");
 }
 
 function recordDiagnosis(deploymentId: number, findings: Finding[], log: (l: string) => void) {
@@ -611,9 +664,11 @@ export function composeEnv(server: ServerRow, workdir: string): NodeJS.ProcessEn
   fs.writeFileSync(path.join(sshDir, "id"), getPrivateKey(server.ssh_key_id!).trim() + "\n", { mode: 0o600 });
   fs.writeFileSync(
     path.join(sshDir, "config"),
-    `Host xudbin-target\n  HostName ${server.host}\n  Port ${server.port}\n  User ${server.username}\n  IdentityFile ${path.join(sshDir, "id")}\n  StrictHostKeyChecking accept-new\n  UserKnownHostsFile ${path.join(sshDir, "known_hosts")}\n`,
+    `Host xudbin-target\n  HostName ${server.host}\n  Port ${server.port}\n  User ${server.username}\n  IdentityFile ${path.join(sshDir, "id")}\n  StrictHostKeyChecking ${server.host_key ? "yes" : "accept-new"}\n  UserKnownHostsFile ${path.join(sshDir, "known_hosts")}\n`,
     { mode: 0o600 },
   );
+  // Panelin kaydettiği sunucu anahtarı: docker CLI de yalnız bu anahtarla bağlanır.
+  if (server.host_key) fs.writeFileSync(path.join(sshDir, "known_hosts"), `${server.port === 22 ? server.host : `[${server.host}]:${server.port}`} ${server.host_key}\n`, { mode: 0o600 });
   return { HOME: home, DOCKER_HOST: "ssh://xudbin-target", DOCKER_CONFIG: path.join(home, ".docker") };
 }
 
@@ -650,7 +705,7 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
   // Her servisi Xudbin ağına da bağla ki Caddy alan adlarını yönlendirebilsin.
   const override = {
     services: Object.fromEntries(services.map((s) => [s, { networks: ["default", "xudbin"], labels: { "xudbin.managed": "true", "xudbin.app": app.slug } }])),
-    networks: { xudbin: { external: true, name: config.network } },
+    networks: { xudbin: { external: true, name: await ensureProjectNetwork(server, app.project_id) } },
   };
   const overridePath = path.join(dir, "docker-compose.xudbin.yml");
   fs.writeFileSync(overridePath, YAML.stringify(override));

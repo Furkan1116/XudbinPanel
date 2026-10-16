@@ -271,6 +271,72 @@ const migrations: string[] = [
   ALTER TABLE apps ADD COLUMN scan_summary TEXT;
   ALTER TABLE apps ADD COLUMN scanned_at INTEGER;
   `,
+  // SSH sunucu anahtarı (ilk bağlantıda kaydedilir, sonra doğrulanır) ve 2FA kodlarının tekrar kullanılmaması.
+  `
+  ALTER TABLE servers ADD COLUMN host_key TEXT;
+  ALTER TABLE users ADD COLUMN totp_last_counter INTEGER;
+  `,
+  // Trafik analitiği ve erişilebilirlik (uptime) izleme.
+  `
+  CREATE TABLE analytics_hourly (
+    app_id     INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    hour       INTEGER NOT NULL,          -- epoch saat (UTC)
+    requests   INTEGER NOT NULL DEFAULT 0,
+    pageviews  INTEGER NOT NULL DEFAULT 0,
+    visitors   INTEGER NOT NULL DEFAULT 0,
+    bytes      INTEGER NOT NULL DEFAULT 0,
+    errors_4xx INTEGER NOT NULL DEFAULT 0,
+    errors_5xx INTEGER NOT NULL DEFAULT 0,
+    bot_hits   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (app_id, hour)
+  );
+  CREATE TABLE analytics_dims (
+    app_id    INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    day       TEXT NOT NULL,              -- YYYY-MM-DD (panelin saat diliminde)
+    dim       TEXT NOT NULL,
+    value     TEXT NOT NULL,
+    pageviews INTEGER NOT NULL DEFAULT 0,
+    visitors  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (app_id, day, dim, value)
+  );
+  CREATE TABLE analytics_visitors (
+    app_id    INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    day       TEXT NOT NULL,
+    vhash     TEXT NOT NULL,
+    first_ts  INTEGER NOT NULL,
+    last_ts   INTEGER NOT NULL,
+    pageviews INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (app_id, day, vhash)
+  );
+  CREATE TABLE analytics_daily (
+    app_id      INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    day         TEXT NOT NULL,
+    visitors    INTEGER NOT NULL,
+    pageviews   INTEGER NOT NULL,
+    bounces     INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    PRIMARY KEY (app_id, day)
+  );
+  CREATE TABLE uptime_checks (
+    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    at     INTEGER NOT NULL,
+    ok     INTEGER NOT NULL,
+    status INTEGER,
+    ms     INTEGER,
+    error  TEXT
+  );
+  CREATE INDEX uptime_checks_app_at ON uptime_checks (app_id, at);
+  CREATE TABLE uptime_incidents (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_id     INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    started_at INTEGER NOT NULL,
+    ended_at   INTEGER,
+    reason     TEXT
+  );
+  ALTER TABLE apps ADD COLUMN uptime_enabled INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE servers ADD COLUMN log_inode TEXT;
+  `,
 ];
 
 function migrate() {

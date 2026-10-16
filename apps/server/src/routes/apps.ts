@@ -31,6 +31,7 @@ import { extractZip, newTempUpload, saveUpload, storeAppUpload, tempUploadFile }
 import { getServer } from "../services/servers.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor.js";
 import { scanApp } from "../services/scan.js";
+import { uptimeSummary } from "../services/uptime.js";
 
 const parseJson = (raw: string | null) => {
   try {
@@ -89,6 +90,7 @@ function publicApp(a: AppRow) {
     webhookSigned: Boolean(a.webhook_signed),
     cpuLimit: a.cpu_limit,
     httpCheck: Boolean(a.http_check),
+    uptimeEnabled: Boolean(a.uptime_enabled),
     scan: { status: a.scan_status, at: a.scanned_at, summary: parseJson(a.scan_summary) },
     healthPath: a.health_path,
     memoryLimit: a.memory_limit,
@@ -217,6 +219,7 @@ export const appRoutes = new Hono<AppEnv>()
         webhookSigned: z.boolean().optional(),
         cpuLimit: z.number().min(0.1).max(256).nullable().optional(),
         httpCheck: z.boolean().optional(),
+        uptimeEnabled: z.boolean().optional(),
         healthPath: z.string().trim().max(200).regex(/^\/[\w\-./?=&%~]*$/, "Sağlık yolu / ile başlamalı, ör. /health").nullable().optional(),
         memoryLimit: z.number().int().min(32).max(1024 * 1024).nullable().optional(),
         volumes: z
@@ -256,6 +259,7 @@ export const appRoutes = new Hono<AppEnv>()
       webhook_signed: input.webhookSigned === undefined ? undefined : input.webhookSigned ? 1 : 0,
       cpu_limit: input.cpuLimit,
       http_check: input.httpCheck === undefined ? undefined : input.httpCheck ? 1 : 0,
+      uptime_enabled: input.uptimeEnabled === undefined ? undefined : input.uptimeEnabled ? 1 : 0,
       health_path: input.healthPath,
       memory_limit: input.memoryLimit,
       volumes: input.volumes ? JSON.stringify(input.volumes) : undefined,
@@ -281,6 +285,11 @@ export const appRoutes = new Hono<AppEnv>()
     return c.json({ ok: true, note: "Değişikliklerin geçerli olması için yeniden deploy et." });
   })
 
+  .get("/:id/uptime", (c) => {
+    const app = loadApp(idParam(c));
+    return c.json(uptimeSummary(app.id));
+  })
+
   .post("/:id/scan", (c) => {
     const app = loadApp(idParam(c));
     if (!app.current_image || app.source_type === "compose") throw new HttpError(422, "Taranacak bir imaj yok; önce deploy et");
@@ -292,14 +301,25 @@ export const appRoutes = new Hono<AppEnv>()
   // Deploy Doktoru'nun önerdiği değişkenleri ekler/günceller; istenirse yeniden deploy eder.
   .post("/:id/env/merge", async (c) => {
     const app = loadApp(idParam(c));
-    const input = await body(c, z.object({ env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().max(10_000)), deploy: z.boolean().default(true) }));
+    const input = await body(
+      c,
+      z.object({
+        env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().max(10_000)).default({}),
+        buildOptions: z.record(z.string().regex(/^[A-Za-z]+$/), z.union([z.string().max(500), z.boolean()])).optional(),
+        deploy: z.boolean().default(true),
+      }),
+    );
+    if (input.buildOptions) {
+      const merged = { ...(JSON.parse(app.build_options || "{}") as Record<string, unknown>), ...input.buildOptions };
+      db.prepare("UPDATE apps SET build_options = ? WHERE id = ?").run(JSON.stringify(merged), app.id);
+    }
     const resolved = Object.fromEntries(
       Object.entries(input.env).map(([k, v]) => [
         k,
         v.replace("{{XUDBIN_SECRET}}", () => randomAlnum(50)).replace("{{XUDBIN_LARAVEL_KEY}}", () => `base64:${Buffer.from(randomAlnum(32)).toString("base64")}`),
       ]),
     );
-    db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(encrypt(mergeEnvText(decrypt(app.env), resolved)), app.id);
+    if (Object.keys(resolved).length) db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(encrypt(mergeEnvText(decrypt(app.env), resolved)), app.id);
     const deploymentId = input.deploy ? enqueueDeploy(app.id, "manual", { title: "Deploy Doktoru düzeltmesi" }) : null;
     return c.json({ ok: true, deploymentId });
   })

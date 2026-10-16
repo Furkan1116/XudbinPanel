@@ -4,6 +4,7 @@ import { db } from "../db.js";
 import { bus } from "../lib/events.js";
 import { HttpError } from "../lib/http.js";
 import { applyDockerFirewall, dockerFirewallEnabled } from "./firewall.js";
+import { reconcileNetworks } from "./networks.js";
 import { applyCaddyConfig, ensureCaddy } from "./caddy.js";
 import { dockerFor, forgetDockerClient, getDockerInfo, type ServerRow } from "./docker.js";
 import { getPrivateKey, sshExec, type SshTarget } from "./ssh.js";
@@ -38,7 +39,17 @@ export function ensureLocalServer() {
 
 export function sshTargetFor(server: ServerRow): SshTarget {
   if (!server.host || !server.ssh_key_id) throw new HttpError(422, "Sunucunun SSH bilgileri eksik");
-  return { host: server.host, port: server.port, username: server.username, privateKey: getPrivateKey(server.ssh_key_id) };
+  return {
+    host: server.host,
+    port: server.port,
+    username: server.username,
+    privateKey: getPrivateKey(server.ssh_key_id),
+    hostKey: server.host_key,
+    onNewHostKey: (key) => {
+      db.prepare("UPDATE servers SET host_key = ? WHERE id = ? AND host_key IS NULL").run(key, server.id);
+      server.host_key = key;
+    },
+  };
 }
 
 export function updateServer(id: number, patch: Partial<ServerRow>) {
@@ -237,6 +248,7 @@ export function startServerSetup(serverId: number) {
       log("Caddy yapılandırması uygulandı.");
 
       updateServer(serverId, { status: "ready", status_detail: null });
+      await reconcileNetworks(getServer(serverId)).catch((err) => log(`Uyarı: ağlar düzenlenemedi: ${(err as Error).message}`));
       await applyDockerFirewall(getServer(serverId), { force: true })
         .then(() => dockerFirewallEnabled() && log("Docker portları güvenlik duvarına bağlandı: dışarıdan yalnız 80 ve 443 açık."))
         .catch((err) => log(`Uyarı: ${(err as Error).message}`));

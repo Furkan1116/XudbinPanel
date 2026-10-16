@@ -10,7 +10,7 @@ type DiagnoseResult = { probe: { status: number | null; statusLine: string; erro
 export function DeployDoctor({ app, last }: { app: App; last: Deployment }) {
   const [result, setResult] = useState<DiagnoseResult | null>(null);
   const check = useAction(() => api.get<DiagnoseResult>(`/apps/${app.id}/diagnose`), { onSuccess: setResult });
-  const fix = useAction((env: Record<string, string>) => api.post(`/apps/${app.id}/env/merge`, { env, deploy: true }), {
+  const fix = useAction((f: NonNullable<Finding["fix"]>) => api.post(`/apps/${app.id}/env/merge`, { env: f.env ?? {}, buildOptions: f.buildOptions, deploy: true }), {
     success: t("Düzeltme uygulandı, yeniden deploy başladı"),
     invalidate: [["app", app.id]],
     onSuccess: () => setResult(null),
@@ -54,7 +54,7 @@ export function DeployDoctor({ app, last }: { app: App; last: Deployment }) {
               <div className="text-[14px] font-medium">{f.title}</div>
               <p className="mt-1 text-[13px] leading-relaxed text-muted">{f.detail}</p>
               {f.fix && (
-                <Button size="sm" variant="primary" className="mt-2" loading={fix.isPending} onClick={() => fix.mutate(f.fix!.env)}>
+                <Button size="sm" variant="primary" className="mt-2" loading={fix.isPending} onClick={() => fix.mutate(f.fix!)}>
                   {f.fix.label}
                 </Button>
               )}

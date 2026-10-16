@@ -33,12 +33,17 @@ function codeAt(secret: string, counter: number) {
   return String(n % 1_000_000).padStart(6, "0");
 }
 
-/** Saat kaymalarına karşı bir önceki ve bir sonraki 30 sn'lik pencereyi de kabul eder. */
-export function verifyTotp(secret: string, code: string) {
+/** Kod geçerliyse eşleştiği 30 sn'lik pencerenin numarası (saat kaymasına karşı ±1 pencere), değilse null. */
+export function totpCounter(secret: string, code: string): number | null {
   const clean = code.replace(/\s/g, "");
-  if (!/^\d{6}$/.test(clean)) return false;
-  const counter = Math.floor(Date.now() / 30_000);
-  return [-1, 0, 1].some((d) => timingSafeEqual(Buffer.from(codeAt(secret, counter + d)), Buffer.from(clean)));
+  if (!/^\d{6}$/.test(clean)) return null;
+  const now = Math.floor(Date.now() / 30_000);
+  for (const d of [-1, 0, 1]) if (timingSafeEqual(Buffer.from(codeAt(secret, now + d)), Buffer.from(clean))) return now + d;
+  return null;
+}
+
+export function verifyTotp(secret: string, code: string) {
+  return totpCounter(secret, code) !== null;
 }
 
 export const totpUri = (secret: string, account: string) =>

@@ -44,7 +44,7 @@ const nodeFields = [
 /** Bağımlılıkları kurup derleyen ortak aşama. */
 function buildStage(repo: Repo, opts: Options, env: Record<string, string>, as = "build") {
   const pm = packageManager(repo);
-  const v = opt(opts.nodeVersion, nodeVersion(repo) ?? "22");
+  const v = opt(opts.nodeVersion, nodeVersion(repo) ?? "24");
   const build = opt(opts.buildCommand, pkgOf(repo).scripts?.build ? runScript(pm, "build") : "");
   return {
     pm,
@@ -52,6 +52,7 @@ function buildStage(repo: Repo, opts: Options, env: Record<string, string>, as =
     text: `FROM node:${v}-alpine AS ${as}
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
+ENV NEXT_TELEMETRY_DISABLED=1 NUXT_TELEMETRY_DISABLED=1 ASTRO_TELEMETRY_DISABLED=1
 COPY . .
 RUN ${opt(opts.installCommand, installCmd(repo, pm))}
 ${publicBuildEnv(env)}ENV NODE_ENV=production

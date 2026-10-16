@@ -21,11 +21,12 @@ services:
       - xudbin-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
       - /:/host:ro
-    networks: [xudbin]
+    # Panel yalnız Caddy ile aynı ağda; uygulamalar panelin API'sine doğrudan ulaşamaz.
+    networks: [panel]
 
 volumes:
   xudbin-data:
 
 networks:
-  xudbin:
-    name: xudbin
+  panel:
+    name: xudbin-panel

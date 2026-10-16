@@ -13,9 +13,11 @@ import { config } from "./config.js";
 import { db } from "./db.js";
 import { clientIp } from "./lib/client-ip.js";
 import { HttpError } from "./lib/http.js";
+import { TooBusyError } from "./auth/password.js";
 import { sameOrigin } from "./lib/same-origin.js";
 import type { AppEnv } from "./lib/types.js";
 import { appRoutes, deploymentRoutes, frameworkRoutes, projectRoutes, uploadRoutes, webhookRoutes } from "./routes/apps.js";
+import { analyticsRoutes } from "./routes/analytics.js";
 import { authRoutes } from "./routes/auth.js";
 import { databaseRoutes } from "./routes/databases.js";
 import { securityRoutes } from "./routes/security.js";
@@ -27,6 +29,10 @@ import { startBackupScheduler } from "./services/databases.js";
 import { startPanelBackupScheduler } from "./services/panel-backup.js";
 import { recoverInterruptedDeployments } from "./services/deploy.js";
 import { startFirewallKeeper } from "./services/firewall.js";
+import { startMaintenance } from "./services/maintenance.js";
+import { startUptimeMonitor } from "./services/uptime.js";
+import { startAnalyticsJobs } from "./services/analytics.js";
+import { reconcileNetworks } from "./services/networks.js";
 import { getSettings, updateSettings } from "./lib/settings.js";
 import { notify } from "./services/notify.js";
 import { isBlocked, startSecurityMonitor } from "./services/security.js";
@@ -36,7 +42,25 @@ import { startSystemSampler } from "./services/system.js";
 const app = new Hono<AppEnv>();
 
 if (!config.isProd) app.use(logger());
-app.use(secureHeaders());
+app.use(
+  secureHeaders({
+    // Panelin arayüzü yalnız kendi dosyalarını yükler; olası bir XSS'te dışarıdan betik çalıştırılamaz.
+    contentSecurityPolicy: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:"],
+      fontSrc: ["'self'", "data:"],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+    },
+    xFrameOptions: "DENY",
+    referrerPolicy: "same-origin",
+  }),
+);
 
 // Banlanmış IP'ler panelin API'sine de ulaşamaz.
 app.use("/api/*", async (c, next) => {
@@ -60,6 +84,7 @@ app.route("/api/uploads", uploadRoutes);
 app.route("/api/deployments", deploymentRoutes);
 app.route("/api/databases", databaseRoutes);
 app.route("/api/security", securityRoutes);
+app.route("/api/analytics", analyticsRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/users", userRoutes);
 app.all("/api/*", (c) => c.json({ error: "Bulunamadı" }, 404));
@@ -73,6 +98,7 @@ if (fs.existsSync(config.webDist)) {
 
 app.onError((err, c) => {
   if (err instanceof HttpError) return c.json({ error: err.message }, err.status);
+  if (err instanceof TooBusyError) return c.json({ error: err.message }, 503);
   console.error(err);
   return c.json({ error: (err as Error).message || "Sunucu hatası" }, 500);
 });
@@ -93,6 +119,9 @@ startBackupScheduler();
 startPanelBackupScheduler();
 startSecurityMonitor();
 startFirewallKeeper();
+startMaintenance();
+startUptimeMonitor();
+startAnalyticsJobs();
 startServerMonitor((s, ok) =>
   ok ? notify("server_down", `${s.name} yeniden erişilebilir`, "Sunucuyla bağlantı geri geldi.") : notify("server_down", `${s.name} sunucusuna ulaşılamıyor`, "SSH bağlantısı 20 saniye içinde kurulamadı."),
 );
@@ -103,9 +132,16 @@ if (local.status === "ready") {
   ensureCaddy(local)
     .then(() => applyCaddyConfig(local))
     .catch((err) => console.error("Caddy hazırlanamadı:", (err as Error).message));
-} else if (process.env.XUDBIN_SKIP_LOCAL_SETUP !== "true") {
-  startServerSetup(local.id);
 }
+// Ağ ayrımı: uygulamalar ve veritabanları kendi proje ağlarına taşınır (çalışırken, yeniden deploy gerekmeden).
+setTimeout(() => {
+  for (const s of listServers().filter((x) => x.status === "ready")) {
+    reconcileNetworks(s)
+      .then((n) => n && console.log(`${s.name}: ${n} konteyner proje ağına taşındı`))
+      .catch((err) => console.error(`${s.name}: ağlar düzenlenemedi:`, (err as Error).message));
+  }
+}, 5_000).unref();
+if (local.status !== "ready" && process.env.XUDBIN_SKIP_LOCAL_SETUP !== "true") startServerSetup(local.id);
 
 const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
   console.log(`Xudbin http://localhost:${info.port} adresinde çalışıyor`);

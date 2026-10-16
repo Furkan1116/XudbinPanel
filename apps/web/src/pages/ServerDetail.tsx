@@ -187,6 +187,7 @@ function Setup({ server }: { server: Server }) {
           </li>
         </ol>
       )}
+      {server.kind === "ssh" && <HostKey server={server} />}
       <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h3 className="font-medium">{t("Kurulum çıktısı")}</h3>
@@ -196,6 +197,27 @@ function Setup({ server }: { server: Server }) {
         </div>
         <LogViewer url={`/api/servers/${server.id}/setup/stream`} height="h-80" emptyText={t("Kurulum henüz çalıştırılmadı.")} onDone={() => qc.invalidateQueries({ queryKey: ["server", server.id] })} />
       </div>
+    </div>
+  );
+}
+
+/** Panelin bu sunucu için kaydettiği SSH anahtarı; sunucu yeniden kurulduysa sıfırlanır. */
+function HostKey({ server }: { server: Server }) {
+  const reset = useAction(() => api.post(`/servers/${server.id}/reset-host-key`), { success: t("Sunucu anahtarı sıfırlandı; bir sonraki bağlantıda yenisi kaydedilecek."), invalidate: [["server", server.id]] });
+  return (
+    <div className="panel space-y-2 p-5">
+      <h3 className="font-medium">{t("Sunucunun SSH anahtarı")}</h3>
+      <p className="text-[14px] text-muted">
+        {server.hostKeyFingerprint
+          ? t("Panel bu sunucuya yalnız aşağıdaki anahtarla bağlanır; anahtar değişirse bağlantı reddedilir (araya girme saldırılarına karşı).")
+          : t("Henüz kaydedilmedi; ilk bağlantıda sunucunun anahtarı kaydedilecek ve sonraki bağlantılarda doğrulanacak.")}
+      </p>
+      {server.hostKeyFingerprint && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <code className="font-mono text-[13px] break-all">{server.hostKeyFingerprint}</code>
+          <Button size="sm" variant="ghost" onClick={() => reset.mutate()} loading={reset.isPending}>{t("Sunucu yeniden kuruldu, anahtarı sıfırla")}</Button>
+        </div>
+      )}
     </div>
   );
 }

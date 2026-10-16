@@ -2,15 +2,11 @@ import { db } from "../db.js";
 import { getSettings } from "../lib/settings.js";
 import { ACCESS_LOG, applyCaddyConfig, CADDY_CONTAINER } from "./caddy.js";
 import { dockerFor, execIn, type ServerRow } from "./docker.js";
+import { ingestAnalytics, type AccessEntry } from "./analytics.js";
 import { notify } from "./notify.js";
 import { listServers, updateServer } from "./servers.js";
 
-type AccessLog = {
-  ts?: number;
-  status?: number;
-  request?: { remote_ip?: string; client_ip?: string; method?: string; host?: string; uri?: string; headers?: Record<string, string[]> };
-  resp_headers?: Record<string, string[]>;
-};
+type AccessLog = AccessEntry;
 
 /** Erişim logundaki bir isteğin güvenlik olayı olup olmadığını ve türünü belirler. */
 function classify(entry: AccessLog): string | null {
@@ -22,44 +18,61 @@ function classify(entry: AccessLog): string | null {
   return null;
 }
 
-const MAX_CHUNK = 2 * 1024 * 1024;
+const MAX_CHUNK = 4 * 1024 * 1024;
+/** Bir turda en fazla bu kadar parça okunur; yoğun trafikte geride kalınırsa sonraki turlarda yetişilir. */
+const MAX_CHUNKS_PER_TICK = 8;
 
-/** Sunucunun Caddy erişim logundan son okunan yerden itibaren yeni satırları okur. */
+/** Sunucunun Caddy erişim logundan son okunan yerden itibaren yeni satırları okur; güvenlik olaylarını ve analitiği işler. */
 async function ingestServer(server: ServerRow) {
   const docker = dockerFor(server);
-  const sizeRes = await execIn(docker, CADDY_CONTAINER, ["sh", "-c", `stat -c %s ${ACCESS_LOG} 2>/dev/null || echo 0`], { timeoutMs: 15_000 });
-  const size = Number(sizeRes.stdout.trim()) || 0;
-  let offset = server.log_offset;
-  if (size < offset) offset = 0; // log döndürülmüş (rotate)
-  if (size === offset) return 0;
+  let total = 0;
+  for (let i = 0; i < MAX_CHUNKS_PER_TICK; i++) {
+    const stat = await execIn(docker, CADDY_CONTAINER, ["sh", "-c", `stat -c '%s %i' ${ACCESS_LOG} 2>/dev/null || echo '0 0'`], { timeoutMs: 15_000 });
+    const [sizeStr, inode] = stat.stdout.trim().split(" ");
+    const size = Number(sizeStr) || 0;
+    let offset = server.log_offset;
+    // Log döndürüldüyse (Caddy dosyayı yeniden adlandırıp yenisini açar) baştan okunur.
+    if (size < offset || (server.log_inode && inode && inode !== server.log_inode)) offset = 0;
+    if (inode && inode !== server.log_inode) {
+      updateServer(server.id, { log_inode: inode });
+      server.log_inode = inode;
+    }
+    if (size === offset) break;
 
-  const length = Math.min(size - offset, MAX_CHUNK);
-  const res = await execIn(docker, CADDY_CONTAINER, ["sh", "-c", `tail -c +${offset + 1} ${ACCESS_LOG} | head -c ${length}`], {
-    timeoutMs: 30_000,
-  });
-  const text = res.stdout;
-  const lastNewline = text.lastIndexOf("\n");
-  if (lastNewline < 0) return 0;
-  const complete = text.slice(0, lastNewline);
-  updateServer(server.id, { log_offset: offset + Buffer.byteLength(complete) + 1 });
+    const length = Math.min(size - offset, MAX_CHUNK);
+    const res = await execIn(docker, CADDY_CONTAINER, ["sh", "-c", `tail -c +${offset + 1} ${ACCESS_LOG} | head -c ${length}`], { timeoutMs: 30_000 });
+    const text = res.stdout;
+    const lastNewline = text.lastIndexOf("\n");
+    if (lastNewline < 0) break;
+    const complete = text.slice(0, lastNewline);
+    server.log_offset = offset + Buffer.byteLength(complete) + 1;
+    updateServer(server.id, { log_offset: server.log_offset });
+    total += processLines(server.id, complete.split("\n"));
+    if (size - server.log_offset <= 0) break;
+  }
+  return total;
+}
 
+function processLines(serverId: number, lines: string[]) {
   const insert = db.prepare(
     `INSERT INTO security_events (server_id, host, ip, kind, method, path, status, user_agent, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  const entries: AccessLog[] = [];
   let count = 0;
-  for (const line of complete.split("\n")) {
+  for (const line of lines) {
     let entry: AccessLog;
     try {
       entry = JSON.parse(line);
     } catch {
       continue;
     }
+    entries.push(entry);
     const kind = classify(entry);
     if (!kind) continue;
     const r = entry.request ?? {};
     insert.run(
-      server.id,
+      serverId,
       r.host ?? null,
       r.client_ip ?? r.remote_ip ?? "?",
       kind,
@@ -70,6 +83,11 @@ async function ingestServer(server: ServerRow) {
       Math.round((entry.ts ?? Date.now() / 1000) * 1000),
     );
     count++;
+  }
+  try {
+    ingestAnalytics(entries);
+  } catch (err) {
+    console.error("Analitik işlenemedi:", (err as Error).message);
   }
   return count;
 }

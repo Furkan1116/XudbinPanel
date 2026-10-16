@@ -53,6 +53,11 @@ export type Framework = {
    * "ALLOWED_HOSTS" adından okuyorsa { DJANGO_ALLOWED_HOSTS: "ALLOWED_HOSTS" }).
    */
   envAliases?: (repo: Repo, opts: Options) => Record<string, string>;
+  /**
+   * Projenin çalışması için gereken, kullanıcının vermediği ayarlar: eksikse eklenecek ortam değişkenleri ve
+   * kalıcı klasörler (ör. Rails'in üretim SQLite dosyaları için storage/).
+   */
+  autoConfig?: (repo: Repo, opts: Options) => { env?: Record<string, string>; volumes?: { name: string; path: string }[]; notes?: string[] };
 };
 
 /** Repo içeriğine güvenli, salt okunur erişim. */

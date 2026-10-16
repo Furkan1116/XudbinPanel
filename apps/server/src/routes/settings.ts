@@ -13,6 +13,7 @@ import { db } from "../db.js";
 import { decrypt, encrypt } from "../lib/crypto.js";
 import { body, HttpError, idParam } from "../lib/http.js";
 import { getSettings, updateSettings } from "../lib/settings.js";
+import { VERSION } from "../lib/version.js";
 import type { AppEnv } from "../lib/types.js";
 import { applyCaddyConfig } from "../services/caddy.js";
 import { NOTIFY_EVENTS, sendTo } from "../services/notify.js";
@@ -27,7 +28,7 @@ export const settingsRoutes = new Hono<AppEnv>()
   .get("/", (c) => {
     const s = getSettings();
     const local = listServers().find((x) => x.kind === "local");
-    return c.json({ panelDomain: s.panelDomain, panelHttps: s.panelHttps, localServerIp: local?.public_ip ?? null, version: "1.0.0" });
+    return c.json({ panelDomain: s.panelDomain, panelHttps: s.panelHttps, localServerIp: local?.public_ip ?? null, version: VERSION, timezone: s.timezone, uptimeEnabled: s.uptimeEnabled });
   })
 
   .put("/panel", async (c) => {
@@ -36,6 +37,8 @@ export const settingsRoutes = new Hono<AppEnv>()
       z.object({
         panelDomain: z.union([z.string().trim().toLowerCase().regex(/^([a-z0-9-]+\.)+[a-z]{2,63}$/, "Geçerli bir alan adı gir"), z.literal("")]),
         panelHttps: z.boolean(),
+        timezone: z.string().max(60).refine((tz) => Intl.supportedValuesOf("timeZone").includes(tz) || tz === "UTC", "Geçersiz saat dilimi").optional(),
+        uptimeEnabled: z.boolean().optional(),
       }),
     );
     updateSettings(input);
@@ -63,7 +66,12 @@ export const settingsRoutes = new Hono<AppEnv>()
 
   .put("/account/profile", async (c) => {
     const user = c.get("user");
-    const input = await body(c, z.object({ name: z.string().trim().min(1).max(100), email: z.email().max(254) }));
+    const input = await body(c, z.object({ name: z.string().trim().min(1).max(100), email: z.email().max(254), password: z.string().max(256).optional() }));
+    // E-posta giriş bilgisidir; değiştirmek için mevcut şifre istenir (açık bırakılmış bir oturumla hesap ele geçirilemesin).
+    if (input.email !== user.email) {
+      const row = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(user.id) as { password_hash: string };
+      if (!input.password || !(await verifyPassword(input.password, row.password_hash))) throw new HttpError(403, "E-postayı değiştirmek için mevcut şifreni gir");
+    }
     try {
       db.prepare("UPDATE users SET name = ?, email = ? WHERE id = ?").run(input.name, input.email, user.id);
     } catch {
@@ -248,12 +256,18 @@ const s3Schema = z.object({
 
 const notificationSchema = z.object({
   name: z.string().trim().min(1).max(60),
-  kind: z.enum(["discord", "telegram", "slack", "webhook"]),
+  kind: z.enum(["discord", "telegram", "slack", "webhook", "email"]),
   config: z.record(z.string(), z.string().max(500)),
   events: z.array(z.enum(Object.keys(NOTIFY_EVENTS) as [string, ...string[]])).min(1, "En az bir olay seç"),
 });
 
 function validateChannel(kind: string, cfg: Record<string, string>) {
+  if (kind === "email") {
+    if (!cfg.host || !/^[a-z0-9.-]+$/i.test(cfg.host)) throw new HttpError(400, "SMTP sunucusu gerekli (ör. smtp.gmail.com)");
+    if (!cfg.from || !/@/.test(cfg.from)) throw new HttpError(400, "Gönderen adresi gerekli");
+    if (!cfg.to || !cfg.to.split(/[,\s]+/).filter(Boolean).every((a) => /^[^\s@<>]+@[^\s@<>]+$/.test(a))) throw new HttpError(400, "Alıcı e-posta adres(ler)i gerekli");
+    return;
+  }
   if (kind === "telegram") {
     if (!cfg.botToken || !cfg.chatId) throw new HttpError(400, "Bot token ve chat ID gerekli");
   } else if (!cfg.url || !/^https:\/\//.test(cfg.url)) throw new HttpError(400, "https:// ile başlayan bir adres gerekli");

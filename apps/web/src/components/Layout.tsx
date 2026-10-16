@@ -1,4 +1,4 @@
-import { FolderKanban, LayoutGrid, LogOut, Server, Settings, ShieldCheck } from "lucide-react";
+import { ChartLine, FolderKanban, LayoutGrid, LogOut, Server, Settings, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router";
 import { useAuthStatus, useLogout } from "@/lib/auth";
@@ -10,6 +10,7 @@ import { t } from "@/lib/i18n";
 const NAV = [
   { to: "/", label: t("Genel bakış"), icon: LayoutGrid, end: true },
   { to: "/projects", label: t("Projeler"), icon: FolderKanban },
+  { to: "/analytics", label: t("Analitik"), icon: ChartLine },
   { to: "/servers", label: t("Sunucular"), icon: Server, admin: true },
   { to: "/security", label: t("Güvenlik"), icon: ShieldCheck, admin: true },
   { to: "/settings", label: t("Ayarlar"), icon: Settings },

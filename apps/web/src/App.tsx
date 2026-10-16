@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { AnalyticsPage } from "@/pages/Analytics";
 import { Layout } from "@/components/Layout";
 import { Toaster } from "@/components/ui/toast";
 import { useAuthStatus } from "@/lib/auth";
@@ -43,6 +44,7 @@ export function App() {
               <Route path="/servers" element={<ServersPage />} />
               <Route path="/servers/:id" element={<ServerDetailPage />} />
               <Route path="/security" element={<SecurityPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

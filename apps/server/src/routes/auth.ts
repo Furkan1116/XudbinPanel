@@ -5,7 +5,7 @@ import { SESSION_COOKIE } from "../auth/middleware.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { createSession, destroySession, validateSession } from "../auth/session.js";
 import { checkSetupToken, clearSetupToken } from "../auth/setup-token.js";
-import { verifyTotp } from "../auth/totp.js";
+import { totpCounter } from "../auth/totp.js";
 import { decrypt } from "../lib/crypto.js";
 import { recordPanelEvent } from "../services/security.js";
 import { config } from "../config.js";
@@ -85,8 +85,8 @@ export const authRoutes = new Hono()
       return c.json({ error: `Çok fazla deneme. ${Math.ceil(retryAfter / 60)} dakika sonra tekrar deneyin.` }, 429);
     }
 
-    const user = db.prepare("SELECT id, password_hash, totp_secret FROM users WHERE email = ?").get(parsed.data.email) as
-      | { id: number; password_hash: string; totp_secret: string | null }
+    const user = db.prepare("SELECT id, password_hash, totp_secret, totp_last_counter FROM users WHERE email = ?").get(parsed.data.email) as
+      | { id: number; password_hash: string; totp_secret: string | null; totp_last_counter: number | null }
       | undefined;
     // Kullanıcı yoksa da hash doğrulaması yapılır ki yanıt süresi e-postanın varlığını ele vermesin.
     const valid = await verifyPassword(parsed.data.password, user?.password_hash ?? DUMMY_HASH);
@@ -96,10 +96,13 @@ export const authRoutes = new Hono()
     }
     if (user.totp_secret) {
       if (!parsed.data.code) return c.json({ error: "Doğrulama kodu gerekli", needsCode: true }, 401);
-      if (!verifyTotp(decrypt(user.totp_secret), parsed.data.code)) {
+      // Aynı kod, geçerli olduğu süre içinde ikinci kez kullanılamaz (izlenip tekrar gönderilen kodlara karşı).
+      const counter = totpCounter(decrypt(user.totp_secret), parsed.data.code);
+      if (counter === null || (user.totp_last_counter !== null && counter <= user.totp_last_counter)) {
         recordPanelEvent(ip, "panel_login", "/api/auth/login (2FA)", c.req.header("user-agent"));
-        return c.json({ error: "Doğrulama kodu hatalı", needsCode: true }, 401);
+        return c.json({ error: "Doğrulama kodu hatalı ya da zaten kullanıldı", needsCode: true }, 401);
       }
+      db.prepare("UPDATE users SET totp_last_counter = ? WHERE id = ?").run(counter, user.id);
     }
 
     loginLimiter.reset(ip);

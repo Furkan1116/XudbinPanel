@@ -121,6 +121,14 @@ cd /opt/xudbin && sudo docker compose up -d
 
 Kurulum linkini kaçırırsan `xudbin link` komutunu çalıştır.
 
+## Bilmen gerekenler
+
+- **Let's Encrypt:** Xudbin HTTPS sertifikalarını Caddy aracılığıyla Let's Encrypt'ten alır. Bu sırada Caddy, paneli kuran kişi adına [Let's Encrypt Abonelik Sözleşmesi](https://letsencrypt.org/repository/)'ni kabul eder.
+- **Otomatik adresler (sslip.io):** Domain almadan verilen `uygulama.1-2-3-4.sslip.io` adresleri ücretsiz, üçüncü taraf bir DNS hizmetine dayanır. Let's Encrypt bu hizmetin tüm kullanıcıları için ortak bir haftalık sertifika kotası uygular; kota dolarsa yeni otomatik adreslere bir süre sertifika alınamayabilir. Canlı siteler için kendi alan adını kullan.
+- **Kişisel veriler (KVKK/GDPR):** Panel, saldırı tespiti ve trafik analitiği için uygulamalarına gelen isteklerin IP adresi, adresi, tarayıcı bilgisi ve yönlendiren sayfasını kendi sunucunda tutar (saldırı kayıtları 30 gün, analitik özetleri 400 gün; ziyaretçi sayımı için IP'ler günlük değişen bir anahtarla tek yönlü özetlenir, saklanmaz). Bu verilerin sorumlusu paneli kuran kişidir. Panel hiçbir yere telemetri göndermez; derlenen Next.js, Nuxt ve Astro projelerinin telemetrisi de kapatılır.
+- **Logolar:** Framework logoları ve adları sahiplerinin markasıdır; Xudbin'in bu projelerle bir bağlantısı yoktur. Ayrıntılar: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **Güvenlik:** Açık bildirmek için [SECURITY.md](SECURITY.md).
+
 ## Hazır imajlar
 
 Repo GitHub'a gönderildiğinde `.github/workflows/images.yml` panel ve Caddy imajlarını (amd64 + arm64) `ghcr.io/<sahip>/xudbin` ve `ghcr.io/<sahip>/xudbin-caddy` olarak yayınlar. İlk yayından sonra GitHub > Packages'ta iki paketi de **Public** yap; kurulumlar derleme yapmadan bu imajları kullanır.

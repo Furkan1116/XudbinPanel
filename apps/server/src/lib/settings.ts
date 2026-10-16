@@ -18,6 +18,11 @@ export type Settings = {
   verifyBackupsEveryH: number;
   /** Her başarılı deploy'dan sonra imaj Trivy ile taranır. */
   imageScanEnabled: boolean;
+  /** Analitik gün sınırları ve grafikler için saat dilimi. */
+  timezone: string;
+  analyticsSalt: { day: string; value: string } | null;
+  geoDbMonth: string | null;
+  uptimeEnabled: boolean;
 };
 
 const DEFAULTS: Settings = {
@@ -34,6 +39,10 @@ const DEFAULTS: Settings = {
   lastPanelBackupAt: null,
   verifyBackupsEveryH: 24,
   imageScanEnabled: true,
+  timezone: "Europe/Istanbul",
+  analyticsSalt: null,
+  geoDbMonth: null,
+  uptimeEnabled: true,
 };
 
 export function getSettings(): Settings {

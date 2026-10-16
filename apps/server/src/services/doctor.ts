@@ -11,25 +11,27 @@ export type Finding = {
   id: string;
   title: string;
   detail: string;
-  /** Uygulanınca ortam değişkenlerine eklenir/güncellenir ve yeniden deploy edilir. */
-  fix?: { label: string; env: Record<string, string> };
+  /** Uygulanınca ortam değişkenleri ve/veya derleme ayarları güncellenir ve yeniden deploy edilir. */
+  fix?: { label: string; env?: Record<string, string>; buildOptions?: Record<string, string | boolean> };
 };
 
 export type HttpProbe = { status: number | null; statusLine: string; error?: string };
 
 /**
- * İsteği Caddy konteynerinden, uygulamanın kendi alan adıyla (Host) ve HTTPS arkasındaymış gibi atar.
- * Yönlendirmeler takip edilmez; yalnız durum satırı okunur.
+ * İsteği Caddy konteynerinden, uygulamanın kendi alan adıyla (Host) ve HTTPS arkasındaymış gibi atar; ilk yanıtın
+ * durum satırı okunur. busybox wget kullanılır: nc, isteği gönderince bağlantıyı kapattığı için bazı sunucular
+ * (uvicorn, Kestrel, Node) yanıt vermeden bağlantıyı bırakıyordu.
  */
 export async function probeHttp(docker: Docker, container: string, port: number, host: string, path = "/"): Promise<HttpProbe> {
-  const request = `GET ${path} HTTP/1.0\\r\\nHost: ${host}\\r\\nUser-Agent: xudbin-doctor\\r\\nX-Forwarded-Proto: https\\r\\nX-Forwarded-Host: ${host}\\r\\nAccept: text/html,*/*\\r\\n\\r\\n`;
-  const res = await execIn(docker, CADDY_CONTAINER, ["sh", "-c", `printf '${request}' | nc -w 10 ${container} ${port} | head -1`], { timeoutMs: 15_000 }).catch(
-    (e: Error) => ({ exitCode: 1, stdout: "", stderr: e.message }),
-  );
+  if (!/^[a-z0-9.-]+$/i.test(host) || !/^\/[\w\-./?=&%~]*$/.test(path) || !/^[\w.-]+$/.test(container)) {
+    return { status: null, statusLine: "", error: "Geçersiz kontrol adresi" };
+  }
+  const cmd = `wget -q -S -O /dev/null -T 10 -U xudbin-doctor --header 'Host: ${host}' --header 'X-Forwarded-Proto: https' --header 'X-Forwarded-Host: ${host}' 'http://${container}:${port}${path}' 2>&1 | grep -m1 'HTTP/'`;
+  const res = await execIn(docker, CADDY_CONTAINER, ["sh", "-c", cmd], { timeoutMs: 20_000 }).catch((e: Error) => ({ exitCode: 1, stdout: "", stderr: e.message }));
   const line = res.stdout.trim();
-  const m = line.match(/^HTTP\/\d(?:\.\d)?\s+(\d{3})/);
-  if (!m) return { status: null, statusLine: line, error: line ? `Beklenmeyen yanıt: ${line.slice(0, 80)}` : "Uygulama HTTP isteğine yanıt vermedi" };
-  return { status: Number(m[1]), statusLine: line };
+  const m = line.match(/HTTP\/\d(?:\.\d)?\s+(\d{3})/);
+  if (!m) return { status: null, statusLine: line, error: "Uygulama HTTP isteğine yanıt vermedi" };
+  return { status: Number(m[1]), statusLine: line.replace(/^\s+/, "") };
 }
 
 /** Sağlık yolu verilmediyse "/" için 404 de kabul edilir (yalnız API olan uygulamalar). */
@@ -49,6 +51,93 @@ const appendList = (current: string | undefined, add: string) => {
 };
 
 const RULES: Rule[] = [
+  // --- Derleme hataları -------------------------------------------------------------------------
+  {
+    re: /npm error Cannot read properties of null \(reading '(edgesOut|edgesIn|package)'\)/,
+    make: () => ({
+      id: "npm-arborist",
+      title: "npm bağımlılıkları çözemedi",
+      detail: "Bu, eski npm sürümlerinde kilit dosyası (package-lock.json) olmayan projelerde görülen bilinen bir npm hatası. Node 24 ile gelen npm'de düzeldi; projeye package-lock.json eklemek de çözer.",
+      fix: { label: "Node 24 ile yeniden derle", buildOptions: { nodeVersion: "24" } },
+    }),
+  },
+  {
+    re: /`npm ci` can only install packages when your package\.json and package-lock\.json[^\n]*in sync/,
+    make: () => ({
+      id: "npm-lock-sync",
+      title: "package-lock.json, package.json ile uyuşmuyor",
+      detail: "package.json değişmiş ama package-lock.json güncellenmemiş. Yerelde npm install çalıştırıp kilit dosyasını commit'le ya da kurulumu npm install ile yap.",
+      fix: { label: "Kurulumu npm install ile yap", buildOptions: { installCommand: "npm install" } },
+    }),
+  },
+  {
+    re: /npm error code ERESOLVE|ERESOLVE unable to resolve dependency tree|ERESOLVE could not resolve/,
+    make: () => ({
+      id: "npm-peer",
+      title: "Paket sürümleri birbiriyle çakışıyor (peer dependency)",
+      detail: "Bazı paketler birbirinin farklı sürümlerini istiyor. Kalıcı çözüm sürümleri uyumlu hale getirmek; hızlı çözüm npm install --legacy-peer-deps.",
+      fix: { label: "--legacy-peer-deps ile kur", buildOptions: { installCommand: "npm install --legacy-peer-deps" } },
+    }),
+  },
+  {
+    re: /requires php [>=^~]*\s*8\.(\d+)[^\n]*your php version \((8\.\d+)/,
+    make: (m) => ({
+      id: "php-version",
+      title: `PHP ${m[2]} yetmiyor, en az PHP 8.${m[1]} gerekli`,
+      detail: `composer.lock'taki paketler PHP 8.${m[1]} istiyor. Derleme PHP sürümü yükseltilmeli.`,
+      fix: { label: `PHP 8.${m[1]} ile yeniden derle`, buildOptions: { phpVersion: `8.${m[1]}` } },
+    }),
+  },
+  {
+    re: /No database file specified\. Missing argument: database/,
+    make: () => ({
+      id: "rails-sqlite",
+      title: "Rails üretim veritabanının yolu tanımlı değil",
+      detail: "config/database.yml'de production için database: yolu yok. Yeniden deploy edildiğinde Xudbin storage/ klasörünü kalıcı yapıp DATABASE_URL değişkenlerini kendisi ekler; harici bir veritabanı kullanacaksan DATABASE_URL'i kendin ver.",
+    }),
+  },
+  {
+    re: /No matching distribution found for ([\w.-]+)|requires a different Python: ([\d.]+) not in '([^']+)'/,
+    make: (m) => ({
+      id: "pip",
+      title: m[1] ? `Python paketi bulunamadı: ${m[1]}` : "Python sürümü uygun değil",
+      detail: m[1]
+        ? "Paket adı veya sürümü yanlış ya da bu Python sürümü için yayınlanmamış. requirements.txt'yi ve Python sürümünü kontrol et."
+        : `Paket ${m[3]} Python sürümünü istiyor, derlemede ${m[2]} kullanıldı. Uygulama ayarlarından Python sürümünü değiştir.`,
+    }),
+  },
+  {
+    re: /Module not found: (?:Error: )?Can't resolve '([^']+)'/,
+    make: (m) => ({
+      id: "bundler-module",
+      title: `Derlemede modül bulunamadı: ${m[1]}`,
+      detail: m[1]!.startsWith(".") || m[1]!.startsWith("@/")
+        ? "Kodda içe aktarılan dosya bulunamıyor. Dosya adı büyük/küçük harf farkıyla yazılmış olabilir (Linux büyük/küçük harfe duyarlıdır)."
+        : `"${m[1]}" paketi package.json'da yok. dependencies kısmına ekle.`,
+    }),
+  },
+  {
+    re: /no space left on device/i,
+    make: () => ({ id: "disk-full", title: "Sunucunun diski dolu", detail: "Derleme için yer kalmadı. Sunucular sayfasından disk kullanımına bak; eski imajları ve derleme önbelleğini temizle." }),
+  },
+  {
+    re: /exec format error/,
+    make: () => ({ id: "arch", title: "İmaj bu sunucunun işlemcisi için derlenmemiş", detail: "İmaj farklı bir mimari (ör. arm64 / amd64) için hazırlanmış. Çok mimarili bir imaj kullan veya kaynaktan derle." }),
+  },
+  {
+    re: /pull access denied|manifest unknown|repository does not exist/,
+    make: () => ({ id: "image-pull", title: "Docker imajı indirilemedi", detail: "İmaj adı veya etiketi yanlış ya da imaj özel (giriş gerektiriyor). Adı ve etiketi kontrol et." }),
+  },
+  {
+    re: /error: release version (\d+) not supported|invalid target release: (\d+)/,
+    make: (m) => ({
+      id: "java-version",
+      title: `Java ${m[1] ?? m[2]} gerekli`,
+      detail: "Proje daha yeni bir Java sürümüyle derlenmek istiyor.",
+      fix: { label: `Java ${m[1] ?? m[2]} ile derle`, buildOptions: { javaVersion: String(m[1] ?? m[2]) } },
+    }),
+  },
+  // --- Çalışma zamanı hataları ------------------------------------------------------------------
   {
     re: /Invalid HTTP_HOST header: '([^']+)'/,
     make: (m, ctx) => {

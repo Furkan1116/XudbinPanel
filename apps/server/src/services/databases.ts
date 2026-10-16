@@ -10,6 +10,7 @@ import { s3Delete, s3Download, s3Upload } from "../lib/s3.js";
 import { containerState, dockerFor, execIn, pullImage, removeContainer } from "./docker.js";
 import { notify } from "./notify.js";
 import { applyDockerFirewall } from "./firewall.js";
+import { ensureProjectNetwork } from "./networks.js";
 import { offsiteTarget } from "./offsite.js";
 import { getServer } from "./servers.js";
 
@@ -103,7 +104,7 @@ export async function startDatabase(d: DatabaseRow, log: (l: string) => void = (
       Labels: { "xudbin.managed": "true", "xudbin.database": d.slug },
       ExposedPorts: { [`${engine.port}/tcp`]: {} },
       HostConfig: {
-        NetworkMode: config.network,
+        NetworkMode: await ensureProjectNetwork(server, d.project_id),
         RestartPolicy: { Name: "unless-stopped" },
         Binds: [`xb-db-${d.slug}-data:${engine.dataPath}`],
         PortBindings: d.external_port ? { [`${engine.port}/tcp`]: [{ HostPort: String(d.external_port) }] } : undefined,

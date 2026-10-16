@@ -84,7 +84,28 @@ export function latestAppUpload(slug: string) {
  * Zip'i açar. Tek bir üst klasörden oluşuyorsa (ör. proje-main/) o klasörü kök kabul eder.
  * unzip, ../ içeren yolları dışarı yazmaz.
  */
+/** Arşiv açılınca en fazla bu kadar yer kaplayabilir; küçük bir "zip bombası" diski dolduramasın. */
+export const MAX_EXTRACTED_BYTES = 3 * 1024 * 1024 * 1024;
+const MAX_FILES = 200_000;
+
+/** unzip -Zt özeti: "N files, X bytes uncompressed, Y bytes compressed". */
+async function zipTotals(zip: string): Promise<{ files: number; bytes: number }> {
+  const out = await new Promise<string>((resolve, reject) => {
+    const p = spawn("unzip", ["-Zt", zip]);
+    let text = "";
+    p.stdout.on("data", (d) => (text += d));
+    p.on("error", () => reject(new Error("unzip bulunamadı")));
+    p.on("close", () => resolve(text));
+  });
+  const m = out.match(/(\d+) files?, (\d+) bytes uncompressed/);
+  if (!m) throw new Error("Arşiv okunamadı; geçerli bir zip dosyası değil");
+  return { files: Number(m[1]), bytes: Number(m[2]) };
+}
+
 export async function extractZip(zip: string, dest: string): Promise<string> {
+  const totals = await zipTotals(zip);
+  if (totals.bytes > MAX_EXTRACTED_BYTES) throw new Error(`Arşiv açıldığında ${(totals.bytes / 1024 ** 3).toFixed(1)} GB yer kaplıyor; sınır ${MAX_EXTRACTED_BYTES / 1024 ** 3} GB`);
+  if (totals.files > MAX_FILES) throw new Error(`Arşivde ${totals.files} dosya var; sınır ${MAX_FILES}`);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
   await new Promise<void>((resolve, reject) => {
