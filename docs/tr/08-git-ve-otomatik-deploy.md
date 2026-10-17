@@ -43,7 +43,7 @@ Her PR ayrı bir adreste açılır, yeni commit'lerde güncellenir ve PR kapanı
 1. Uygulamanın **Ayarlar** sekmesinde **Pull request önizlemeleri**'ni aç.
 2. GitHub App kullanıyorsan başka bir şey gerekmez. Elle webhook kullanıyorsan Git sağlayıcının webhook ayarında "Pull requests" olaylarını da seç.
 
-GitHub App bağlıysa (ya da uygulamada bir GitHub erişim token'ı kayıtlıysa) önizleme adresi PR'a yorum olarak yazılır. Açık önizlemeler ana uygulamanın **Genel** sekmesinde **Açık PR önizlemeleri** altında listelenir. Güvenlik nedeniyle fork'tan gelen PR'lar deploy edilmez.
+GitHub App bağlıysa (ya da uygulamada bir GitHub erişim token'ı kayıtlıysa) önizleme adresi PR'a yorum olarak yazılır. Açık önizlemeler ana uygulamanın **Genel** sekmesinde **Açık PR önizlemeleri** altında listelenir. Güvenlik nedeniyle fork'tan gelen PR'lar deploy edilmez. Önizlemeler ana uygulamanın üretim ortam değişkenlerini **almaz**: depoya yazabilen herkes bir dalda kod çalıştırabildiği için, **Ortam değişkenleri** sekmesindeki ayrı **Önizleme ortam değişkenleri** listesi kullanılır (boşsa önizleme yalnız `XUDBIN_PREVIEW=1` alır). Oraya test değerleri koy. Git token'ı yalnız klonlamak için kullanılır ve klonlanan deponun `.git/config` dosyasına yazılmaz. Bu sürümden önce açılmış önizlemeler, PR'a yeni bir olay (ör. push) geldiğinde yeni listeyle güncellenir.
 
 ## CI'dan deploy
 

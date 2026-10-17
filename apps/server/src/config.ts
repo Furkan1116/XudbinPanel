@@ -33,6 +33,12 @@ export const config = {
   acmeCa: env.XUDBIN_ACME_CA || null,
   /** ACME sunucusu herkese açık bir sertifika kullanmıyorsa, Caddy konteynerindeki kök sertifika dosyası. */
   acmeCaRoot: env.XUDBIN_ACME_CA_ROOT || null,
+  /**
+   * Üyelerin verdiği adreslerin (git clone, uptime) özel ağa çözülmesi varsayılan olarak engellenir (SSRF).
+   * İç ağdaki bir Gitea/GitLab gibi meşru hedefler için virgülle ayrılmış ana bilgisayar adı ya da IP listesi;
+   * "*" her şeye izin verir (önerilmez).
+   */
+  ssrfAllow: (env.XUDBIN_SSRF_ALLOW ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
 };
 
 function findDockerSocket() {

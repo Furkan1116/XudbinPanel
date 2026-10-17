@@ -58,4 +58,10 @@ On **Settings > Account**:
 
 A panel admin effectively has root on your servers, so always turn on 2FA for admin accounts. If you lose your phone, run `xudbin user disable-2fa <email>` on the server.
 
+## Requests the panel makes
+
+The panel server sends requests to addresses members provide (git repository URL, an app's domain name). If those resolve to an internal network (`127.x`, `10.x`, `172.16-31.x`, `192.168.x`, `169.254.x` including cloud metadata, `100.64/10`, IPv6 local/link-local addresses, IPv4-mapped forms) the request is not made. The uptime monitor connects to the validated IP and does not follow redirects. For git clones the address is checked up front, redirects are disabled and only `https` is allowed; however git resolves the name itself, so this is **not complete protection** (the DNS answer can change between the check and the connection). Restricting the panel server's outbound traffic with a firewall adds another layer.
+
+For legitimate internal targets such as a Gitea/GitLab on your network, set `XUDBIN_SSRF_ALLOW=git.company.local,10.0.0.5` (comma-separated host names or IPs) on the server. Admin settings (notification webhook, S3, OIDC) are not filtered: they are intentionally allowed, for example for a local MinIO, and only an admin can change them.
+
 If you find a security vulnerability, don't open a public issue; use **Security > Report a vulnerability** on GitHub.

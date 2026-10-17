@@ -8,9 +8,12 @@ import { getServer } from "./servers.js";
 
 /**
  * Pull request önizlemeleri: PR açılınca o dal için ayrı bir uygulama (kendi adresiyle) oluşturulur,
- * yeni commit'lerde yeniden deploy edilir, PR kapanınca silinir. Önizleme ana uygulamanın ayarlarını ve
- * ortam değişkenlerini kopyalar (XUDBIN_PREVIEW=1 eklenir); kalıcı klasörleri ayrıdır.
+ * yeni commit'lerde yeniden deploy edilir, PR kapanınca silinir. Önizleme ana uygulamanın ayarlarını kopyalar;
+ * ortam değişkenleri ise YALNIZ uygulamanın ayrı "önizleme ortam değişkenleri" alanından gelir (XUDBIN_PREVIEW=1 eklenir),
+ * üretim sırları kopyalanmaz. Kalıcı klasörleri ayrıdır.
  * Güvenlik: yalnız aynı repodan açılan PR'lar; fork'tan gelen kod uygulamanın gizli bilgileriyle çalıştırılmaz.
+ * Depoya yazabilen biri herhangi bir dalda kod çalıştırabildiği için o koda üretim sırrı verilmemelidir (O10).
+ * Git token'ı yalnız klonlamak için önizleme kaydında tutulur; konteynere ortam değişkeni olarak geçmez.
  */
 export type PrEvent = { action: "open" | "update" | "close"; number: number; branch: string; title: string; sameRepo: boolean; commentUrl?: string; repo?: string };
 
@@ -35,6 +38,11 @@ export function parsePrEvent(header: (n: string) => string | undefined, payload:
   return null;
 }
 
+/** Önizlemenin ortam değişkenleri: yalnız ana uygulamanın "önizleme ortam değişkenleri" alanı + XUDBIN_PREVIEW=1. */
+export function buildPreviewEnv(parent: Pick<AppRow, "preview_env">) {
+  return (decrypt(parent.preview_env).trimEnd() + "\nXUDBIN_PREVIEW=1\n").trimStart();
+}
+
 const previewOf = (parentId: number, pr: number) => db.prepare("SELECT * FROM apps WHERE parent_app_id = ? AND preview_pr = ?").get(parentId, pr) as AppRow | undefined;
 
 export async function handlePrEvent(parent: AppRow, ev: PrEvent) {
@@ -50,7 +58,7 @@ export async function handlePrEvent(parent: AppRow, ev: PrEvent) {
     const server = getServer(parent.server_id);
     const base = parent.slug.replace(/-[a-z0-9]{4}$/, "");
     const slug = `${base}-pr${ev.number}-${randomToken(3).toLowerCase().replace(/[^a-z0-9]/g, "x").slice(0, 4)}`;
-    const env = (decrypt(parent.env).trimEnd() + "\nXUDBIN_PREVIEW=1\n").trimStart();
+    const env = buildPreviewEnv(parent);
     const { encrypt } = await import("../lib/crypto.js");
     const res = db
       .prepare(
@@ -71,8 +79,11 @@ export async function handlePrEvent(parent: AppRow, ev: PrEvent) {
       db.prepare("INSERT INTO domains (app_id, host, https, generated, created_at) VALUES (?, ?, ?, 1, ?)").run(id, host, server.https_mode === "off" ? 0 : 1, Date.now());
     }
     app = getApp(id)!;
-  } else if (app.git_branch !== ev.branch) {
-    db.prepare("UPDATE apps SET git_branch = ? WHERE id = ?").run(ev.branch, app.id);
+  } else {
+    if (app.git_branch !== ev.branch) db.prepare("UPDATE apps SET git_branch = ? WHERE id = ?").run(ev.branch, app.id);
+    // Eski sürümlerde oluşmuş önizlemeler üretim değişkenlerini taşıyor olabilir; her olayda ayrı listeyle değiştirilir.
+    const { encrypt } = await import("../lib/crypto.js");
+    db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(encrypt(buildPreviewEnv(parent)), app.id);
   }
   const deploymentId = enqueueDeploy(app.id, "webhook", { title: `PR #${ev.number}: ${ev.title}`.slice(0, 200) });
   if (!existing && (ev.commentUrl || ev.repo)) void commentOnPr(parent, ev, app.id).catch(() => {});

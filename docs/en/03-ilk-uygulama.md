@@ -15,7 +15,7 @@ On the project page click **Add app** and pick a source:
 | Source | When to use it |
 |---|---|
 | **Git repository** | GitHub, GitLab, Gitea... For a private repo enter an **Access token**, or use **Pick from GitHub** if the [GitHub App](08-git-ve-otomatik-deploy.md) is connected. In a monorepo, put the subfolder in **Project folder** (e.g. `apps/web`). |
-| **Upload files** | Drag and drop the project folder or a zip file. The `.env` file isn't uploaded; enter its values as environment variables. |
+| **Upload files** | Drag and drop the project folder or a zip file. The `.env` file isn't uploaded; enter its values as environment variables. Uploading requires being an admin or a developer in at least one project; a file can be up to 300 MB (3 GB once extracted), and each user is limited to one upload at a time and 20 uploads / 1 GB per hour. |
 | **Docker image** | Run a ready-made image, e.g. `ghcr.io/user/app:latest`. |
 | **Docker Compose** | Multiple services. The compose file comes from the repo or you paste it in. |
 

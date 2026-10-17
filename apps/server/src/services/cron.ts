@@ -4,6 +4,7 @@ import { decrypt } from "../lib/crypto.js";
 import { timeZone } from "./analytics.js";
 import { demuxLogs, fillPlaceholders, getApp, parseEnv } from "./deploy.js";
 import { dockerFor, removeContainer, withTimeout } from "./docker.js";
+import { resourceLimits } from "../lib/limits.js";
 import { ensureProjectNetwork } from "./networks.js";
 import { notify } from "./notify.js";
 import { getServer } from "./servers.js";
@@ -46,8 +47,7 @@ export async function runCronJob(jobId: number, trigger: "schedule" | "manual" =
       HostConfig: {
         NetworkMode: await ensureProjectNetwork(server, app.project_id),
         Binds: volumes.map((v) => `xb-${app.slug}-${v.name}:${v.path}`),
-        ...(app.memory_limit ? { Memory: app.memory_limit * 1024 * 1024 } : {}),
-        ...(app.cpu_limit ? { NanoCpus: Math.round(app.cpu_limit * 1e9) } : {}),
+        ...resourceLimits(app, { swap: false }),
       },
     });
     await container.start();

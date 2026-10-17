@@ -1,6 +1,7 @@
 import tls from "node:tls";
 import { db } from "../db.js";
 import { getSettings } from "../lib/settings.js";
+import { safeGet } from "../lib/ssrf.js";
 import { dockerFor } from "./docker.js";
 import { isHealthy, probeHttp } from "./doctor.js";
 import { notify } from "./notify.js";
@@ -19,13 +20,13 @@ const state = new Map<number, { fails: number; down: boolean; since: number; fir
 async function checkUrl(url: string): Promise<{ ok: boolean; status: number | null; ms: number; error?: string }> {
   const started = Date.now();
   try {
-    const res = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(15_000), headers: { "User-Agent": "xudbin-uptime" } });
-    await res.body?.cancel().catch(() => {});
-    const ms = Date.now() - started;
-    return { ok: res.status < 500, status: res.status, ms };
+    // Alan adı kullanıcıdan geldiği için istek, çözülüp iç ağ denetiminden geçen IP'ye yapılır (SSRF / DNS-rebinding, O4);
+    // yönlendirmeler takip edilmez.
+    const res = await safeGet(url, { timeoutMs: 15_000, headers: { "User-Agent": "xudbin-uptime" } });
+    return { ok: res.status < 500, status: res.status, ms: res.ms };
   } catch (err) {
-    const e = err as Error & { cause?: { code?: string; message?: string } };
-    return { ok: false, status: null, ms: Date.now() - started, error: e.cause?.code ?? e.cause?.message ?? e.message };
+    const e = err as Error & { code?: string };
+    return { ok: false, status: null, ms: Date.now() - started, error: e.code ?? e.message };
   }
 }
 
@@ -40,7 +41,9 @@ async function checkApp(app: AppRow) {
   const target = primaryUrl(app.id);
   if (!target) return;
   const path = app.health_path || "/";
-  let r = await checkUrl(target.url + path);
+  // health_path "/" ile başlar ama yine de adresin ana bilgisayarı değişmemeli.
+  const full = target.url + path;
+  let r = new URL(full).host === target.host ? await checkUrl(full) : { ok: false, status: null, ms: 0, error: "Geçersiz sağlık yolu" };
   if (!r.ok && r.status === null && app.container && app.source_type !== "compose") {
     // Dışarıdan ulaşılamadı: sunucu içinden de dene; sağlıklıysa sorun ağ/kendi IP'sine dönüş (hairpin), çökme değil.
     const server = getServer(app.server_id);

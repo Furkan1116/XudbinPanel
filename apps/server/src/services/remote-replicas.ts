@@ -3,6 +3,7 @@ import { randomToken } from "../lib/crypto.js";
 import { CADDY_CONTAINER } from "./caddy.js";
 import { probeHttp, isHealthy } from "./doctor.js";
 import { containerState, dockerFor, execIn, imageExists, removeContainer, type ServerRow } from "./docker.js";
+import { resourceLimits } from "../lib/limits.js";
 import { ensureProjectNetwork } from "./networks.js";
 import { getServer } from "./servers.js";
 
@@ -206,8 +207,7 @@ export async function startRemoteReplicas(ctx: Ctx, extras: ServerRow[]): Promis
         HostConfig: {
           NetworkMode: network,
           RestartPolicy: { Name: "unless-stopped" },
-          ...(app.memory_limit ? { Memory: app.memory_limit * 1024 * 1024, MemorySwap: app.memory_limit * 1024 * 1024 } : {}),
-          ...(app.cpu_limit ? { NanoCpus: Math.round(app.cpu_limit * 1e9) } : {}),
+          ...resourceLimits(app),
           LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
         },
       });

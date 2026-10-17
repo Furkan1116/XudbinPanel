@@ -19,7 +19,7 @@ import { dateTime, duration, formatBytes, timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
 type Tab = "overview" | "deployments" | "logs" | "env" | "domains" | "cron" | "security" | "settings";
-type AppData = { app: App; env: string; secretsHidden?: boolean; deployments: Deployment[] };
+type AppData = { app: App; env: string; previewEnv?: string; secretsHidden?: boolean; deployments: Deployment[] };
 
 export function AppDetailPage() {
   const id = Number(useParams().id);
@@ -305,7 +305,9 @@ function Env({ data }: { data: AppData }) {
   }
   const frameworks = useFrameworks();
   const fw = frameworkById(frameworks.data?.frameworks, data.app.framework);
-  const save = useAction(() => api.put(`/apps/${data.app.id}/env`, { env }), { success: t("Kaydedildi. Geçerli olması için yeniden deploy et."), invalidate: [["app", data.app.id]] });
+  const [previewEnv, setPreviewEnv] = useState(data.previewEnv ?? "");
+  const showPreview = data.app.sourceType === "git" && !data.app.parentAppId && data.app.previewsEnabled;
+  const save = useAction(() => api.put(`/apps/${data.app.id}/env`, { env, ...(showPreview ? { previewEnv } : {}) }), { success: t("Kaydedildi. Geçerli olması için yeniden deploy et."), invalidate: [["app", data.app.id]] });
   return (
     <form
       onSubmit={(e) => {
@@ -331,8 +333,23 @@ function Env({ data }: { data: AppData }) {
       <p className="mt-3 text-[13px] text-faint">
         <code className="font-mono">{"{{XUDBIN_URL}}"}</code>, <code className="font-mono">{"{{XUDBIN_DOMAINS}}"}</code> {t("ve")} <code className="font-mono">{"{{XUDBIN_ORIGINS}}"}</code> {t("deploy sırasında uygulamanın güncel alan adlarıyla doldurulur.")}
       </p>
+      {showPreview && (
+        <div className="mt-6">
+          <h3 className="text-[14px] font-medium text-fg">{t("Önizleme ortam değişkenleri")}</h3>
+          <p className="mb-2 mt-1 max-w-2xl text-[13px] text-muted">
+            {t("Pull request önizlemeleri yukarıdaki üretim değişkenlerini almaz; yalnız burada yazdıkların verilir. Önizlemede çalışan kod depoya yazabilen herkesin kodudur, bu yüzden buraya üretim sırlarını değil test değerlerini (ör. ayrı bir test veritabanı) koy.")}
+          </p>
+          <textarea
+            className="input h-40 font-mono text-[13px] leading-relaxed"
+            spellCheck={false}
+            value={previewEnv}
+            onChange={(e) => setPreviewEnv(e.target.value)}
+            placeholder={"DATABASE_URL=postgresql://test...\nSECRET_KEY=test-only"}
+          />
+        </div>
+      )}
       <div className="mt-3 flex justify-end">
-        <Button type="submit" variant="primary" loading={save.isPending} disabled={env === data.env}>{t("Kaydet")}</Button>
+        <Button type="submit" variant="primary" loading={save.isPending} disabled={env === data.env && previewEnv === (data.previewEnv ?? "")}>{t("Kaydet")}</Button>
       </div>
     </form>
   );
@@ -683,7 +700,7 @@ function Settings({ app }: { app: App }) {
               checked={form.previewsEnabled}
               onChange={(v) => setForm({ ...form, previewsEnabled: v })}
               label={t("Pull request önizlemeleri")}
-              description={t("Her PR için ayrı bir adreste önizleme açılır, yeni commit'lerde güncellenir, PR kapanınca silinir. Git sağlayıcının webhook ayarında \"Pull requests\" olaylarını da seç. Fork'tan gelen PR'lar güvenlik nedeniyle deploy edilmez.")}
+              description={t("Her PR için ayrı bir adreste önizleme açılır, yeni commit'lerde güncellenir, PR kapanınca silinir. Git sağlayıcının webhook ayarında \"Pull requests\" olaylarını da seç. Fork'tan gelen PR'lar güvenlik nedeniyle deploy edilmez. Önizlemeler üretim ortam değişkenlerini almaz; \"Ortam değişkenleri\" sekmesindeki ayrı önizleme listesi kullanılır.")}
             />
           )}
           {app.sourceType !== "image" && (

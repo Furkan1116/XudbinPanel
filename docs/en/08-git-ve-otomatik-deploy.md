@@ -43,7 +43,7 @@ Each PR gets its own address, is updated on new commits, and is deleted along wi
 1. Turn on **Pull request previews** on the app's **Settings** tab.
 2. With the GitHub App, nothing else is needed. With a manual webhook, also enable "Pull requests" events in your Git provider's webhook settings.
 
-If the GitHub App is connected (or the app has a GitHub access token saved), the preview URL is posted as a comment on the PR. Open previews are listed under **Open PR previews** on the main app's **Overview** tab. For security, PRs from forks aren't deployed.
+If the GitHub App is connected (or the app has a GitHub access token saved), the preview URL is posted as a comment on the PR. Open previews are listed under **Open PR previews** on the main app's **Overview** tab. For security, PRs from forks aren't deployed. Previews do **not** receive the main app's production environment variables: since anyone with write access to the repo can run code on a branch, the separate **Preview environment variables** list on the **Environment variables** tab is used (if empty, a preview only gets `XUDBIN_PREVIEW=1`). Put test values there. The git token is used only for cloning and is not written to the cloned repo's `.git/config`. Previews created before this version are updated with the new list on the next event for that PR (e.g. a push).
 
 ## Deploying from CI
 

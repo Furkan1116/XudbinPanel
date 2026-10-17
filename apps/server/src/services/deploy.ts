@@ -21,6 +21,8 @@ import { getServer } from "./servers.js";
 import { getPrivateKey } from "./ssh.js";
 import { extractZip, latestAppUpload } from "./uploads.js";
 import { appTokenAllowed, gitTokenFor } from "./github-app.js";
+import { resourceLimits } from "../lib/limits.js";
+import { assertSafeGitUrl } from "../lib/ssrf.js";
 import { ensureRelayCa, extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas, startRemoteReplicas } from "./remote-replicas.js";
 
 export type AppRow = {
@@ -67,6 +69,7 @@ export type AppRow = {
   replicas: number;
   replica_containers: string;
   previews_enabled: number;
+  preview_env: string | null;
   parent_app_id: number | null;
   preview_pr: number | null;
   volume_backup_interval_h: number;
@@ -326,16 +329,24 @@ function run(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.Pro
 
 /** Repoyu yalnız son commit'iyle klonlar (algılama ve derleme için). */
 // git'in "could not read Username" gibi hatalarını kullanıcının anlayacağı bir mesaja çevirir.
-async function gitClone(args: string[], opts: { cwd?: string; token: string; log: (l: string) => void; signal?: AbortSignal }) {
+async function gitClone(args: string[], opts: { cwd?: string; token: string; log: (l: string) => void; signal?: AbortSignal; url: string }) {
+  // Ağ çağrısından hemen önce iç ağ denetimi (ayrıntılı sınırlama için bkz. lib/ssrf.ts).
+  try {
+    await assertSafeGitUrl(opts.url);
+  } catch (e) {
+    throw new Error(`Repo klonlanamadı: ${(e as Error).message}`);
+  }
   let output = "";
   const log = (l: string) => {
     output += l + "\n";
     opts.log(l);
   };
   try {
-    await run("git", args, { cwd: opts.cwd, env: { GIT_TERMINAL_PROMPT: "0" }, log, redact: [opts.token], signal: opts.signal });
+    // Yönlendirmeler kapalı ve yalnız https: ön denetimden (assertSafeGitUrl) geçen adres 3xx ile iç ağa çevrilemesin (O4).
+    await run("git", ["-c", "http.followRedirects=false", ...args], { cwd: opts.cwd, env: { GIT_TERMINAL_PROMPT: "0", GIT_ALLOW_PROTOCOL: "https" }, log, redact: [opts.token], signal: opts.signal });
   } catch (e) {
     if (opts.signal?.aborted) throw e;
+    if (/redirect/i.test(output)) throw new Error("Repo klonlanamadı: git adresi başka bir adrese yönlendiriyor; yönlendirme güvenlik nedeniyle izlenmez, son adresi yaz.");
     if (/Remote branch .* not found/i.test(output)) throw new Error("Repo klonlanamadı: bu isimde bir dal yok.");
     if (/could not read Username|Authentication failed|Repository not found|returned error: 40[134]/i.test(output)) {
       throw new Error(
@@ -348,10 +359,20 @@ async function gitClone(args: string[], opts: { cwd?: string; token: string; log
   }
 }
 
+/**
+ * Klonlama sonrası uzak adres (origin) token'sız hâle getirilir: `git clone https://x-access-token:TOKEN@...` token'ı
+ * .git/config'e yazar; derleme bağlamıyla (COPY . .) imaja ya da konteynere geçerdi (O10).
+ */
+export async function stripRemoteToken(repoDir: string, url: string, token: string) {
+  if (!token) return;
+  await run("git", ["remote", "set-url", "origin", url], { cwd: repoDir, log: () => {}, redact: [token] });
+}
+
 export async function shallowClone(url: string, branch: string, token: string, dest: string, log: (l: string) => void = () => {}) {
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  await gitClone(["clone", "--depth", "1", "--branch", branch, gitUrlWithToken(url, token), dest], { token, log });
+  await gitClone(["clone", "--depth", "1", "--branch", branch, gitUrlWithToken(url, token), dest], { token, log, url });
+  await stripRemoteToken(dest, url, token);
 }
 
 async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void, signal?: AbortSignal) {
@@ -360,7 +381,8 @@ async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void,
   fs.mkdirSync(workdir, { recursive: true });
   const token = await gitTokenFor(app.git_url, decrypt(app.git_token), appTokenAllowed(app));
   log(`Klonlanıyor: ${app.git_url} (${app.git_branch})`);
-  await gitClone(["clone", "--depth", "1", "--branch", app.git_branch, gitUrlWithToken(app.git_url, token), "src"], { cwd: workdir, token, log, signal });
+  await gitClone(["clone", "--depth", "1", "--branch", app.git_branch, gitUrlWithToken(app.git_url, token), "src"], { cwd: workdir, token, log, signal, url: app.git_url });
+  await stripRemoteToken(path.join(workdir, "src"), app.git_url, token);
   const sha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   const msg = (await run("git", ["log", "-1", "--pretty=%s"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   log(`Commit ${sha}: ${msg}`);
@@ -546,8 +568,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
         RestartPolicy: { Name: "unless-stopped" },
         Binds: volumes.map((v) => `xb-${app.slug}-${v.name}:${v.path}`),
         // Sınır yoksa tek bir uygulama tüm sunucuyu (panel dahil) belleksiz bırakabilir.
-        ...(fresh.memory_limit ? { Memory: fresh.memory_limit * 1024 * 1024, MemorySwap: fresh.memory_limit * 1024 * 1024 } : {}),
-        ...(fresh.cpu_limit ? { NanoCpus: Math.round(fresh.cpu_limit * 1e9) } : {}),
+        ...resourceLimits(fresh),
         LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
       },
       NetworkingConfig: { EndpointsConfig: { [network]: { Aliases: [`xb-${app.slug}`] } } },
