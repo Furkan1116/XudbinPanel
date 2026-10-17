@@ -6,7 +6,7 @@ import { enforceRoles, requireAuth } from "../src/auth/middleware.js";
 import { createSession } from "../src/auth/session.js";
 import { db } from "../src/db.js";
 import type { AppEnv } from "../src/lib/types.js";
-import { accessibleAppIds, projectAccess } from "../src/services/access.js";
+import { accessibleAppIds, canSeeSecrets, projectAccess, requireSecretAccess, secretsVisible } from "../src/services/access.js";
 import { HttpError, idParam } from "../src/lib/http.js";
 
 function seed() {
@@ -90,4 +90,29 @@ test("proje yetkisi sayısal olmayan kimlik yazımlarıyla atlanamaz (K1)", asyn
     assert.notEqual((await h.request(`/api/apps/${form}`, { headers: cookie(s.dev) })).status, 200, form);
   }
   assert.equal((await strict.request(`/api/apps/${s.a1}`, { headers: cookie(s.dev) })).status, 200);
+});
+
+test("sır yetkisi okuma yetkisi değildir: izleyici ve salt okunur anahtar sırrı göremez (O2)", async () => {
+  const s = seed();
+  const h = new Hono<AppEnv>();
+  h.use("/api/*", requireAuth, enforceRoles, projectAccess);
+  h.get("/api/apps/:id", (c) => c.json({ secrets: secretsVisible(c, s.p1) }));
+  h.get("/api/apps/:id/volume-backups/1/download", (c) => {
+    requireSecretAccess(c, s.p1);
+    return c.json({ ok: true });
+  });
+  h.onError((e, c) => c.json({ error: e.message }, (e as HttpError).status ?? 500));
+  const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+  const seen = async (headers: Record<string, string>) => ((await h.request(`/api/apps/${s.a1}`, { headers })).json() as Promise<{ secrets: boolean }>).then((j) => j.secrets);
+  assert.equal(await seen(cookie(s.admin)), true);
+  assert.equal(await seen(cookie(s.dev)), true);
+  assert.equal(await seen(cookie(s.viewer)), false);
+  assert.equal(await seen(auth(createApiToken(s.dev, "rw").token)), true);
+  assert.equal(await seen(auth(createApiToken(s.dev, "ro", { readOnly: true }).token)), false);
+  assert.equal(await seen(auth(createApiToken(s.admin, "admin-ro", { readOnly: true }).token)), false);
+  const dl = (headers: Record<string, string>) => h.request(`/api/apps/${s.a1}/volume-backups/1/download`, { headers }).then((r) => r.status);
+  assert.equal(await dl(cookie(s.dev)), 200);
+  assert.equal(await dl(cookie(s.viewer)), 403);
+  assert.equal(await dl(auth(createApiToken(s.dev, "ro2", { readOnly: true }).token)), 403);
+  assert.equal(canSeeSecrets({ id: s.stranger, email: "", name: "", role: "member", mustChangePassword: false }, s.p1), false);
 });

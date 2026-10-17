@@ -19,7 +19,7 @@ import { dateTime, duration, formatBytes, timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
 type Tab = "overview" | "deployments" | "logs" | "env" | "domains" | "cron" | "security" | "settings";
-type AppData = { app: App; env: string; deployments: Deployment[] };
+type AppData = { app: App; env: string; secretsHidden?: boolean; deployments: Deployment[] };
 
 export function AppDetailPage() {
   const id = Number(useParams().id);
@@ -212,10 +212,13 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
       {(app.sourceType === "git" || app.sourceType === "compose") && (
         <Section title={t("Otomatik deploy")} description={t("Git sağlayıcında bu adresi push webhook'u olarak ekle; her push'ta uygulama yeniden deploy edilir.")}>
           <div className="space-y-3">
-            <Field label={t("Webhook adresi")}>
-              <CopyField value={webhook} secret />
-            </Field>
-            {app.webhookSecret && (
+            {app.secretsHidden && <Notice tone="info" title={t("Webhook adresi ve gizli anahtar yalnız yazma yetkisi olanlara gösterilir.")} />}
+            {!app.secretsHidden && (
+              <Field label={t("Webhook adresi")}>
+                <CopyField value={webhook} secret />
+              </Field>
+            )}
+            {app.webhookSecret && !app.secretsHidden && (
               <Field label={t("Gizli anahtar (Secret)")} hint={t("GitHub, Gitea ve GitLab'de webhook'un Secret / Secret token alanına yaz. İstek bu anahtarla imzalanmadıysa deploy başlamaz.")}>
                 <CopyField value={app.webhookSecret} secret />
               </Field>
@@ -297,6 +300,9 @@ function Deployments({ data }: { data: AppData }) {
 
 function Env({ data }: { data: AppData }) {
   const [env, setEnv] = useState(data.env);
+  if (data.secretsHidden) {
+    return <Notice tone="info" title={t("Ortam değişkenleri gizli")}>{t("Değerler yalnız yazma yetkisi olanlara (yönetici ve proje geliştiricisi) gösterilir. Salt okunur erişimde ve salt okunur API anahtarında gizlenir.")}</Notice>;
+  }
   const frameworks = useFrameworks();
   const fw = frameworkById(frameworks.data?.frameworks, data.app.framework);
   const save = useAction(() => api.put(`/apps/${data.app.id}/env`, { env }), { success: t("Kaydedildi. Geçerli olması için yeniden deploy et."), invalidate: [["app", data.app.id]] });

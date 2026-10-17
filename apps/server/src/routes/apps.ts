@@ -39,7 +39,7 @@ import { checkDomain } from "../services/dns-check.js";
 import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
-import { accessibleAppIds, accessibleProjectIds, canWriteProject } from "../services/access.js";
+import { accessibleAppIds, accessibleProjectIds, canWriteProject, requireSecretAccess, SECRET_MASK, secretsVisible } from "../services/access.js";
 import { appsForRepo, completeManifest, gitTokenFor, verifyGithubSignature } from "../services/github-app.js";
 import { extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas } from "../services/remote-replicas.js";
 
@@ -60,7 +60,8 @@ export function generatedHost(slug: string, server: ServerRow) {
   return `${slug}.${server.public_ip.replace(/\./g, "-")}.sslip.io`;
 }
 
-function publicApp(a: AppRow) {
+/** `secrets` false ise webhook adresi/sırrı maskelenir (deploy tetikleme yetkisi sızmasın). Yazma uçları yazma yetkisi olana döner, varsayılan açık. */
+function publicApp(a: AppRow, secrets = true) {
   const server = getServer(a.server_id);
   const domains = db.prepare("SELECT id, host, https, generated, created_at AS createdAt FROM domains WHERE app_id = ? ORDER BY generated DESC, id").all(a.id) as {
     id: number;
@@ -97,8 +98,9 @@ function publicApp(a: AppRow) {
     container: a.container,
     currentImage: a.current_image,
     internalHost: `xb-${a.slug}`,
-    webhookPath: `/api/webhooks/deploy/${a.webhook_token}`,
-    webhookSecret: a.webhook_secret,
+    webhookPath: secrets ? `/api/webhooks/deploy/${a.webhook_token}` : "",
+    webhookSecret: a.webhook_secret ? (secrets ? a.webhook_secret : SECRET_MASK) : null,
+    secretsHidden: !secrets,
     webhookSigned: Boolean(a.webhook_signed),
     cpuLimit: a.cpu_limit,
     httpCheck: Boolean(a.http_check),
@@ -239,7 +241,9 @@ export const appRoutes = new Hono<AppEnv>()
         const row = d as { diagnosis: string | null };
         return { ...row, diagnosis: row.diagnosis ? (JSON.parse(row.diagnosis) as Finding[]) : null };
       });
-    return c.json({ app: publicApp(app), env: decrypt(app.env), deployments });
+    // Okuma yetkisi sır yetkisi değildir: izleyici ve salt okunur anahtar env/webhook sırrını görmez.
+    const secrets = secretsVisible(c, app.project_id);
+    return c.json({ app: publicApp(app, secrets), env: secrets ? decrypt(app.env) : "", secretsHidden: !secrets, deployments });
   })
 
   .patch("/:id", async (c) => {
@@ -381,6 +385,7 @@ export const appRoutes = new Hono<AppEnv>()
   })
   .get("/:id/volume-backups/:backupId/download", (c) => {
     const app = loadApp(idParam(c));
+    requireSecretAccess(c, app.project_id);
     const b = must(db.prepare("SELECT file FROM volume_backups WHERE id = ? AND app_id = ? AND status = 'success'").get(idParam(c, "backupId"), app.id) as { file: string } | undefined, "Yedek bulunamadı");
     const full = volumeBackupFile(app, b.file);
     if (!fs.existsSync(full)) throw new HttpError(404, "Yedek dosyası diskte yok (uzak depolamada olabilir)");

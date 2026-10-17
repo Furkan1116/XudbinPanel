@@ -25,15 +25,17 @@ import {
 } from "../services/databases.js";
 import { demuxLogs } from "../services/deploy.js";
 import { offsiteTarget } from "../services/offsite.js";
-import { canWriteProject } from "../services/access.js";
+import { canWriteProject, requireSecretAccess, SECRET_MASK, secretsVisible } from "../services/access.js";
 import type { AppEnv } from "../lib/types.js";
 import { s3Delete } from "../lib/s3.js";
 import { dockerFor } from "../services/docker.js";
 import { getServer } from "../services/servers.js";
 
-function publicDb(d: DatabaseRow) {
+/** `secrets` false ise parola ve bağlantı adreslerindeki parola maskelenir (adresin geri kalanı görünür). */
+function publicDb(d: DatabaseRow, secrets = true) {
   const server = getServer(d.server_id);
-  const password = decrypt(d.db_password);
+  const password = secrets ? decrypt(d.db_password) : SECRET_MASK;
+  const url = (host?: string, port?: number) => connectionUrl(d, password, host, port).replace(encodeURIComponent(SECRET_MASK), SECRET_MASK);
   return {
     id: d.id,
     projectId: d.project_id,
@@ -46,11 +48,12 @@ function publicDb(d: DatabaseRow) {
     dbName: d.db_name,
     dbUser: d.db_user,
     password,
+    secretsHidden: !secrets,
     internalHost: containerName(d),
     internalPort: ENGINES[d.engine].port,
-    internalUrl: connectionUrl(d, password),
+    internalUrl: url(),
     externalPort: d.external_port,
-    externalUrl: d.external_port && server.public_ip ? connectionUrl(d, password, server.public_ip, d.external_port) : null,
+    externalUrl: d.external_port && server.public_ip ? url(server.public_ip, d.external_port) : null,
     status: d.status,
     backupIntervalH: d.backup_interval_h,
     backupKeep: d.backup_keep,
@@ -106,7 +109,7 @@ export const databaseRoutes = new Hono<AppEnv>()
          FROM backups WHERE database_id = ? ORDER BY id DESC`,
       )
       .all(d.id);
-    return c.json({ database: publicDb(d), backups });
+    return c.json({ database: publicDb(d, secretsVisible(c, d.project_id)), backups });
   })
 
   .patch("/:id", async (c) => {
@@ -156,6 +159,7 @@ export const databaseRoutes = new Hono<AppEnv>()
 
   .get("/:id/backups/:backupId/download", (c) => {
     const d = load(idParam(c));
+    requireSecretAccess(c, d.project_id);
     const b = must(db.prepare("SELECT file FROM backups WHERE id = ? AND database_id = ? AND status = 'success'").get(idParam(c, "backupId"), d.id) as { file: string } | undefined, "Yedek bulunamadı");
     const full = path.join(backupDir(d), b.file);
     if (!fs.existsSync(full)) throw new HttpError(404, "Yedek dosyası diskte yok");

@@ -117,6 +117,8 @@ export type App = {
   autoDeploy: boolean;
   hostAccess: boolean;
   webhookSecret: string | null;
+  /** Sunucu sırları (webhook adresi/sırrı) bu kullanıcıdan gizlediyse true. */
+  secretsHidden?: boolean;
   webhookSigned: boolean;
   cpuLimit: number | null;
   memoryLimit: number | null;
@@ -176,6 +178,8 @@ export type Database = {
   dbName: string;
   dbUser: string;
   password: string;
+  /** Parola ve bağlantı adresindeki parola bu kullanıcıdan gizlendiyse true. */
+  secretsHidden?: boolean;
   internalHost: string;
   internalPort: number;
   internalUrl: string;

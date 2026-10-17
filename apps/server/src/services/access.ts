@@ -1,6 +1,8 @@
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { SessionUser } from "../auth/session.js";
 import { db } from "../db.js";
+import { HttpError } from "../lib/http.js";
 import type { AppEnv } from "../lib/types.js";
 
 /**
@@ -64,3 +66,26 @@ export function canWriteProject(user: SessionUser, projectId: number) {
   const r = projectRole(user, projectId);
   return r === "admin" || r === "developer";
 }
+
+/**
+ * Sır yetkisi: ortam değişkenleri, webhook sırrı/adresi ve veritabanı parolası okuma yetkisiyle
+ * değil yazma yetkisiyle açılır. Yönetici ve proje "developer"ı görür; "viewer" ve salt okunur
+ * API anahtarı göremez (anahtar sahibi yönetici olsa bile: sızarsa sır çıkmasın).
+ */
+export function canSeeSecrets(user: SessionUser, projectId: number, tokenReadOnly = false) {
+  if (tokenReadOnly) return false;
+  return canWriteProject(user, projectId);
+}
+
+/** İstek bağlamından sır yetkisi (GET yanıtlarında maskeleme kararı için). */
+export function secretsVisible(c: Context<AppEnv>, projectId: number) {
+  return canSeeSecrets(c.get("user"), projectId, Boolean(c.get("tokenReadOnly")));
+}
+
+/** Yedek dosyası gibi sır içeren indirmeler için: yetkisi yoksa 403. */
+export function requireSecretAccess(c: Context<AppEnv>, projectId: number) {
+  if (!secretsVisible(c, projectId)) throw new HttpError(403, "Bu dosya sır içerebilir; indirmek için yazma yetkisi gerekiyor");
+}
+
+/** Maskelenmiş sır değerlerinin yerine konan sabit metin. */
+export const SECRET_MASK = "••••";

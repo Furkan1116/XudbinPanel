@@ -1331,4 +1331,9 @@ export const en: Record<string, string> = {
   "Geri": "Back",
   "Saatlik engellenen istek": "Blocked requests per hour",
   "Günlük engellenen istek": "Blocked requests per day",
+  "Webhook adresi ve gizli anahtar yalnız yazma yetkisi olanlara gösterilir.": "The webhook URL and secret are shown only to people with write access.",
+  "Ortam değişkenleri gizli": "Environment variables are hidden",
+  "Değerler yalnız yazma yetkisi olanlara (yönetici ve proje geliştiricisi) gösterilir. Salt okunur erişimde ve salt okunur API anahtarında gizlenir.": "Values are shown only to people with write access (admins and project developers). They are hidden for read-only access and read-only API keys.",
+  "Parola gizli": "Password hidden",
+  "Parola ve bağlantı adreslerindeki parola yalnız yazma yetkisi olanlara gösterilir.": "The password and the password in connection URLs are shown only to people with write access.",
 };

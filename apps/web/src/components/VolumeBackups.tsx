@@ -66,9 +66,11 @@ export function VolumeBackups({ app }: { app: App }) {
               <StatusBadge status={b.status} />
               {b.status === "success" && (
                 <div className="flex gap-1">
-                  <a href={`/api/apps/${app.id}/volume-backups/${b.id}/download`} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg">
-                    <Download className="size-4" /> {t("İndir")}
-                  </a>
+                  {!app.secretsHidden && (
+                    <a href={`/api/apps/${app.id}/volume-backups/${b.id}/download`} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg">
+                      <Download className="size-4" /> {t("İndir")}
+                    </a>
+                  )}
                   <Button size="sm" variant="ghost" onClick={() => setRestore(b)}>{t("Geri yükle")}</Button>
                   <Button size="sm" variant="ghost" onClick={() => del.mutate(b)}>{t("Sil")}</Button>
                 </div>

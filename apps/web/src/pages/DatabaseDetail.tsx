@@ -67,12 +67,13 @@ export function DatabaseDetailPage() {
 function Connection({ d }: { d: Database }) {
   return (
     <div className="space-y-8">
+      {d.secretsHidden && <Notice tone="info" title={t("Parola gizli")}>{t("Parola ve bağlantı adreslerindeki parola yalnız yazma yetkisi olanlara gösterilir.")}</Notice>}
       <Section title={t("Uygulamalardan bağlan")} description={t("Aynı sunucudaki uygulamalar bu adresi kullanır. Uygulamanın ortam değişkenlerine ekle.")}>
-        <CopyField value={d.internalUrl} secret />
+        <CopyField value={d.internalUrl} secret={!d.secretsHidden} />
       </Section>
       {d.externalUrl ? (
         <Section title={t("Dışarıdan bağlan")} description={t("Sunucunun {port} portu açık. Yalnız ihtiyaç varsa kullan; şifreyi kimseyle paylaşma.", { port: d.externalPort ?? "" })}>
-          <CopyField value={d.externalUrl} secret />
+          <CopyField value={d.externalUrl} secret={!d.secretsHidden} />
         </Section>
       ) : (
         <Notice tone="info" title={t("Dışarıya kapalı")}>{t("Veritabanına internetten erişilemez. Gerekirse Ayarlar'dan bir port aç.")}</Notice>
@@ -91,7 +92,7 @@ function Connection({ d }: { d: Database }) {
         ))}
       </dl>
       <Field label={t("Şifre")}>
-        <CopyField value={d.password} secret />
+        <CopyField value={d.password} secret={!d.secretsHidden} />
       </Field>
     </div>
   );
@@ -149,9 +150,11 @@ function Backups({ d, backups }: { d: Database; backups: Backup[] }) {
                 <StatusBadge status={b.status} />
                 {b.status === "success" && (
                   <div className="flex gap-1">
-                    <a href={`/api/databases/${d.id}/backups/${b.id}/download`} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg">
-                      <Download className="size-4" /> {t("İndir")}
-                    </a>
+                    {!d.secretsHidden && (
+                      <a href={`/api/databases/${d.id}/backups/${b.id}/download`} className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-muted hover:bg-surface-2 hover:text-fg">
+                        <Download className="size-4" /> {t("İndir")}
+                      </a>
+                    )}
                     <Button size="sm" variant="ghost" disabled={b.verifyStatus === "running"} onClick={() => verify.mutate(b)}>{t("Doğrula")}</Button>
                     {d.engine !== "redis" && <Button size="sm" variant="ghost" onClick={() => setRestore(b)}>{t("Geri yükle")}</Button>}
                     <Button size="sm" variant="ghost" onClick={() => del.mutate(b)}>{t("Sil")}</Button>
