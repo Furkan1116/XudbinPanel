@@ -204,6 +204,11 @@ const WAF_DIRECTIVES = [
   "SecAuditEngine Off",
 ].join("\n");
 
+/** Caddy'nin çözdüğü gerçek istemci IP'si (güvenilir vekil yoksa doğrudan bağlanan adres). */
+const CLIENT_IP = "{http.vars.client_ip}";
+/** Panel ile Caddy arasında gerçek istemci IP'sini taşıyan başlık; lib/client-ip.ts aynı adı okur. */
+export const CLIENT_IP_HEADER = "X-Xudbin-Client-Ip";
+
 function blockedIpRanges(): string[] {
   const rows = db
     .prepare("SELECT ip FROM blocked_ips WHERE expires_at IS NULL OR expires_at > ?")
@@ -213,7 +218,8 @@ function blockedIpRanges(): string[] {
 
 function blockRoute(ranges: string[], reason: string): Route {
   return {
-    match: [{ remote_ip: { ranges } }],
+    // client_ip: Cloudflare Tunnel gibi güvenilir bir vekil varsa gerçek ziyaretçi IP'si; yoksa doğrudan bağlanan adres.
+    match: [{ client_ip: { ranges } }],
     handle: [
       {
         handler: "static_response",
@@ -232,7 +238,7 @@ function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; ha
   if (sec.denyIps.length) routes.push(blockRoute(sec.denyIps, "deny"));
   if (sec.allowIps.length) {
     routes.push({
-      match: [{ not: [{ remote_ip: { ranges: sec.allowIps } }] }],
+      match: [{ not: [{ client_ip: { ranges: sec.allowIps } }] }],
       handle: [{ handler: "static_response", status_code: 403, headers: { "X-Xudbin-Block": ["allowlist"] }, body: "Erişim engellendi." }],
       terminal: true,
     });
@@ -241,7 +247,7 @@ function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; ha
     handlers.push({
       handler: "rate_limit",
       rate_limits: {
-        [zone]: { key: "{http.request.remote.host}", window: "1m", max_events: sec.rateLimit },
+        [zone]: { key: CLIENT_IP, window: "1m", max_events: sec.rateLimit },
       },
     });
   }
@@ -336,9 +342,14 @@ export function buildCaddyConfig(server: ServerRow) {
               handle: [
                 {
                   handler: "rate_limit",
-                  rate_limits: { panel: { key: "{http.request.remote.host}", window: "1m", max_events: 600 } },
+                  rate_limits: { panel: { key: CLIENT_IP, window: "1m", max_events: 600 } },
                 },
-                { handler: "reverse_proxy", upstreams: [{ dial: config.panelUpstream }] },
+                {
+                  handler: "reverse_proxy",
+                  upstreams: [{ dial: config.panelUpstream }],
+                  // Panel gerçek ziyaretçi IP'sini yalnız bu başlıktan okur; set istemcinin gönderdiği değeri ezer.
+                  headers: { request: { set: { [CLIENT_IP_HEADER]: [CLIENT_IP] } } },
+                },
               ],
             },
           ],
