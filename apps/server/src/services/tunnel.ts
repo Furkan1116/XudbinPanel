@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { config } from "../config.js";
 import { decrypt } from "../lib/crypto.js";
-import { dockerFor, ensureNetwork, pullImage, removeContainer, type ServerRow } from "./docker.js";
+import { dockerFor, ensureNetwork, pullImage, putFile, removeContainer, type ServerRow } from "./docker.js";
 
 /**
  * Cloudflare Tunnel: dış IP'si olmayan / port açamayan sunucular (ev sunucusu, NAT arkası) için.
@@ -9,6 +9,7 @@ import { dockerFor, ensureNetwork, pullImage, removeContainer, type ServerRow } 
  * için "Public hostname" eklenir ve servis olarak http://xudbin-caddy:80 verilir; HTTPS'i Cloudflare sağlar.
  */
 export const TUNNEL_CONTAINER = "xudbin-tunnel";
+const TOKEN_FILE = "xudbin-tunnel-token";
 const IMAGE = "cloudflare/cloudflared:2026.9.0";
 
 export async function ensureTunnel(server: ServerRow) {
@@ -27,11 +28,12 @@ export async function ensureTunnel(server: ServerRow) {
   const c = await docker.createContainer({
     name: TUNNEL_CONTAINER,
     Image: IMAGE,
-    Cmd: ["tunnel", "--no-autoupdate", "run"],
-    Env: [`TUNNEL_TOKEN=${token}`],
+    // Token ortam değişkeni değil dosya olarak verilir: `docker inspect` ve ortam dökümlerinde görünmez.
+    Cmd: ["tunnel", "--no-autoupdate", "run", "--token-file", `/${TOKEN_FILE}`],
     Labels: { "xudbin.managed": "true", "xudbin.tunnel": hash },
     HostConfig: { NetworkMode: config.network, RestartPolicy: { Name: "unless-stopped" } },
   });
+  await putFile(docker, TUNNEL_CONTAINER, "/", TOKEN_FILE, token);
   await c.start();
   return { running: true };
 }
