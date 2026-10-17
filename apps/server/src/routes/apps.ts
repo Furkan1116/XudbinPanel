@@ -239,7 +239,7 @@ export const appRoutes = new Hono<AppEnv>()
         const row = d as { diagnosis: string | null };
         return { ...row, diagnosis: row.diagnosis ? (JSON.parse(row.diagnosis) as Finding[]) : null };
       });
-    return c.json({ app: publicApp(app), env: decrypt(app.env), deployments });
+    return c.json({ app: publicApp(app), env: decrypt(app.env), previewEnv: decrypt(app.preview_env), deployments });
   })
 
   .patch("/:id", async (c) => {
@@ -348,8 +348,10 @@ export const appRoutes = new Hono<AppEnv>()
 
   .put("/:id/env", async (c) => {
     const app = loadApp(idParam(c));
-    const { env } = await body(c, z.object({ env: z.string().max(200_000) }));
+    const { env, previewEnv } = await body(c, z.object({ env: z.string().max(200_000), previewEnv: z.string().max(200_000).optional() }));
     db.prepare("UPDATE apps SET env = ? WHERE id = ?").run(env.trim() ? encrypt(env) : null, app.id);
+    // PR önizlemelerine yalnız bu ayrı liste verilir; üretim değişkenleri kopyalanmaz.
+    if (previewEnv !== undefined) db.prepare("UPDATE apps SET preview_env = ? WHERE id = ?").run(previewEnv.trim() ? encrypt(previewEnv) : null, app.id);
     return c.json({ ok: true, note: "Değişikliklerin geçerli olması için yeniden deploy et." });
   })
 

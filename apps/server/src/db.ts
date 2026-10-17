@@ -442,6 +442,10 @@ const migrations: string[] = [
   ALTER TABLE apps ADD COLUMN relay_secret TEXT;
   ALTER TABLE servers ADD COLUMN relay_ca TEXT;
   `,
+  // PR önizlemeleri için ayrı ortam değişkenleri (üretim sırları önizlemeye kopyalanmaz, bağımsız inceleme O10).
+  `
+  ALTER TABLE apps ADD COLUMN preview_env TEXT;
+  `,
 ];
 
 function migrate() {

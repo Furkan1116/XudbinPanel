@@ -68,6 +68,7 @@ export type AppRow = {
   replicas: number;
   replica_containers: string;
   previews_enabled: number;
+  preview_env: string | null;
   parent_app_id: number | null;
   preview_pr: number | null;
   volume_backup_interval_h: number;
@@ -357,10 +358,20 @@ async function gitClone(args: string[], opts: { cwd?: string; token: string; log
   }
 }
 
+/**
+ * Klonlama sonrası uzak adres (origin) token'sız hâle getirilir: `git clone https://x-access-token:TOKEN@...` token'ı
+ * .git/config'e yazar; derleme bağlamıyla (COPY . .) imaja ya da konteynere geçerdi (O10).
+ */
+export async function stripRemoteToken(repoDir: string, url: string, token: string) {
+  if (!token) return;
+  await run("git", ["remote", "set-url", "origin", url], { cwd: repoDir, log: () => {}, redact: [token] });
+}
+
 export async function shallowClone(url: string, branch: string, token: string, dest: string, log: (l: string) => void = () => {}) {
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   await gitClone(["clone", "--depth", "1", "--branch", branch, gitUrlWithToken(url, token), dest], { token, log, url });
+  await stripRemoteToken(dest, url, token);
 }
 
 async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void, signal?: AbortSignal) {
@@ -370,6 +381,7 @@ async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void,
   const token = await gitTokenFor(app.git_url, decrypt(app.git_token));
   log(`Klonlanıyor: ${app.git_url} (${app.git_branch})`);
   await gitClone(["clone", "--depth", "1", "--branch", app.git_branch, gitUrlWithToken(app.git_url, token), "src"], { cwd: workdir, token, log, signal, url: app.git_url });
+  await stripRemoteToken(path.join(workdir, "src"), app.git_url, token);
   const sha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   const msg = (await run("git", ["log", "-1", "--pretty=%s"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   log(`Commit ${sha}: ${msg}`);

@@ -226,7 +226,7 @@ on("GET", "/users", () => ({ users: D.users, me: D.demoUser.id }));
 // --- Uygulamalar ------------------------------------------------------------
 on("GET", "/apps/:id", ({ params }) => {
   const a = findApp(params.id!);
-  return { app: a, env: D.envOf[a.id] ?? "", deployments: D.appDeployments(a.id).map(strip) };
+  return { app: a, env: D.envOf[a.id] ?? "", previewEnv: "", deployments: D.appDeployments(a.id).map(strip) };
 });
 on("GET", "/apps/:id/stats", ({ params }) => {
   const a = findApp(params.id!);
