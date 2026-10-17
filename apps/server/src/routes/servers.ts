@@ -5,6 +5,7 @@ import { db } from "../db.js";
 import { bus } from "../lib/events.js";
 import { body, HttpError, idParam } from "../lib/http.js";
 import { encrypt } from "../lib/crypto.js";
+import type { AppEnv } from "../lib/types.js";
 import { applyCaddyConfig } from "../services/caddy.js";
 import { dockerFor, listContainers, type ServerRow } from "../services/docker.js";
 import {
@@ -68,8 +69,17 @@ const serverInput = z.object({
 const timeout = <T,>(p: Promise<T>, ms: number) =>
   Promise.race([p, new Promise<never>((_, r) => setTimeout(() => r(new Error("Sunucu yanıt vermedi")), ms))]);
 
-export const serverRoutes = new Hono()
-  .get("/", (c) => c.json({ servers: listServers().map(publicServer) }))
+/**
+ * Üyenin uygulama oluştururken sunucu seçebilmesi için gereken asgari alanlar. Adres, IP, SSH ve kurulum ayrıntıları,
+ * konteyner listesi, günlük ve güvenlik taraması yalnız yöneticiye açıktır (bağımsız inceleme O8; ayrıca middleware'de
+ * `/api/servers/*` yöneticiye kilitli).
+ */
+export function memberServerView(s: Pick<ServerRow, "id" | "name" | "status">) {
+  return { id: s.id, name: s.name, status: s.status };
+}
+
+export const serverRoutes = new Hono<AppEnv>()
+  .get("/", (c) => c.json({ servers: listServers().map((s) => (c.get("user").role === "admin" ? publicServer(s) : memberServerView(s))) }))
 
   // Tüm sunucuların anlık durumu; biri yavaşsa diğerlerini bekletmez.
   .get("/overview", async (c) => {

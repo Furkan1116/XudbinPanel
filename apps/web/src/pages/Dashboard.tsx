@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { ResourceChart } from "@/components/ResourceChart";
 import { ServerMeters } from "@/components/ServerMeters";
 import { Empty, Notice, PageHeader, PageLoading, Section, StatusBadge } from "@/components/ui";
+import { useAuthStatus } from "@/lib/auth";
 import { api, type Deployment, type ServerOverview } from "@/lib/api";
 import { duration, formatUptime, timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -12,18 +13,21 @@ type RecentDeployment = Deployment & { appId: number; appName: string };
 type SecuritySummary = { byKind: { kind: string; n: number }[]; blockedCount: number };
 
 export function DashboardPage() {
-  const servers = useQuery({ queryKey: ["servers", "overview"], queryFn: () => api.get<{ servers: ServerOverview[] }>("/servers/overview"), refetchInterval: 5000 });
+  // Sunucu ayrıntıları yalnız yöneticiye açık; üye yalnız deploy ve uptime özetini görür.
+  const admin = useAuthStatus().data?.user?.role === "admin";
+  const servers = useQuery({ queryKey: ["servers", "overview"], queryFn: () => api.get<{ servers: ServerOverview[] }>("/servers/overview"), refetchInterval: 5000, enabled: admin });
   const deployments = useQuery({ queryKey: ["deployments", "recent"], queryFn: () => api.get<{ deployments: RecentDeployment[] }>("/deployments"), refetchInterval: 5000 });
   const security = useQuery({ queryKey: ["security", "summary", 24], queryFn: () => api.get<SecuritySummary>("/security/summary?hours=24"), refetchInterval: 30_000 });
   const down = useQuery({ queryKey: ["analytics", "down"], queryFn: () => api.get<{ down: { appId: number; name: string; since: number; reason: string }[] }>("/analytics/down"), refetchInterval: 30_000 });
 
-  if (!servers.data) return <PageLoading />;
-  const local = servers.data.servers.find((s) => s.kind === "local");
+  if (admin && !servers.data) return <PageLoading />;
+  const serverList = servers.data?.servers ?? [];
+  const local = serverList.find((s) => s.kind === "local");
   const attacks = security.data?.byKind.reduce((sum, k) => sum + k.n, 0) ?? 0;
 
   return (
     <>
-      <PageHeader title={t("Genel bakış")} description={t("{n} sunucu yönetiliyor", { n: servers.data.servers.length })} />
+      <PageHeader title={t("Genel bakış")} description={admin ? t("{n} sunucu yönetiliyor", { n: serverList.length }) : undefined} />
 
       {down.data && down.data.down.length > 0 && (
         <div className="mb-6">
@@ -50,9 +54,9 @@ export function DashboardPage() {
         </section>
       )}
 
-      <Section title={t("Sunucular")} actions={<Link to="/servers" className="text-[14px] text-muted hover:text-fg">{t("Tümü")}</Link>} className="!mt-9">
+      {admin && <Section title={t("Sunucular")} actions={<Link to="/servers" className="text-[14px] text-muted hover:text-fg">{t("Tümü")}</Link>} className="!mt-9">
         <div className="grid gap-3 md:grid-cols-2">
-          {servers.data.servers.map((s) => (
+          {serverList.map((s) => (
             <Link key={s.id} to={`/servers/${s.id}`} className="panel block px-5 py-4 transition-colors hover:border-line-strong">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -69,7 +73,7 @@ export function DashboardPage() {
             </Link>
           ))}
         </div>
-      </Section>
+      </Section>}
 
       <div className="mt-9 grid gap-9 lg:grid-cols-[1fr_18rem]">
         <Section title={t("Son deploylar")} className="!mt-0">

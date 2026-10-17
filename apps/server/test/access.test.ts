@@ -8,6 +8,7 @@ import { db } from "../src/db.js";
 import type { AppEnv } from "../src/lib/types.js";
 import { accessibleAppIds, canSeeSecrets, projectAccess, requireSecretAccess, secretsVisible } from "../src/services/access.js";
 import { appTokenAllowed, approvedAppUrl, gitTokenFor } from "../src/services/github-app.js";
+import { memberServerView } from "../src/routes/servers.js";
 import { domainProblem, MAX_DOMAINS_PER_APP, panelHosts } from "../src/services/domain-policy.js";
 import { updateSettings } from "../src/lib/settings.js";
 import { HttpError, idParam } from "../src/lib/http.js";
@@ -174,4 +175,23 @@ test("panel alan adı ve alt alanları üyeye kapalı, uygulama başına alan ad
     else process.env.XUDBIN_DOMAIN = old;
     updateSettings({ panelDomain: "" });
   }
+});
+
+test("sunucu uçları: üye yalnız asgari listeyi görür, ayrıntılar yöneticiye kalır (O8)", async () => {
+  const s = seed();
+  const h = new Hono<AppEnv>();
+  h.use("/api/*", requireAuth, enforceRoles, projectAccess);
+  h.all("/api/servers", (c) => c.json({ ok: true }));
+  h.all("/api/servers/*", (c) => c.json({ ok: true }));
+  const status = (u: number, path: string, method = "GET") => h.request(path, { method, headers: cookie(u) }).then((r) => r.status);
+  assert.equal(await status(s.dev, "/api/servers"), 200);
+  assert.equal(await status(s.viewer, "/api/servers"), 200);
+  for (const p of ["/overview", "/1", "/1/setup/stream", "/1/containers", "/1/security", "/1/stats", "/1/tunnel"]) {
+    assert.equal(await status(s.dev, `/api/servers${p}`), 403, p);
+    assert.equal(await status(s.admin, `/api/servers${p}`), 200, p);
+  }
+  assert.equal(await status(s.dev, "/api/servers", "POST"), 403);
+  // Üyeye giden sunucu görünümünde adres, IP, SSH ve günlük alanı yok.
+  const view = memberServerView({ id: 1, name: "ana", status: "ready", host: "10.0.0.1", public_ip: "1.2.3.4", setup_log: "gizli" } as never);
+  assert.deepEqual(Object.keys(view).sort(), ["id", "name", "status"]);
 });
