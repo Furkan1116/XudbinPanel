@@ -45,7 +45,7 @@ export const settingsRoutes = new Hono<AppEnv>()
   .get("/", (c) => {
     const s = getSettings();
     const local = listServers().find((x) => x.kind === "local");
-    return c.json({ panelDomain: s.panelDomain, panelHttps: s.panelHttps, localServerIp: local?.public_ip ?? null, version: VERSION, timezone: s.timezone, uptimeEnabled: s.uptimeEnabled });
+    return c.json({ panelDomain: s.panelDomain, panelHttps: s.panelHttps, panelWaf: s.panelWaf, localServerIp: local?.public_ip ?? null, version: VERSION, timezone: s.timezone, uptimeEnabled: s.uptimeEnabled });
   })
 
   .get("/update", async (c) => c.json({ ...(await updateInfo()), canSelfUpdate: config.isProd, lastUpdate: lastUpdateStatus() }))
@@ -77,6 +77,7 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
       z.object({
         panelDomain: z.union([z.string().trim().toLowerCase().regex(/^([a-z0-9-]+\.)+[a-z]{2,63}$/, "Geçerli bir alan adı gir"), z.literal("")]),
         panelHttps: z.boolean(),
+        panelWaf: z.enum(["off", "detect", "block"]).optional(),
         timezone: z.string().max(60).refine((tz) => Intl.supportedValuesOf("timeZone").includes(tz) || tz === "UTC", "Geçersiz saat dilimi").optional(),
         uptimeEnabled: z.boolean().optional(),
       }),

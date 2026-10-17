@@ -159,6 +159,8 @@ async function doApply(server: ServerRow) {
   const state = await containerState(docker, CADDY_CONTAINER);
   if (!state.exists) throw new Error("Bu sunucuda Caddy kurulu değil. Önce sunucu kurulumunu çalıştır.");
   const json = JSON.stringify(buildCaddyConfig(server), null, 2);
+  // Geçersiz bir yapılandırma diskte kalırsa Caddy yeniden başlayınca hiç açılmaz; reload başarısızsa eskisi geri yazılır.
+  const previous = state.running ? (await execIn(docker, CADDY_CONTAINER, ["cat", "/etc/caddy/caddy.json"], { timeoutMs: 10_000 }).catch(() => null)) : null;
   await putFile(docker, CADDY_CONTAINER, "/etc/caddy", "caddy.json", json);
   if (!state.running) {
     await docker.getContainer(CADDY_CONTAINER).start();
@@ -168,6 +170,7 @@ async function doApply(server: ServerRow) {
     timeoutMs: 30_000,
   });
   if (res.exitCode !== 0) {
+    if (previous && previous.exitCode === 0 && previous.stdout.trim()) await putFile(docker, CADDY_CONTAINER, "/etc/caddy", "caddy.json", previous.stdout).catch(() => {});
     const msg = (res.stderr || res.stdout).split("\n").filter(Boolean).pop() ?? "bilinmeyen hata";
     throw new Error(`Caddy yapılandırması uygulanamadı: ${msg}`);
   }
@@ -204,6 +207,31 @@ const WAF_DIRECTIVES = [
   "SecAuditEngine Off",
 ].join("\n");
 
+/** Caddy'nin çözdüğü gerçek istemci IP'si (güvenilir vekil yoksa doğrudan bağlanan adres). */
+const CLIENT_IP = "{http.vars.client_ip}";
+/** Panel ile Caddy arasında gerçek istemci IP'sini taşıyan başlık; lib/client-ip.ts aynı adı okur. */
+export const CLIENT_IP_HEADER = "X-Xudbin-Client-Ip";
+
+/**
+ * Panel rotasının WAF'ı. Uygulamalarla aynı Coraza + OWASP CRS, paranoya düzeyi 1.
+ * Panel API'si JSON gövde, uzun Compose dosyası ve ortam değişkeni taşır; CRS bunlara yanlış pozitif verir,
+ * bu yüzden /api/ isteklerinde gövde denetimi kapalıdır (URL, sorgu, başlık ve çerezler yine denetlenir).
+ * "detect" modunda kural eşleşir ama istek kesilmez; "block" modunda kesilir.
+ */
+export function panelWafDirectives(mode: "detect" | "block"): string {
+  return [
+    "Include @coraza.conf-recommended",
+    "Include @crs-setup.conf.example",
+    'SecAction "id:100001,phase:1,pass,nolog,setvar:tx.blocking_paranoia_level=1,setvar:tx.detection_paranoia_level=1"',
+    'SecRule REQUEST_URI "@beginsWith /api/" "id:100002,phase:1,pass,nolog,ctl:requestBodyAccess=Off"',
+    "Include @owasp_crs/*.conf",
+    mode === "block" ? "SecRuleEngine On" : "SecRuleEngine DetectionOnly",
+    "SecRequestBodyAccess On",
+    "SecResponseBodyAccess Off",
+    "SecAuditEngine Off",
+  ].join("\n");
+}
+
 function blockedIpRanges(): string[] {
   const rows = db
     .prepare("SELECT ip FROM blocked_ips WHERE expires_at IS NULL OR expires_at > ?")
@@ -213,7 +241,8 @@ function blockedIpRanges(): string[] {
 
 function blockRoute(ranges: string[], reason: string): Route {
   return {
-    match: [{ remote_ip: { ranges } }],
+    // client_ip: Cloudflare Tunnel gibi güvenilir bir vekil varsa gerçek ziyaretçi IP'si; yoksa doğrudan bağlanan adres.
+    match: [{ client_ip: { ranges } }],
     handle: [
       {
         handler: "static_response",
@@ -232,7 +261,7 @@ function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; ha
   if (sec.denyIps.length) routes.push(blockRoute(sec.denyIps, "deny"));
   if (sec.allowIps.length) {
     routes.push({
-      match: [{ not: [{ remote_ip: { ranges: sec.allowIps } }] }],
+      match: [{ not: [{ client_ip: { ranges: sec.allowIps } }] }],
       handle: [{ handler: "static_response", status_code: 403, headers: { "X-Xudbin-Block": ["allowlist"] }, body: "Erişim engellendi." }],
       terminal: true,
     });
@@ -241,7 +270,7 @@ function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; ha
     handlers.push({
       handler: "rate_limit",
       rate_limits: {
-        [zone]: { key: "{http.request.remote.host}", window: "1m", max_events: sec.rateLimit },
+        [zone]: { key: CLIENT_IP, window: "1m", max_events: sec.rateLimit },
       },
     });
   }
@@ -274,6 +303,18 @@ function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; ha
   if (sec.waf) handlers.push({ handler: "waf", load_owasp_crs: true, directives: WAF_DIRECTIVES });
   return { routes, handlers };
 }
+
+/**
+ * Coraza bir isteği kestiğinde Caddy'ye hata olarak döner; bu rota yanıtı X-Xudbin-Block: waf ile işaretler.
+ * Otomatik ban yalnız bu işareti sayar (uygulamanın kendi 403'ü proxy yanıtıdır, hata rotasına girmez).
+ */
+const WAF_ERROR_ROUTES: Route[] = [
+  {
+    match: [{ expression: "{http.error.status_code} == 403" }],
+    handle: [{ handler: "static_response", status_code: 403, headers: { "X-Xudbin-Block": ["waf"] }, body: "Erişim engellendi." }],
+    terminal: true,
+  },
+];
 
 function upstreamsFor(d: DomainRow): string[] {
   if (d.kind === "worker") return [];
@@ -336,9 +377,15 @@ export function buildCaddyConfig(server: ServerRow) {
               handle: [
                 {
                   handler: "rate_limit",
-                  rate_limits: { panel: { key: "{http.request.remote.host}", window: "1m", max_events: 600 } },
+                  rate_limits: { panel: { key: CLIENT_IP, window: "1m", max_events: 600 } },
                 },
-                { handler: "reverse_proxy", upstreams: [{ dial: config.panelUpstream }] },
+                ...(settings.panelWaf === "off" ? [] : [{ handler: "waf", load_owasp_crs: true, directives: panelWafDirectives(settings.panelWaf) }]),
+                {
+                  handler: "reverse_proxy",
+                  upstreams: [{ dial: config.panelUpstream }],
+                  // Panel gerçek ziyaretçi IP'sini yalnız bu başlıktan okur; set istemcinin gönderdiği değeri ezer.
+                  headers: { request: { set: { [CLIENT_IP_HEADER]: [CLIENT_IP] } } },
+                },
               ],
             },
           ],
@@ -449,17 +496,18 @@ export function buildCaddyConfig(server: ServerRow) {
       http: {
         servers: httpsOff
           ? {
-              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, automatic_https: { disable: true }, ...clientIp },
+              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, errors: { routes: WAF_ERROR_ROUTES }, automatic_https: { disable: true }, ...clientIp },
             }
           : {
               https: {
                 listen: [":443"],
                 routes: [...relayIn.routes, ...httpsRoutes, fallback],
                 logs: { default_logger_name: "access" },
+                errors: { routes: WAF_ERROR_ROUTES },
                 automatic_https: { skip: httpOnlyHosts },
                 ...clientIp,
               },
-              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, ...clientIp },
+              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, errors: { routes: WAF_ERROR_ROUTES }, ...clientIp },
             },
       },
       ...(!httpsOff && (relayIn.hosts.length || (tlsPolicies && httpsHosts.length))

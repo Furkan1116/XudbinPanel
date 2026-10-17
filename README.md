@@ -52,7 +52,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Uygulama başına WAF, hız sınırı, güvenlik başlıkları, şifre koruması, IP listeleri
 - Tüm sunuculardaki Caddy loglarından saldırı ekranı: zaman çizelgesi, en çok saldıran IP'ler, hedeflenen adresler
 - Eşiği aşan IP'ler tüm sunucularda otomatik banlanır
-- Panel: kurulum anahtarı, iki adımlı doğrulama (TOTP), giriş hız sınırı, CSRF koruması, oturum yönetimi
+- Panel: kurulum anahtarı, iki adımlı doğrulama (TOTP), giriş hız sınırı, panel adresinde WAF (varsayılan yalnız tespit; Ayarlar > Panel WAF), CSRF koruması, oturum yönetimi
 - SSH anahtarları, git token'ları, ortam değişkenleri ve veritabanı şifreleri AES-256-GCM ile şifrelenir
 
 **Trafik analitiği:** Google Analytics benzeri, çerezsiz ve ek kod gerektirmeyen site istatistikleri. Ziyaretçi, sayfa görüntüleme, hemen çıkma; en çok ziyaret edilen sayfalar, trafik kaynakları (yönlendiren siteler ve UTM kampanyaları), ülkeler, tarayıcılar, işletim sistemleri ve cihazlar. Veriler Caddy erişim loglarından, panelin kendi sunucusunda hesaplanır.

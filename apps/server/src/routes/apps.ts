@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { isValidIpOrCidr } from "../lib/cidr.js";
 import bcrypt from "bcryptjs";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -522,7 +523,7 @@ export const appRoutes = new Hono<AppEnv>()
 
   .put("/:id/security", async (c) => {
     const app = loadApp(idParam(c));
-    const ipList = z.array(z.string().trim().regex(/^[0-9a-f:.]+(\/\d{1,3})?$/i, "Geçersiz IP veya CIDR")).max(200);
+    const ipList = z.array(z.string().trim().refine(isValidIpOrCidr, "Geçersiz IP veya CIDR")).max(200);
     const input = await body(
       c,
       z.object({

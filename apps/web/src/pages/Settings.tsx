@@ -54,10 +54,10 @@ export function SettingsPage() {
 function PanelSettings() {
   const { data } = useQuery({
     queryKey: ["settings"],
-    queryFn: () => api.get<{ panelDomain: string; panelHttps: boolean; localServerIp: string | null; version: string; timezone: string; uptimeEnabled: boolean }>("/settings"),
+    queryFn: () => api.get<{ panelDomain: string; panelHttps: boolean; panelWaf: "off" | "detect" | "block"; localServerIp: string | null; version: string; timezone: string; uptimeEnabled: boolean }>("/settings"),
   });
-  const [form, setForm] = useState<{ panelDomain: string; panelHttps: boolean; timezone: string; uptimeEnabled: boolean } | null>(null);
-  const f = form ?? (data ? { panelDomain: data.panelDomain, panelHttps: data.panelHttps, timezone: data.timezone, uptimeEnabled: data.uptimeEnabled } : null);
+  const [form, setForm] = useState<{ panelDomain: string; panelHttps: boolean; panelWaf: "off" | "detect" | "block"; timezone: string; uptimeEnabled: boolean } | null>(null);
+  const f = form ?? (data ? { panelDomain: data.panelDomain, panelHttps: data.panelHttps, panelWaf: data.panelWaf, timezone: data.timezone, uptimeEnabled: data.uptimeEnabled } : null);
   const save = useAction(() => api.put("/settings/panel", f), { success: t("Ayarlar kaydedildi"), invalidate: [["settings"]] });
   const zones = useMemo(() => {
     try {
@@ -84,6 +84,13 @@ function PanelSettings() {
           <input className="input" value={f.panelDomain} onChange={(e) => setForm({ ...f, panelDomain: e.target.value.trim().toLowerCase() })} placeholder="panel.ornek.com" />
         </Field>
         <Toggle checked={f.panelHttps} onChange={(v) => setForm({ ...f, panelHttps: v })} label={t("HTTPS")} description={t("Ücretsiz Let's Encrypt sertifikası otomatik alınır.")} />
+        <Field label={t("Panel WAF")} hint={t("Panelin adresini OWASP kurallarıyla (Coraza, paranoya 1) denetler. \"Yalnız tespit\" istekleri kesmez; panelin sorunsuz çalıştığını gördükten sonra \"Engelle\"ye geç.")}>
+          <select className="input" value={f.panelWaf} onChange={(e) => setForm({ ...f, panelWaf: e.target.value as "off" | "detect" | "block" })}>
+            <option value="off">{t("Kapalı")}</option>
+            <option value="detect">{t("Yalnız tespit")}</option>
+            <option value="block">{t("Engelle")}</option>
+          </select>
+        </Field>
         <Field label={t("Saat dilimi")} hint={t("Analitikteki gün sınırları ve zamanlanmış görevler bu saat dilimine göre.")}>
           <select className="input" value={f.timezone} onChange={(e) => setForm({ ...f, timezone: e.target.value })}>
             {zones.map((z) => (
