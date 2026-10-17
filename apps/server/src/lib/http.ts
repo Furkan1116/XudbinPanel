@@ -1,6 +1,8 @@
 import type { Context } from "hono";
 import type { z } from "zod";
 
+import { TooBusyError } from "../auth/password.js";
+
 export class HttpError extends Error {
   constructor(public status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 503, message: string) {
     super(message);
@@ -33,4 +35,15 @@ export function idParam(c: Context, name = "id") {
 export function must<T>(value: T | undefined | null, message = "Bulunamadı"): T {
   if (value === undefined || value === null) throw new HttpError(404, message);
   return value;
+}
+
+/**
+ * Hono onError işleyicisi. Kasıtlı kullanıcı mesajları (HttpError, TooBusyError) aynen döner; beklenmeyen hatalarda
+ * ayrıntı (iç yol, Docker/SQL hata metni) yalnız sunucu loguna yazılır, istemciye genel mesaj gider.
+ */
+export function errorResponse(err: Error, c: Context) {
+  if (err instanceof HttpError) return c.json({ error: err.message }, err.status);
+  if (err instanceof TooBusyError) return c.json({ error: err.message }, 503);
+  console.error(err);
+  return c.json({ error: "Sunucu hatası. Ayrıntı sunucu loglarında." }, 500);
 }
