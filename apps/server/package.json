@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "DATA_DIR=./test/.data node --import tsx --test test/*.test.ts"
+    "test": "DATA_DIR=./test/.data node --import tsx --test --test-concurrency=1 test/*.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
