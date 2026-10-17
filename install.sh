@@ -9,7 +9,9 @@
 #   XUDBIN_DOMAIN  Panel için kendi alan adın (boşsa <ip>.sslip.io adresi üretilir)
 #   ACME_EMAIL     Let's Encrypt bildirimleri için e-posta (isteğe bağlı)
 #   XUDBIN_REPO    Kaynak kodun git adresi (varsayılan: resmi repo)
-#   XUDBIN_IMAGE   Hazır panel imajı (varsayılan: ghcr.io/furkan1116/xudbin:latest; yoksa kaynaktan derlenir)
+#   XUDBIN_IMAGE   Hazır panel imajı (varsayılan: son sürüm etiketi, ör. ghcr.io/furkan1116/xudbin:1.3.1)
+#   XUDBIN_REF     Kurulacak sürüm etiketi (varsayılan: GitHub'daki en yeni v* etiketi)
+#   XUDBIN_VERIFY  0 yapılırsa imaj imzası doğrulanmaz (önerilmez; kendi imajın/çatalın için)
 #   XUDBIN_HARDEN  0 yapılırsa güvenlik duvarı ve fail2ban kurulmaz (varsayılan 1)
 #   XUDBIN_HTTPS   0 yapılırsa HTTPS kapalı kurulur (dış IP'si olmayan yerel ağ/test sunucuları için)
 # Betiğin tamamı bir fonksiyonun içinde ve en sonda çağrılıyor: "curl | bash" sırasında bağlantı kesilirse
@@ -19,7 +21,14 @@ set -euo pipefail
 
 INSTALL_DIR=/opt/xudbin
 DEFAULT_REPO=https://github.com/Furkan1116/XudbinPanel
-DEFAULT_IMAGE=ghcr.io/furkan1116/xudbin:latest
+IMAGE_REPO=ghcr.io/furkan1116/xudbin
+CADDY_IMAGE_REPO=ghcr.io/furkan1116/xudbin-caddy
+CADDY_IMAGE_TAG=1
+# İmza doğrulaması: imaj yalnız resmi reponun GitHub Actions iş akışında imzalanmışsa kabul edilir.
+# cosign sunucuda kurulu olmayabilir; sürümü ve özeti sabit resmi konteyneri kullanılır.
+COSIGN_IMAGE=ghcr.io/sigstore/cosign/cosign:v2.4.1@sha256:b03690aa52bfe94054187142fba24dc54137650682810633901767d8a3e15b31
+SIGNER_IDENTITY='^https://github\.com/Furkan1116/XudbinPanel/\.github/workflows/'
+SIGNER_ISSUER=https://token.actions.githubusercontent.com
 MODE=install
 [[ ${1:-} == --update ]] && MODE=update
 
@@ -29,6 +38,29 @@ step() { N=$((N + 1)); echo; echo "${R}[$N/$TOTAL]${X} ${B}$*${X}"; }
 ok() { echo "   ${G}✓${X} $*"; }
 info() { echo "   ${D}$*${X}"; }
 fail() { echo; echo "   ${R}✗ Hata:${X} $*" >&2; exit 1; }
+
+# Güncelleme sonucu panelde gösterilir (Ayarlar > Panel).
+STATUS_FILE=/opt/xudbin/.update-status
+status() { mkdir -p /opt/xudbin && printf '%s\n' "$*" > "$STATUS_FILE" 2>/dev/null || true; }
+
+# En yeni sürüm etiketi (v1.2.3). main dalı panellere inmez; yalnız etiketlenmiş sürümler kurulur.
+latest_tag() {
+  git ls-remote --tags --refs "$1" 'v*' 2>/dev/null | awk -F/ '{print $3}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1
+}
+
+# İmajı indirir, imzasını doğrular ve değişmez özet adresini (repo@sha256:...) yazdırır.
+# Dönüş: 0 doğrulandı, 1 imaj indirilemedi, 2 imza doğrulanamadı.
+verify_image() {
+  local ref=$1 digest
+  docker pull -q "$ref" >/dev/null 2>&1 || return 1
+  digest=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" 2>/dev/null | grep -F "${ref%%[:@]*}@" | head -1)
+  [[ -n $digest ]] || return 1
+  if [[ ${XUDBIN_VERIFY:-1} == 0 ]]; then echo "$digest"; return 0; fi
+  docker run --rm "$COSIGN_IMAGE" verify \
+    --certificate-identity-regexp "$SIGNER_IDENTITY" \
+    --certificate-oidc-issuer "$SIGNER_ISSUER" "$digest" >/dev/null 2>&1 || return 2
+  echo "$digest"
+}
 
 banner() {
   echo
@@ -84,17 +116,61 @@ step "Xudbin indiriliyor"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")
 REPO=${XUDBIN_REPO:-$DEFAULT_REPO}
 ensure_git() { command -v git >/dev/null || { command -v apt-get >/dev/null && { apt-get update -qq && apt-get install -y -qq git >/dev/null; } || dnf install -y -q git >/dev/null; }; }
-if [[ -n $SCRIPT_DIR && -f $SCRIPT_DIR/install.sh && -d $SCRIPT_DIR/apps/server && $SCRIPT_DIR != "$INSTALL_DIR" ]]; then
+LOCAL_SOURCE=0
+[[ -n $SCRIPT_DIR && -f $SCRIPT_DIR/install.sh && -d $SCRIPT_DIR/apps/server && $SCRIPT_DIR != "$INSTALL_DIR" ]] && LOCAL_SOURCE=1
+
+# Önceki kurulumun imajı kendi imajınsa (resmi repo dışı) korunur; resmi imaj her güncellemede yeni sürüme geçer.
+OLD_IMAGE=$( [[ -f $INSTALL_DIR/.env ]] && sed -n 's/^XUDBIN_IMAGE=//p' "$INSTALL_DIR/.env" | tail -1 || true)
+CUSTOM_IMAGE=${XUDBIN_IMAGE:-}
+if [[ -z $CUSTOM_IMAGE && -n $OLD_IMAGE && $OLD_IMAGE != "$IMAGE_REPO"* && $OLD_IMAGE != xudbin:local ]]; then CUSTOM_IMAGE=$OLD_IMAGE; fi
+
+TAG=${XUDBIN_REF:-}
+PANEL_IMAGE=""
+if [[ $LOCAL_SOURCE == 0 ]]; then
+  ensure_git
+  [[ -n $TAG ]] || TAG=$(latest_tag "$REPO")
+  [[ -n $TAG ]] || fail "Sürüm etiketi bulunamadı ($REPO). İnternet bağlantısını kontrol et."
+  info "Sürüm: $TAG"
+fi
+
+# İmaj, kod değiştirilmeden ÖNCE doğrulanır: doğrulama başarısızsa sunucuda hiçbir şey değişmez.
+if [[ -n $CUSTOM_IMAGE ]]; then
+  PANEL_IMAGE=$CUSTOM_IMAGE
+  info "Kendi imajın kullanılıyor: $PANEL_IMAGE"
+  if [[ ${XUDBIN_VERIFY:-1} != 0 ]]; then
+    echo "   ${Y}!${X} Kendi imajının imzası resmi repoyla doğrulanamaz; XUDBIN_VERIFY=0 ile çalıştırıyorsan bunu bilerek yap."
+  fi
+elif [[ -n $TAG ]]; then
+  set +e
+  PANEL_IMAGE=$(verify_image "$IMAGE_REPO:${TAG#v}")
+  rc=$?
+  set -e
+  if [[ $rc == 0 ]]; then
+    ok "İmaj imzası doğrulandı: ${PANEL_IMAGE#*@}"
+  elif [[ $rc == 2 ]]; then
+    status "verify-failed $TAG"
+    fail "İmzası doğrulanamayan imaj kurulmadı ($IMAGE_REPO:${TAG#v}). $([[ $MODE == update ]] && echo "Mevcut sürüm çalışmaya devam ediyor.")"
+  else
+    PANEL_IMAGE=""
+    if [[ $MODE == update ]]; then
+      status "pull-failed $TAG"
+      fail "Yeni sürümün imajı indirilemedi ($IMAGE_REPO:${TAG#v}). Mevcut sürüm çalışmaya devam ediyor."
+    fi
+    echo "   ${Y}!${X} Hazır imaj indirilemedi; panel kaynaktan derlenecek (imza doğrulaması YAPILAMAZ)."
+  fi
+fi
+
+if [[ $LOCAL_SOURCE == 1 ]]; then
   mkdir -p "$INSTALL_DIR"
   tar -C "$SCRIPT_DIR" --exclude=node_modules --exclude=dist --exclude=data --exclude=.git --exclude=.env -cf - . | tar -C "$INSTALL_DIR" -xf -
   ok "Kaynak kod kopyalandı: $SCRIPT_DIR"
 elif [[ -d $INSTALL_DIR/.git ]]; then
-  ensure_git
-  git -C "$INSTALL_DIR" pull --ff-only -q && ok "Güncel sürüm çekildi ($(git -C "$INSTALL_DIR" rev-parse --short HEAD))"
+  git -C "$INSTALL_DIR" fetch -q --depth 1 origin "refs/tags/$TAG:refs/tags/$TAG" || fail "Sürüm indirilemedi: $TAG"
+  git -C "$INSTALL_DIR" -c advice.detachedHead=false checkout -q "$TAG" || fail "Sürüme geçilemedi: $TAG"
+  ok "Sürüm $TAG çekildi"
 elif [[ ! -f $INSTALL_DIR/docker-compose.yml ]]; then
-  ensure_git
-  git clone -q --depth 1 "$REPO" "$INSTALL_DIR" || fail "Repo indirilemedi: $REPO"
-  ok "İndirildi: $REPO"
+  git clone -q --depth 1 --branch "$TAG" "$REPO" "$INSTALL_DIR" || fail "Repo indirilemedi: $REPO ($TAG)"
+  ok "İndirildi: $REPO ($TAG)"
 else
   ok "Mevcut kurulum kullanılıyor"
 fi
@@ -103,13 +179,13 @@ install -m 0755 "$INSTALL_DIR/scripts/xudbin" /usr/local/bin/xudbin
 ok "xudbin komutu kuruldu (xudbin link, xudbin status, xudbin update...)"
 
 # --- Ayarlar (.env) ---
-CLI_DOMAIN=${XUDBIN_DOMAIN:-}; CLI_EMAIL=${ACME_EMAIL:-}; CLI_HTTPS=${XUDBIN_HTTPS:-}; CLI_IMAGE=${XUDBIN_IMAGE:-}
+CLI_DOMAIN=${XUDBIN_DOMAIN:-}; CLI_EMAIL=${ACME_EMAIL:-}; CLI_HTTPS=${XUDBIN_HTTPS:-}
 if [[ -f .env ]]; then
   # shellcheck disable=SC1091
   source .env
 fi
 XUDBIN_DOMAIN=${CLI_DOMAIN:-${XUDBIN_DOMAIN:-}}; ACME_EMAIL=${CLI_EMAIL:-${ACME_EMAIL:-}}
-XUDBIN_HTTPS=${CLI_HTTPS:-${XUDBIN_HTTPS:-1}}; XUDBIN_IMAGE=${CLI_IMAGE:-${XUDBIN_IMAGE:-$DEFAULT_IMAGE}}
+XUDBIN_HTTPS=${CLI_HTTPS:-${XUDBIN_HTTPS:-1}}; XUDBIN_IMAGE=$PANEL_IMAGE
 if [[ $XUDBIN_HTTPS == 0 ]]; then SCHEME=http; SECURE_COOKIES=false; else SCHEME=https; SECURE_COOKIES=true; fi
 PUBLIC_IP=${XUDBIN_PUBLIC_IP:-}
 if [[ -z ${XUDBIN_DOMAIN:-} ]]; then
@@ -155,26 +231,34 @@ fi
 
 # --- 5. Panel ------------------------------------------------------------------
 step "Panel başlatılıyor"
-if docker pull -q "$XUDBIN_IMAGE" >/dev/null 2>&1; then
-  ok "Hazır imaj indirildi: $XUDBIN_IMAGE"
+if [[ -n $XUDBIN_IMAGE ]]; then
   BUILD_FLAG=--no-build
 else
   XUDBIN_IMAGE=xudbin:local
-  info "Hazır imaj bulunamadı, kaynaktan derleniyor (birkaç dakika)..."
+  info "Kaynaktan derleniyor (birkaç dakika)..."
   BUILD_FLAG=--build
 fi
+# Caddy (WAF) imajı da doğrulanır; doğrulanamazsa panel onu yerelde derler (hazır imaja güvenilmez).
+set +e
+CADDY_IMAGE=$(verify_image "$CADDY_IMAGE_REPO:$CADDY_IMAGE_TAG")
+crc=$?
+set -e
+if [[ $crc == 0 ]]; then ok "Caddy imajı imzası doğrulandı"; else CADDY_IMAGE=""; info "Caddy imajı doğrulanamadı; panel yerelde derleyecek"; fi
 cat > .env <<ENV
 XUDBIN_DOMAIN=${XUDBIN_DOMAIN}
 ACME_EMAIL=${ACME_EMAIL:-}
 XUDBIN_HTTPS=${XUDBIN_HTTPS}
 XUDBIN_PUBLIC_IP=${PUBLIC_IP:-}
 XUDBIN_IMAGE=${XUDBIN_IMAGE}
+XUDBIN_CADDY_IMAGE=${CADDY_IMAGE}
+XUDBIN_VERSION=${TAG#v}
 SECURE_COOKIES=${SECURE_COOKIES}
 HOST_HOSTNAME=$(hostname)
 ENV
 chmod 600 .env
 docker compose up -d $BUILD_FLAG >/tmp/xudbin-compose.log 2>&1 || { tail -20 /tmp/xudbin-compose.log; fail "Panel başlatılamadı."; }
 ok "Panel konteyneri çalışıyor"
+status "ok ${TAG:-yerel}"
 
 # --- 6. Caddy + sertifika --------------------------------------------------------
 step "Alan adı ve ${SCHEME^^}"

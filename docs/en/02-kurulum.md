@@ -81,6 +81,10 @@ You can also update from the server:
 sudo xudbin update
 ```
 
+Updates only come from tagged releases (`v1.2.3`); changes on the `main` branch never reach your server. Before installing, the signatures of the panel and Caddy images are verified: if an image was not signed by the official repository's GitHub Actions workflow, the update stops, the current version keeps running and a warning appears under **Settings > Panel**. The running image is started by its verified digest (`@sha256:...`).
+
+To install a specific release, pass `XUDBIN_REF=v1.3.0`. If you run your own image or fork, `XUDBIN_VERIFY=0` turns verification off (not recommended).
+
 Updating doesn't touch your apps, databases or panel data. Security fixes only ship in the latest version.
 
 ## Verifying the images
@@ -88,8 +92,8 @@ Updating doesn't touch your apps, databases or panel data. Security fixes only s
 Prebuilt images are built in GitHub Actions and signed with Sigstore (cosign); an SBOM and provenance are published with the image. To verify the signature:
 
 ```bash
-cosign verify ghcr.io/furkan1116/xudbin:latest \
-  --certificate-identity-regexp '^https://github.com/Furkan1116/XudbinPanel/' \
+cosign verify ghcr.io/furkan1116/xudbin:1.3.0 \
+  --certificate-identity-regexp '^https://github\.com/Furkan1116/XudbinPanel/\.github/workflows/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

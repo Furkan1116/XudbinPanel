@@ -81,6 +81,10 @@ Sunucudan da güncelleyebilirsin:
 sudo xudbin update
 ```
 
+Güncelleme yalnız etiketlenmiş sürümlerden (`v1.2.3`) yapılır; `main` dalındaki değişiklikler sunucuna gelmez. Kurulumdan önce panel ve Caddy imajlarının imzası doğrulanır: imaj resmi reponun GitHub Actions iş akışında imzalanmamışsa güncelleme durur, mevcut sürüm çalışmaya devam eder ve **Ayarlar > Panel**'de uyarı görünür. Çalışan imaj, doğrulanan özetiyle (`@sha256:...`) başlatılır.
+
+Belirli bir sürümü kurmak için `XUDBIN_REF=v1.3.0` verebilirsin. Kendi imajını ya da çatalını kullanıyorsan `XUDBIN_VERIFY=0` doğrulamayı kapatır (önerilmez).
+
 Güncelleme uygulamalarına, veritabanlarına ve panel verisine dokunmaz. Güvenlik düzeltmeleri yalnız en son sürüme gelir.
 
 ## İmajları doğrulama
@@ -88,8 +92,8 @@ Güncelleme uygulamalarına, veritabanlarına ve panel verisine dokunmaz. Güven
 Hazır imajlar GitHub Actions'ta derlenip Sigstore (cosign) ile imzalanır; SBOM ve köken (provenance) bilgisi de imajla yayınlanır. İmzayı doğrulamak için:
 
 ```bash
-cosign verify ghcr.io/furkan1116/xudbin:latest \
-  --certificate-identity-regexp '^https://github.com/Furkan1116/XudbinPanel/' \
+cosign verify ghcr.io/furkan1116/xudbin:1.3.0 \
+  --certificate-identity-regexp '^https://github\.com/Furkan1116/XudbinPanel/\.github/workflows/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

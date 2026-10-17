@@ -17,6 +17,8 @@ services:
       XUDBIN_HTTPS: ${XUDBIN_HTTPS:-1}
       XUDBIN_PUBLIC_IP: ${XUDBIN_PUBLIC_IP:-}
       XUDBIN_ACME_CA: ${XUDBIN_ACME_CA:-}
+      # Kurulum betiğinin imzasını doğruladığı Caddy imajı (özetle); boşsa panel Caddy'yi yerelde derler.
+      XUDBIN_CADDY_IMAGE: ${XUDBIN_CADDY_IMAGE:-ghcr.io/furkan1116/xudbin-caddy:1}
     volumes:
       - xudbin-data:/data
       - /var/run/docker.sock:/var/run/docker.sock

@@ -7,6 +7,7 @@ import { test } from "node:test";
 import YAML from "yaml";
 import { resolveInside } from "../src/lib/paths.js";
 import { sameGitRepo, verifyWebhook } from "../src/routes/apps.js";
+import { lastUpdateStatus } from "../src/routes/settings.js";
 import { composeHostAccessIssues } from "../src/services/compose-policy.js";
 import { openRepo } from "../src/services/frameworks/util.js";
 
@@ -127,4 +128,14 @@ test("kayıtlı git token'ı yalnız aynı repo adresine gider (O1)", () => {
   assert.ok(!sameGitRepo("https://saldirgan.example/ali/site.git", "https://github.com/ali/site.git"));
   assert.ok(!sameGitRepo("https://github.com/baska/site", "https://github.com/ali/site"));
   assert.ok(!sameGitRepo("bozuk", "https://github.com/ali/site"));
+});
+
+test("son güncelleme durumu: yalnız bilinen durumlar okunur (Y3)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xb-upd-"));
+  const f = path.join(dir, ".update-status");
+  fs.writeFileSync(f, "verify-failed v1.4.0\n");
+  assert.deepEqual(lastUpdateStatus(f), { state: "verify-failed", tag: "v1.4.0" });
+  fs.writeFileSync(f, "<script> x");
+  assert.equal(lastUpdateStatus(f), null);
+  assert.equal(lastUpdateStatus(path.join(dir, "yok")), null);
 });

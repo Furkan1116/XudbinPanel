@@ -512,6 +512,8 @@ export const en: Record<string, string> = {
   "Güncelleme başladı; panel birkaç dakika içinde yeniden başlayacak.": "Update started; the panel will restart in a few minutes.",
   "Güncelleniyor... Sayfa yeni sürüm hazır olunca kendiliğinden yenilenecek.": "Updating... The page will reload when the new version is ready.",
   "Yeni sürüm yayında: {v}": "New version available: {v}",
+  "{v} kurulmadı: imajın imzası doğrulanamadı. Mevcut sürüm çalışmaya devam ediyor.": "{v} was not installed: the image signature could not be verified. The current version keeps running.",
+  "{v} kurulmadı: imaj indirilemedi. Mevcut sürüm çalışmaya devam ediyor.": "{v} was not installed: the image could not be downloaded. The current version keeps running.",
   "Güncel.": "Up to date.",
   "Yeni sürüm bilgisi alınamadı.": "Couldn't check for updates.",
   "Sürüm notları": "Release notes",

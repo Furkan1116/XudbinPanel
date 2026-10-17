@@ -182,8 +182,8 @@ API'yi doğrudan da kullanabilirsin: `curl -X POST -H "Authorization: Bearer xb_
 Yayınlanan imajlar GitHub Actions'ta derlenip [Sigstore](https://www.sigstore.dev) ile imzalanır; SBOM ve köken (provenance) bilgisi imajla birlikte yayınlanır. İmzayı doğrulamak için:
 
 ```bash
-cosign verify ghcr.io/furkan1116/xudbin:latest \
-  --certificate-identity-regexp '^https://github.com/Furkan1116/XudbinPanel/' \
+cosign verify ghcr.io/furkan1116/xudbin:1.3.0 \
+  --certificate-identity-regexp '^https://github\.com/Furkan1116/XudbinPanel/\.github/workflows/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

@@ -30,6 +30,16 @@ import { appManifest, disconnectGithubApp, githubApp, listRepos, newManifestStat
 const pendingTotp = new Map<number, string>();
 const sessionKey = (hash: string) => hash.slice(0, 16);
 
+/** install.sh'nin yazdığı son güncelleme sonucu (sunucu kökü panel konteynerine salt okunur bağlı). */
+export function lastUpdateStatus(file = path.join(config.diskPath, "opt/xudbin/.update-status")): { state: string; tag: string } | null {
+  try {
+    const [state = "", tag = ""] = fs.readFileSync(file, "utf8").trim().split(/\s+/);
+    return /^(ok|verify-failed|pull-failed)$/.test(state) ? { state, tag } : null;
+  } catch {
+    return null;
+  }
+}
+
 export const settingsRoutes = new Hono<AppEnv>()
   .get("/", (c) => {
     const s = getSettings();
@@ -37,7 +47,7 @@ export const settingsRoutes = new Hono<AppEnv>()
     return c.json({ panelDomain: s.panelDomain, panelHttps: s.panelHttps, localServerIp: local?.public_ip ?? null, version: VERSION, timezone: s.timezone, uptimeEnabled: s.uptimeEnabled });
   })
 
-  .get("/update", async (c) => c.json({ ...(await updateInfo()), canSelfUpdate: config.isProd }))
+  .get("/update", async (c) => c.json({ ...(await updateInfo()), canSelfUpdate: config.isProd, lastUpdate: lastUpdateStatus() }))
 
   // Panelden güncelleme: install.sh --update sunucunun systemd'sinde ayrı bir iş olarak çalışır (panel yeniden
   // başlasa da devam eder). İlerleme: journalctl -u xudbin-update

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router";
 import { ApiTokens } from "@/components/ApiTokens";
 import { AuditLog } from "@/components/AuditLog";
@@ -103,8 +103,15 @@ function PanelSettings() {
 
 /** Sürüm ve panelden güncelleme: güncelleme sunucuda ayrı bir iş olarak çalışır, panel yeni sürümle geri gelince sayfa yenilenir. */
 function UpdateCard({ version }: { version: string }) {
-  const { data } = useQuery({ queryKey: ["update"], queryFn: () => api.get<{ current: string; latest: string | null; updateAvailable: boolean; url: string; canSelfUpdate: boolean }>("/settings/update") });
+  const waitingRef = useRef(false);
+  const { data } = useQuery({ queryKey: ["update"], queryFn: () => api.get<{ current: string; latest: string | null; updateAvailable: boolean; url: string; canSelfUpdate: boolean; lastUpdate: { state: string; tag: string } | null }>("/settings/update"), refetchInterval: (q) => (q.state.data && waitingRef.current ? 5000 : false) });
+  const failed = data?.lastUpdate && data.lastUpdate.state !== "ok" && data.lastUpdate.tag === `v${data.latest}` ? data.lastUpdate : null;
   const [waiting, setWaiting] = useState(false);
+  waitingRef.current = waiting;
+  // Güncelleme imza doğrulamasında ya da indirmede durduysa beklemeyi bırak.
+  useEffect(() => {
+    if (waiting && failed) setWaiting(false);
+  }, [waiting, failed]);
   const apply = useAction(() => api.post("/settings/update/apply"), {
     success: t("Güncelleme başladı; panel birkaç dakika içinde yeniden başlayacak."),
     onSuccess: () => setWaiting(true),
@@ -135,6 +142,13 @@ function UpdateCard({ version }: { version: string }) {
             <a href={data.url} target="_blank" rel="noreferrer" className="underline">{t("Sürüm notları")}</a>
           )}
         </div>
+        {failed && (
+          <div className="mt-1 text-[13px] text-accent">
+            {failed.state === "verify-failed"
+              ? t("{v} kurulmadı: imajın imzası doğrulanamadı. Mevcut sürüm çalışmaya devam ediyor.", { v: failed.tag })
+              : t("{v} kurulmadı: imaj indirilemedi. Mevcut sürüm çalışmaya devam ediyor.", { v: failed.tag })}
+          </div>
+        )}
       </div>
       {data?.updateAvailable && !waiting && (
         data.canSelfUpdate ? (
