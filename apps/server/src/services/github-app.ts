@@ -137,13 +137,33 @@ async function installationFor(cfg: GithubAppConfig, repo: string) {
 }
 
 /**
- * Repo için klonlama token'ı: App bu repoya kuruluysa kısa ömürlü kurulum token'ı, değilse uygulamanın
- * kendi token'ı (varsa). GitHub'a ulaşılamazsa sessizce kendi token'ına düşer.
+ * App token'ı yalnız onaylanmış repoya verilir. Onay: (a) adresi yönetici verdiyse ya da (b) aynı projede
+ * zaten onaylı bir uygulamanın reposuysa. Üye başka bir özel repo yazarsa onay düşer; kendi token'ını girmesi gerekir
+ * (aksi halde App'in erişebildiği her özel repo herhangi bir üyeye açık olurdu; bağımsız inceleme O3).
+ * Dönen değer `apps.git_app_url` sütununa yazılır.
  */
-export async function gitTokenFor(gitUrl: string | null | undefined, ownToken: string) {
+export function approvedAppUrl(user: { role: string }, projectId: number, gitUrl: string | null | undefined, exceptAppId = 0) {
+  const repo = githubRepoOf(gitUrl);
+  if (!repo || !gitUrl) return null;
+  if (user.role === "admin") return gitUrl;
+  const rows = db.prepare("SELECT git_app_url FROM apps WHERE project_id = ? AND id != ? AND git_app_url IS NOT NULL").all(projectId, exceptAppId) as { git_app_url: string }[];
+  return rows.some((r) => githubRepoOf(r.git_app_url) === repo) ? gitUrl : null;
+}
+
+/** Uygulamanın şu anki adresi onaylı adresle aynı repoysa App token'ı kullanabilir. */
+export function appTokenAllowed(app: { git_url: string | null; git_app_url: string | null }) {
+  const repo = githubRepoOf(app.git_url);
+  return Boolean(repo) && githubRepoOf(app.git_app_url) === repo;
+}
+
+/**
+ * Repo için klonlama token'ı: App bu repoya kuruluysa ve `allowApp` doğruysa kısa ömürlü kurulum token'ı,
+ * değilse uygulamanın kendi token'ı (varsa). GitHub'a ulaşılamazsa sessizce kendi token'ına düşer.
+ */
+export async function gitTokenFor(gitUrl: string | null | undefined, ownToken: string, allowApp: boolean) {
   const cfg = githubApp();
   const repo = githubRepoOf(gitUrl);
-  if (!cfg || !repo || ownToken) return ownToken;
+  if (!allowApp || !cfg || !repo || ownToken) return ownToken;
   try {
     const inst = await installationFor(cfg, repo);
     return inst ? await installationToken(cfg, inst) : ownToken;

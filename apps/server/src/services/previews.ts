@@ -54,13 +54,13 @@ export async function handlePrEvent(parent: AppRow, ev: PrEvent) {
     const { encrypt } = await import("../lib/crypto.js");
     const res = db
       .prepare(
-        `INSERT INTO apps (project_id, server_id, name, slug, source_type, git_url, git_branch, git_token, build_type, framework, build_options,
+        `INSERT INTO apps (project_id, server_id, name, slug, source_type, git_url, git_app_url, git_branch, git_token, build_type, framework, build_options,
            dockerfile_path, build_context, port, command, env, volumes, security, webhook_token, webhook_secret, webhook_signed, auto_deploy,
            http_check, health_path, memory_limit, cpu_limit, kind, parent_app_id, preview_pr, created_at)
-         VALUES (?, ?, ?, ?, 'git', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, 'git', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        parent.project_id, parent.server_id, `${parent.name} PR #${ev.number}`, slug, parent.git_url, ev.branch, parent.git_token, parent.build_type,
+        parent.project_id, parent.server_id, `${parent.name} PR #${ev.number}`, slug, parent.git_url, parent.git_app_url, ev.branch, parent.git_token, parent.build_type,
         parent.framework, parent.build_options, parent.dockerfile_path, parent.build_context, parent.port, parent.command, encrypt(env), parent.volumes,
         parent.security, randomToken(24), randomToken(24), parent.http_check, parent.health_path, parent.memory_limit, parent.cpu_limit, parent.kind,
         parent.id, ev.number, Date.now(),

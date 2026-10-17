@@ -40,7 +40,7 @@ import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
 import { accessibleAppIds, accessibleProjectIds, canWriteProject, requireSecretAccess, SECRET_MASK, secretsVisible } from "../services/access.js";
-import { appsForRepo, completeManifest, gitTokenFor, verifyGithubSignature } from "../services/github-app.js";
+import { appsForRepo, appTokenAllowed, approvedAppUrl, completeManifest, gitTokenFor, verifyGithubSignature } from "../services/github-app.js";
 import { extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas } from "../services/remote-replicas.js";
 
 const parseJson = (raw: string | null) => {
@@ -192,8 +192,8 @@ export const appRoutes = new Hono<AppEnv>()
       .prepare(
         `INSERT INTO apps (project_id, server_id, name, slug, source_type, git_url, git_branch, git_token, build_type,
                            image, compose_file, port, webhook_token, created_at, framework, build_options, build_context, env,
-                           webhook_secret, webhook_signed)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+                           webhook_secret, webhook_signed, git_app_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
       )
       .run(
         input.projectId,
@@ -215,6 +215,8 @@ export const appRoutes = new Hono<AppEnv>()
         input.buildContext || ".",
         input.env?.trim() ? encrypt(input.env) : null,
         randomToken(24),
+        // GitHub App token'ı yalnız yöneticinin ya da projede zaten onaylı bir repo için verilir (O3).
+        approvedAppUrl(c.get("user"), input.projectId, input.gitUrl),
       );
     const id = Number(res.lastInsertRowid);
     if (input.sourceType === "upload" && input.uploadId) storeAppUpload(slug, tempUploadFile(input.uploadId)!);
@@ -307,6 +309,8 @@ export const appRoutes = new Hono<AppEnv>()
     const map: Record<string, unknown> = {
       name: input.name,
       git_url: input.gitUrl,
+      // Adres değiştiyse App token onayı yeniden değerlendirilir; üye yeni bir özel repo bağlarsa onay düşer (O3).
+      git_app_url: input.gitUrl === undefined || input.gitUrl === app.git_url ? undefined : approvedAppUrl(c.get("user"), app.project_id, input.gitUrl, app.id),
       git_branch: input.gitBranch,
       git_token: input.gitToken === undefined ? undefined : input.gitToken ? encrypt(input.gitToken) : null,
       build_type: input.buildType,
@@ -993,7 +997,9 @@ export const frameworkRoutes = new Hono<AppEnv>()
       context = input.gitUrl ? context : app.build_context;
     }
     if (!url || !/^https:\/\//.test(url)) throw new HttpError(400, "https:// ile başlayan bir repo adresi gerekli");
-    token = await gitTokenFor(url, token);
+    // App token'ı yalnız uygulamanın onaylı reposuna ya da yönetici isteğine verilir; üye yeni bir adres için kendi token'ını girer (O3).
+    const allowApp = c.get("user").role === "admin" || Boolean(input.appId && appTokenAllowed({ git_url: url, git_app_url: loadApp(input.appId).git_app_url }));
+    token = await gitTokenFor(url, token, allowApp);
     const dest = path.join(config.dataDir, "builds", `detect-${randomAlnum(10)}`);
     try {
       await shallowClone(url, branch || "main", token, dest);

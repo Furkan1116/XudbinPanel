@@ -25,7 +25,8 @@ import { listServers } from "../services/servers.js";
 import { createPanelBackup, PANEL_BACKUP_DIR } from "../services/panel-backup.js";
 import { s3Test } from "../lib/s3.js";
 import { publicOrigin } from "../lib/origin.js";
-import { appManifest, disconnectGithubApp, githubApp, listRepos, newManifestState } from "../services/github-app.js";
+import { accessibleProjectIds } from "../services/access.js";
+import { appManifest, disconnectGithubApp, githubApp, githubRepoOf, listRepos, newManifestState } from "../services/github-app.js";
 
 const pendingTotp = new Map<number, string>();
 const sessionKey = (hash: string) => hash.slice(0, 16);
@@ -273,11 +274,16 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
     disconnectGithubApp();
     return c.json({ ok: true });
   })
-  // Uygulama oluştururken repo seçici (tüm üyeler; izleyiciler uygulama oluşturamaz ama listeyi görmeleri zararsız).
+  // Uygulama oluştururken repo seçici. Üyeye yalnız App token'ının zaten verildiği (erişebildiği projelerdeki
+  // onaylı) repolar listelenir; App'in gördüğü diğer özel repoların adı bile sızmasın (O3).
   .get("/github/repos", async (c) => {
     if (!githubApp()) return c.json({ connected: false, repos: [] });
     try {
-      return c.json({ connected: true, ...(await listRepos()) });
+      const all = await listRepos();
+      if (c.get("user").role === "admin") return c.json({ connected: true, ...all });
+      const rows = db.prepare(`SELECT git_app_url FROM apps WHERE git_app_url IS NOT NULL AND project_id IN (${accessibleProjectIds(c.get("user")).join(",") || "-1"})`).all() as { git_app_url: string }[];
+      const ok = new Set(rows.map((r) => githubRepoOf(r.git_app_url)));
+      return c.json({ connected: true, installations: [], repos: all.repos.filter((r) => ok.has(r.fullName.toLowerCase())) });
     } catch (err) {
       throw new HttpError(503, (err as Error).message);
     }

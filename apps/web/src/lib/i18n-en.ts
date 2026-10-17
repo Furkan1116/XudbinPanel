@@ -1336,4 +1336,5 @@ export const en: Record<string, string> = {
   "Değerler yalnız yazma yetkisi olanlara (yönetici ve proje geliştiricisi) gösterilir. Salt okunur erişimde ve salt okunur API anahtarında gizlenir.": "Values are shown only to people with write access (admins and project developers). They are hidden for read-only access and read-only API keys.",
   "Parola gizli": "Password hidden",
   "Parola ve bağlantı adreslerindeki parola yalnız yazma yetkisi olanlara gösterilir.": "The password and the password in connection URLs are shown only to people with write access.",
+  "Yalnız özel (private) repolar için, şifrelenerek saklanır. GitHub App erişimi yalnız yöneticiye ya da projede zaten bağlı repoya verilir; yeni bir özel repo için kendi token'ını gir.": "Only for private repos; stored encrypted. GitHub App access is given only to admins or to a repo already connected in the project; for a new private repo, enter your own token.",
 };

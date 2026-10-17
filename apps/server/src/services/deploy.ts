@@ -20,7 +20,7 @@ import { imageScanEnabled, scanApp } from "./scan.js";
 import { getServer } from "./servers.js";
 import { getPrivateKey } from "./ssh.js";
 import { extractZip, latestAppUpload } from "./uploads.js";
-import { gitTokenFor } from "./github-app.js";
+import { appTokenAllowed, gitTokenFor } from "./github-app.js";
 import { ensureRelayCa, extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas, startRemoteReplicas } from "./remote-replicas.js";
 
 export type AppRow = {
@@ -33,6 +33,7 @@ export type AppRow = {
   git_url: string | null;
   git_branch: string;
   git_token: string | null;
+  git_app_url: string | null;
   build_type: "auto" | "dockerfile" | "static";
   framework: string;
   build_options: string;
@@ -357,7 +358,7 @@ async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void,
   if (!app.git_url) throw new Error("Git adresi tanımlı değil");
   fs.rmSync(workdir, { recursive: true, force: true });
   fs.mkdirSync(workdir, { recursive: true });
-  const token = await gitTokenFor(app.git_url, decrypt(app.git_token));
+  const token = await gitTokenFor(app.git_url, decrypt(app.git_token), appTokenAllowed(app));
   log(`Klonlanıyor: ${app.git_url} (${app.git_branch})`);
   await gitClone(["clone", "--depth", "1", "--branch", app.git_branch, gitUrlWithToken(app.git_url, token), "src"], { cwd: workdir, token, log, signal });
   const sha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();

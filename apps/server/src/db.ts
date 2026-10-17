@@ -442,6 +442,12 @@ const migrations: string[] = [
   ALTER TABLE apps ADD COLUMN relay_secret TEXT;
   ALTER TABLE servers ADD COLUMN relay_ca TEXT;
   `,
+  // GitHub App token'ının hangi repo adresi için verildiği (bağımsız inceleme O3). Boşsa uygulama yalnız
+  // kendi git token'ını kullanır. Mevcut uygulamalar deploy'dan kopmasın diye bugünkü adresleriyle başlar.
+  `
+  ALTER TABLE apps ADD COLUMN git_app_url TEXT;
+  UPDATE apps SET git_app_url = git_url WHERE git_url IS NOT NULL;
+  `,
 ];
 
 function migrate() {

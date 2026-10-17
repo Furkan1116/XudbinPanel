@@ -7,6 +7,8 @@ import { createSession } from "../src/auth/session.js";
 import { db } from "../src/db.js";
 import type { AppEnv } from "../src/lib/types.js";
 import { accessibleAppIds, canSeeSecrets, projectAccess, requireSecretAccess, secretsVisible } from "../src/services/access.js";
+import { appTokenAllowed, approvedAppUrl, gitTokenFor } from "../src/services/github-app.js";
+import { updateSettings } from "../src/lib/settings.js";
 import { HttpError, idParam } from "../src/lib/http.js";
 
 function seed() {
@@ -115,4 +117,33 @@ test("sır yetkisi okuma yetkisi değildir: izleyici ve salt okunur anahtar sır
   assert.equal(await dl(cookie(s.viewer)), 403);
   assert.equal(await dl(auth(createApiToken(s.dev, "ro2", { readOnly: true }).token)), 403);
   assert.equal(canSeeSecrets({ id: s.stranger, email: "", name: "", role: "member", mustChangePassword: false }, s.p1), false);
+});
+
+test("GitHub App token'ı yalnız yöneticiye ya da projede onaylı repoya verilir (O3)", async () => {
+  const s = seed();
+  const admin = { role: "admin" };
+  const member = { role: "member" };
+  const x = "https://github.com/sirket/gizli-repo.git";
+  const y = "https://github.com/sirket/baska-repo";
+  // Yönetici her repoyu onaylar; üye onaylı repo yoksa onaylayamaz.
+  assert.equal(approvedAppUrl(admin, s.p1, x), x);
+  assert.equal(approvedAppUrl(member, s.p1, x), null);
+  assert.equal(approvedAppUrl(member, s.p1, "https://gitlab.com/a/b"), null);
+  // Projede onaylı uygulama varsa aynı repo (farklı yazımla da) üyeye açılır; başka proje ve başka repo açılmaz.
+  db.prepare("UPDATE apps SET git_url = ?, git_app_url = ? WHERE id = ?").run(x, x, s.a1);
+  assert.equal(approvedAppUrl(member, s.p1, "https://github.com/Sirket/Gizli-Repo", s.a2), "https://github.com/Sirket/Gizli-Repo");
+  assert.equal(approvedAppUrl(member, s.p1, y, s.a2), null);
+  assert.equal(approvedAppUrl(member, s.p2, x, s.a2), null);
+  // Adres değişince onay düşer.
+  assert.equal(appTokenAllowed({ git_url: x, git_app_url: x }), true);
+  assert.equal(appTokenAllowed({ git_url: y, git_app_url: x }), false);
+  assert.equal(appTokenAllowed({ git_url: x, git_app_url: null }), false);
+  // İzin yoksa App'e hiç gidilmez: kendi token'ı (boşsa boş) döner.
+  updateSettings({ githubApp: { id: 1, slug: "t", name: "t", htmlUrl: "", owner: "", pem: "", webhookSecret: "", clientId: "", clientSecret: "" } });
+  try {
+    assert.equal(await gitTokenFor(x, "", false), "");
+    assert.equal(await gitTokenFor(x, "kendi", false), "kendi");
+  } finally {
+    updateSettings({ githubApp: null });
+  }
 });

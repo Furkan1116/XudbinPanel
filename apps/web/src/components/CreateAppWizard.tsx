@@ -218,7 +218,7 @@ export function CreateAppWizard({ open, onClose, projectId }: { open: boolean; o
                   </Field>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-[1fr_12rem]">
-                  <Field label={t("Erişim token'ı")} hint={t("Yalnız özel (private) repolar için, şifrelenerek saklanır.")}>
+                  <Field label={t("Erişim token'ı")} hint={t("Yalnız özel (private) repolar için, şifrelenerek saklanır. GitHub App erişimi yalnız yöneticiye ya da projede zaten bağlı repoya verilir; yeni bir özel repo için kendi token'ını gir.")}>
                     <input className="input" type="password" autoComplete="off" value={git.token} onChange={(e) => setGit({ ...git, token: e.target.value.trim() })} />
                   </Field>
                   {source === "git" && (
