@@ -25,6 +25,23 @@ Restoring replaces the database's current data with the backup; take a backup of
 
 The **Backups** page shows the status of all database and folder backups in one place.
 
+## Backup encryption
+
+Database and persistent-folder (volume) backups are **encrypted by default** (AES-256-GCM, streamed; it can't be turned off). Files end in `.xbe` (for example `blog-2026-10-17T10-00-00.sql.gz.xbe`); no plain data is left on disk or in off-site storage (S3). A separate key per file is derived (HKDF) from the panel's `secret.key`; no extra passphrase is asked, so scheduled backups stay encrypted on their own. Restore and **Verify** work with encrypted files; a corrupt or truncated file is rejected before anything is restored. Older `.gz` backups taken before this feature are unencrypted; they can still be restored, but take a new backup and delete the old ones if that matters.
+
+**Important:** the key that opens backups is the panel's `secret.key`. If you lose it together with the panel's data (for example the server is gone), the encrypted database/volume backups can't be opened either. So set up the **Panel backup**: it carries `secret.key`, and after `xudbin restore` on a new server the backups in off-site storage can be opened again. If you lose the panel backup passphrase and the server too, the backups are unrecoverable. This also means anyone with access to `secret.key` (for example root on the server) can open backups; the goal is protecting backup files that sit on disk or in S3 if they are stolen.
+
+### Opening a downloaded backup
+
+You can't feed a downloaded `.xbe` file straight to a database. Copy it to the server running the panel and convert it to plain gzip:
+
+```bash
+sudo xudbin backup decrypt blog-2026-10-17T10-00-00.sql.gz.xbe   # creates blog-...sql.gz
+gunzip blog-2026-10-17T10-00-00.sql.gz                           # the .sql file
+```
+
+The output is named after the input without `.xbe`; give a different name as a last argument if you prefer. It runs in the container with the panel's own `secret.key`. To open it on another machine you need a copy of `secret.key`: `docker exec xudbin node dist/cli.js backup decrypt /path/file.xbe --key-file /path/secret.key --out out.gz` (files must be inside the container).
+
 ## Off-site storage (S3)
 
 So backups survive if the server is lost entirely, turn on **Also upload backups to off-site storage** under **Settings > Backups > Off-site storage**. AWS S3, Cloudflare R2, Backblaze B2 and MinIO are supported. Enter the Endpoint, Bucket, Access key, Secret key, Region (`auto` for R2) and an optional Folder (prefix); **Test connection** checks write access.

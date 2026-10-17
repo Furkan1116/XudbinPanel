@@ -66,6 +66,7 @@ xudbin user disable-2fa ali@ornek.com          # telefon kaybolduysa 2FA'yı kap
 xudbin user delete ali@ornek.com
 xudbin unban 203.0.113.7                       # IP banını kaldırır
 sudo xudbin restore /root/xudbin-panel-....xbk # panel yedeğini geri yükler
+sudo xudbin backup decrypt yedek.sql.gz.xbe    # şifreli veritabanı/volume yedeğini gzip'e çevirir
 sudo xudbin update                             # Xudbin'i günceller
 xudbin restart                                 # paneli yeniden başlatır
 xudbin logs                                    # panel loglarını izler

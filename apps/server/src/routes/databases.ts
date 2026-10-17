@@ -159,7 +159,7 @@ export const databaseRoutes = new Hono<AppEnv>()
     const b = must(db.prepare("SELECT file FROM backups WHERE id = ? AND database_id = ? AND status = 'success'").get(idParam(c, "backupId"), d.id) as { file: string } | undefined, "Yedek bulunamadı");
     const full = path.join(backupDir(d), b.file);
     if (!fs.existsSync(full)) throw new HttpError(404, "Yedek dosyası diskte yok");
-    c.header("Content-Type", "application/gzip");
+    c.header("Content-Type", b.file.endsWith(".xbe") ? "application/octet-stream" : "application/gzip");
     c.header("Content-Disposition", `attachment; filename="${b.file}"`);
     c.header("Content-Length", String(fs.statSync(full).size));
     return c.body(Readable.toWeb(fs.createReadStream(full)) as ReadableStream);

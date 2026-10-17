@@ -22,5 +22,16 @@ case "${1:-}" in
     docker exec -i $TTY xudbin node dist/cli.js restore "${ARGS[@]}"
     [ -z "$COPIED" ] || docker exec xudbin rm -f "$COPIED" >/dev/null 2>&1 || true
     docker restart xudbin >/dev/null && echo "Panel yedekten başlatıldı" ;;
+  backup)
+    # xudbin backup decrypt <dosya.xbe> [çıktı]: şifreli yedek konteynerde çözülür, düz gzip sunucudaki dosyaya yazılır.
+    [ "${2:-}" = decrypt ] && [ -f "${3:-}" ] || { echo "Kullanım: xudbin backup decrypt <dosya.xbe> [çıktı.gz]"; exit 1; }
+    IN="$3"; OUT="${4:-${3%.xbe}}"; [ "$OUT" != "$IN" ] || OUT="$IN.dec"
+    [ ! -e "$OUT" ] || { echo "$OUT zaten var; başka bir çıktı adı ver"; exit 1; }
+    docker cp "$IN" xudbin:/tmp/xudbin-decrypt-in >/dev/null || exit 1
+    if (umask 077; docker exec xudbin node dist/cli.js backup decrypt /tmp/xudbin-decrypt-in > "$OUT"); then
+      docker exec xudbin rm -f /tmp/xudbin-decrypt-in >/dev/null 2>&1; echo "Çözüldü: $OUT (gzip; açmak için: gunzip)"
+    else
+      docker exec xudbin rm -f /tmp/xudbin-decrypt-in >/dev/null 2>&1; rm -f "$OUT"; echo "Çözülemedi (dosya bozuk veya bu panelin secret.key'i ile şifrelenmemiş)"; exit 1
+    fi ;;
   *) exec docker exec -i $TTY xudbin node dist/cli.js "$@" ;;
 esac

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
@@ -50,4 +50,9 @@ export function verifySignedToken(purpose: string, token: string, maxAgeMs: numb
   const expected = Buffer.from(createHmac("sha256", KEY).update(`${purpose}:${ts}.${rand}`).digest("base64url"));
   const got = Buffer.from(sig);
   return got.length === expected.length && timingSafeEqual(got, expected) && Date.now() - Number(ts) < maxAgeMs;
+}
+
+/** Ana anahtardan, amaca özel ve dosya başına ayrı alt anahtar türetir (HKDF-SHA256); ana anahtar hiçbir yerde doğrudan kullanılmaz. */
+export function deriveKey(purpose: string, salt: Buffer): Buffer {
+  return Buffer.from(hkdfSync("sha256", KEY, salt, purpose, 32));
 }

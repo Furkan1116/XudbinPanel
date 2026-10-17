@@ -66,6 +66,7 @@ xudbin user disable-2fa ali@example.com           # turns off 2FA if the phone i
 xudbin user delete ali@example.com
 xudbin unban 203.0.113.7                          # removes an IP ban
 sudo xudbin restore /root/xudbin-panel-....xbk    # restores a panel backup
+sudo xudbin backup decrypt backup.sql.gz.xbe      # turns an encrypted database/volume backup into gzip
 sudo xudbin update                                # updates Xudbin
 xudbin restart                                    # restarts the panel
 xudbin logs                                       # follows the panel logs

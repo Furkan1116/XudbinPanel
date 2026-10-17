@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { createGunzip, createGzip } from "node:zlib";
+import { createGzip } from "node:zlib";
+import { ENCRYPTED_EXT, encryptStream, openBackupPlain } from "../lib/backup-crypto.js";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { decrypt, randomAlnum } from "../lib/crypto.js";
@@ -171,7 +172,7 @@ export async function createBackup(d: DatabaseRow) {
   const dir = backupDir(d);
   fs.mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const file = `${d.slug}-${stamp}.${ext}.gz`;
+  const file = `${d.slug}-${stamp}.${ext}.gz${ENCRYPTED_EXT}`;
   const res = db
     .prepare("INSERT INTO backups (database_id, file, status, created_at) VALUES (?, ?, 'running', ?)")
     .run(d.id, file, Date.now());
@@ -194,7 +195,7 @@ export async function createBackup(d: DatabaseRow) {
     docker.modem.demuxStream(stream, out, err);
     stream.on("end", () => out.end());
     stream.on("close", () => out.end());
-    await pipeline(out, createGzip(), fs.createWriteStream(path.join(dir, file)));
+    await pipeline(out, createGzip(), encryptStream(), fs.createWriteStream(path.join(dir, file), { mode: 0o600 }));
     const info = await exec.inspect();
     if (info.ExitCode !== 0) throw new Error(stderr.trim().split("\n").pop() || `Yedekleme ${info.ExitCode} koduyla çıktı`);
     const size = fs.statSync(path.join(dir, file)).size;
@@ -267,7 +268,7 @@ export async function restoreBackup(d: DatabaseRow, file: string) {
   const c = restoreCommand(d);
   if (!c) throw new Error("Redis yedeği panelden geri yüklenemez; .rdb dosyasını indirip elle yükle.");
   const res = await execIn(dockerFor(getServer(d.server_id)), containerName(d), ["sh", "-c", c], {
-    stdin: fs.createReadStream(full).pipe(createGunzip()),
+    stdin: await openBackupPlain(full),
     env: [`P=${password}`],
     timeoutMs: 30 * 60_000,
   });
@@ -346,7 +347,7 @@ async function doVerify(d: DatabaseRow, backupId: number) {
 
     if (d.engine === "redis") {
       const res = await execIn(docker, name, ["sh", "-c", "cat > /tmp/dump.rdb && redis-check-rdb /tmp/dump.rdb"], {
-        stdin: fs.createReadStream(full).pipe(createGunzip()),
+        stdin: await openBackupPlain(full),
         timeoutMs: 10 * 60_000,
       });
       const out = res.stdout + res.stderr;
@@ -368,7 +369,7 @@ async function doVerify(d: DatabaseRow, backupId: number) {
     }
 
     const restore = await execIn(docker, name, ["sh", "-c", restoreCommand(d)!], {
-      stdin: fs.createReadStream(full).pipe(createGunzip()),
+      stdin: await openBackupPlain(full),
       env,
       timeoutMs: 30 * 60_000,
     });

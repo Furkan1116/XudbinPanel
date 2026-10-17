@@ -384,7 +384,7 @@ export const appRoutes = new Hono<AppEnv>()
     const b = must(db.prepare("SELECT file FROM volume_backups WHERE id = ? AND app_id = ? AND status = 'success'").get(idParam(c, "backupId"), app.id) as { file: string } | undefined, "Yedek bulunamadı");
     const full = volumeBackupFile(app, b.file);
     if (!fs.existsSync(full)) throw new HttpError(404, "Yedek dosyası diskte yok (uzak depolamada olabilir)");
-    c.header("Content-Type", "application/gzip");
+    c.header("Content-Type", b.file.endsWith(".xbe") ? "application/octet-stream" : "application/gzip");
     c.header("Content-Disposition", `attachment; filename="${b.file}"`);
     c.header("Content-Length", String(fs.statSync(full).size));
     return c.body(Readable.toWeb(fs.createReadStream(full)) as ReadableStream);
