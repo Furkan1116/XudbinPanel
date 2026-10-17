@@ -58,4 +58,10 @@ Her sunucunun durumunu **Sunucular > sunucu > Durum** sekmesindeki **Sunucu güv
 
 Panelde yönetici olan biri sunucularda root yetkisine sahiptir; yönetici hesaplarında 2FA'yı mutlaka aç. Telefonunu kaybedersen sunucuda `xudbin user disable-2fa <e-posta>` çalıştır.
 
+## Panelin dışarıya attığı istekler
+
+Üyelerin verdiği adreslere (git repo adresi, uygulamanın alan adı) panel sunucusu istek atar. Bu adresler iç ağa çözülüyorsa (`127.x`, `10.x`, `172.16-31.x`, `192.168.x`, `169.254.x` bulut metadata dahil, `100.64/10`, IPv6 yerel/link-local adresleri, IPv4-mapped biçimleri) istek yapılmaz. Uptime izleyici bağlantıyı doğrulanmış IP'ye kurar ve yönlendirmeleri izlemez. Git klonlamada adres önceden denetlenir, yönlendirmeler kapatılır ve yalnız `https` kullanılır; ancak git adresi kendisi çözdüğü için bu **tam bir koruma değildir** (DNS yanıtı denetim ile bağlantı arasında değişebilir). Panel sunucusunun giden trafiğini güvenlik duvarıyla kısıtlamak ek güvence verir.
+
+İç ağdaki bir Gitea/GitLab gibi meşru hedefler için sunucuda `XUDBIN_SSRF_ALLOW=git.sirket.local,10.0.0.5` (virgülle ayrılmış ana bilgisayar adı veya IP) ayarla. Yönetici ayarları (bildirim webhook'u, S3, OIDC) bu süzgeçten geçmez; yerel MinIO gibi kullanımlar için bilerek serbesttir ve yalnız yönetici değiştirebilir.
+
 Bir güvenlik açığı bulursan herkese açık issue açma; GitHub'daki **Security > Report a vulnerability** bağlantısını kullan.
