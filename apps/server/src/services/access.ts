@@ -46,6 +46,10 @@ export function projectOfPath(path: string): number | null | undefined {
 export const projectAccess = createMiddleware<AppEnv>(async (c, next) => {
   const user = c.get("user");
   if (user.role === "admin") return next();
+  // Proje kaynağı yolunda ikinci bölüm ya düz rakam (kimlik) ya da düz kelime (ör. /detect)
+  // olmalı. "1e0", "%31", "0x1" gibi biçimler denetimi atlatmasın diye üyelere hiç açılmaz.
+  const seg = c.req.path.match(/^\/api\/(?:projects|apps|databases|deployments)\/([^/]+)/)?.[1];
+  if (seg !== undefined && !/^\d+$/.test(seg) && !/^[a-z][a-z-]*$/.test(seg)) return c.json({ error: "Bulunamadı" }, 404);
   const pid = projectOfPath(c.req.path);
   if (pid === undefined || pid === null) return next();
   const role = projectRole(user, pid);

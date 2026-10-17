@@ -19,10 +19,15 @@ export async function body<T extends z.ZodType>(c: Context, schema: T): Promise<
   return parsed.data;
 }
 
+/**
+ * Yol parametresindeki kimlik. Yalnız düz ondalık rakam kabul edilir: `Number()` tek başına
+ * "1e0", "0x1", "+1", " 1" gibi yazımları da 1 sayar; proje yetkisi yolu düz rakam diye
+ * denetlediği için bu yazımlar denetimi atlatabiliyordu.
+ */
 export function idParam(c: Context, name = "id") {
-  const id = Number(c.req.param(name));
-  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "Geçersiz kimlik");
-  return id;
+  const raw = c.req.param(name) ?? "";
+  if (!/^[1-9]\d{0,15}$/.test(raw)) throw new HttpError(400, "Geçersiz kimlik");
+  return Number(raw);
 }
 
 export function must<T>(value: T | undefined | null, message = "Bulunamadı"): T {

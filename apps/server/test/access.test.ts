@@ -7,6 +7,7 @@ import { createSession } from "../src/auth/session.js";
 import { db } from "../src/db.js";
 import type { AppEnv } from "../src/lib/types.js";
 import { accessibleAppIds, projectAccess } from "../src/services/access.js";
+import { HttpError, idParam } from "../src/lib/http.js";
 
 function seed() {
   const now = Date.now();
@@ -74,4 +75,19 @@ test("API anahtarları: sahibinin yetkisi, salt okunur ve hesap kısıtı", asyn
   assert.equal((await h.request(`/api/apps/${s.a1}`, { headers: auth(expired.token) })).status, 401);
   assert.equal((await h.request(`/api/apps/${s.a1}`, { headers: auth("xb_uydurma") })).status, 401);
   assert.equal((await h.request("/api/settings/account/tokens", { method: "POST", headers: auth(rw) })).status, 403);
+});
+
+test("proje yetkisi sayısal olmayan kimlik yazımlarıyla atlanamaz (K1)", async () => {
+  const s = seed();
+  const h = app();
+  const strict = new Hono<AppEnv>();
+  strict.use("/api/*", requireAuth, enforceRoles, projectAccess);
+  strict.get("/api/apps/:id", (c) => c.json({ id: idParam(c) }));
+  strict.onError((e, c) => c.json({ error: e.message }, (e as HttpError).status ?? 500));
+  for (const form of [`${s.a2}e0`, `${s.a2}.0`, `0x${s.a2.toString(16)}`, `+${s.a2}`, `%20${s.a2}`, `0${s.a2}`]) {
+    const status = (await strict.request(`/api/apps/${form}`, { headers: cookie(s.dev) })).status;
+    assert.ok(status === 404 || status === 400, `${form} -> ${status}`);
+    assert.notEqual((await h.request(`/api/apps/${form}`, { headers: cookie(s.dev) })).status, 200, form);
+  }
+  assert.equal((await strict.request(`/api/apps/${s.a1}`, { headers: cookie(s.dev) })).status, 200);
 });
