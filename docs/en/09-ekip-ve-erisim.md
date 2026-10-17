@@ -18,9 +18,11 @@ xudbin user reset-password ali@example.com
 | Role | Access |
 |---|---|
 | **Admin** | Everything: servers, security, settings, users and all projects |
-| **Member** | Only the projects, apps and databases they're added to; no access to servers, security or settings |
+| **Member** | Only the projects, apps and databases they're added to; intended to have no access to servers, security or settings (see the warning below) |
 
-Because admins control Docker, they effectively have root on your servers; give this role only to people you trust and make them turn on 2FA. Members can't use Compose settings that grant host access (privileged, host path mounts, host network); only an admin can allow this per app with **Host access** on the app's **Settings** tab.
+Because admins control Docker, they effectively have root on your servers; give this role only to people you trust and make them turn on 2FA. Compose settings that grant host access (privileged, host path mounts, host network) need admin approval: an admin enables them per app with **Host access** on the app's **Settings** tab.
+
+> **Warning:** The member role is not yet a strong security boundary. An independent code review on 2026-10-17 found gaps that could let a member reach other projects or the panel; they are being worked on. Until they are fixed, give the member role only to people you trust. Details: [SECURITY.md](../../SECURITY.md).
 
 ## Project roles
 

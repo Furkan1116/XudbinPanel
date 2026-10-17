@@ -18,9 +18,11 @@ xudbin user reset-password ali@ornek.com
 | Rol | Yetki |
 |---|---|
 | **Yönetici** | Her şey: sunucular, güvenlik, ayarlar, kullanıcılar ve tüm projeler |
-| **Üye** | Yalnız eklendiği projeler, uygulamalar ve veritabanları; sunuculara, güvenliğe ve ayarlara erişemez |
+| **Üye** | Yalnız eklendiği projeler, uygulamalar ve veritabanları; sunuculara, güvenliğe ve ayarlara erişmemesi amaçlanır (aşağıdaki uyarıya bak) |
 
-Yönetici Docker'a eriştiği için sunucularda fiilen root yetkisine sahiptir; bu rolü yalnız güvendiğin kişilere ver ve 2FA'yı açtır. Üyeler Compose dosyalarında sunucuya erişim veren ayarları (privileged, sunucu klasörü bağlama, host ağı) kullanamaz; bunu yalnız bir yönetici, uygulamanın **Ayarlar** sekmesindeki **Sunucu erişimi** ile açabilir.
+Yönetici Docker'a eriştiği için sunucularda fiilen root yetkisine sahiptir; bu rolü yalnız güvendiğin kişilere ver ve 2FA'yı açtır. Compose'ta sunucuya erişim veren ayarlar (privileged, sunucu klasörü bağlama, host ağı) için yönetici onayı gerekir: yönetici bunu uygulamanın **Ayarlar** sekmesindeki **Sunucu erişimi** ile açar.
+
+> **Uyarı:** Üye rolü henüz güçlü bir güvenlik sınırı değildir. 2026-10-17 tarihli bağımsız kod incelemesi, üyenin başka projelere ya da panele erişmesine yol açabilecek eksikler buldu; bunlar üzerinde çalışılıyor. Düzeltilene kadar üye rolünü yalnız güvendiğin kişilere ver. Ayrıntı: [SECURITY.md](../../SECURITY.md).
 
 ## Proje rolleri
 

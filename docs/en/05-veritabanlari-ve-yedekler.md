@@ -31,7 +31,7 @@ So backups survive if the server is lost entirely, turn on **Also upload backups
 
 ## Backup verification
 
-To know a backup can really be restored, set an interval (in hours) in **Verify backups**. One of the automatic backups is regularly restored into a temporary, network-less database and tested, and the backup is marked "verified". 0 turns this off. To test a single backup by hand, click **Verify**.
+To know a backup can really be restored, set an interval (in hours) in **Verify backups**. One of the automatic backups is regularly restored into a temporary, network-less database and tested, and the backup is marked "verified". 0 turns this off. Verification covers database backups only; volume and panel backups are not verified. To test a single backup by hand, click **Verify**.
 
 ## Volume backups
 

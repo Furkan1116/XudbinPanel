@@ -42,13 +42,13 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - PostgreSQL, MySQL, MariaDB, MongoDB, Redis; kullanıcı ve şifre otomatik üretilir
 - Elle veya zamanlanmış yedekleme, saklama sayısı, indirme ve geri yükleme
 - Yedekler S3 uyumlu uzak depolamaya da yüklenir (AWS S3, Cloudflare R2, Backblaze B2, MinIO)
-- **Doğrulanmış yedek:** yedekler düzenli olarak ağsız geçici bir veritabanına geri yüklenip denenir ("son yedek doğrulandı, 12 tablo")
+- **Doğrulanmış veritabanı yedeği:** otomatik veritabanı yedeklerinden biri düzenli olarak ağsız geçici bir veritabanına geri yüklenip denenir ("son yedek doğrulandı, 12 tablo"); volume ve panel yedekleri doğrulanmaz
 - **Panel yedeği:** panelin kendi verisi ve şifreleme anahtarı şifreli olarak yedeklenir; sunucu giderse yeni kurulumda `xudbin restore` ile geri gelir
 
 **Güvenlik**
 - **Güvenlik puanı:** panel, sunucular ve uygulamalar için kontroller (2FA, yedekler, güvenlik duvarı, fail2ban, SSH ayarları, otomatik güncellemeler, WAF, debug modu, imaj açıkları...) ve tek tıkla düzeltmeler
 - Docker'ın güvenlik duvarını atlaması engellenir: dışarıdan konteynerlere yalnız 80/443 ve panelden açılan veritabanı portları ulaşır
-- Üye rolü compose dosyasında sunucuya erişim (privileged, sunucu klasörü bağlama, host ağı) kullanamaz; bunu yalnız yönetici açabilir
+- Compose'ta sunucuya erişim (privileged, sunucu klasörü bağlama, host ağı) için yönetici onayı gerekir; ancak bu denetim şu an tam değildir, üye rolünü yalnız güvendiğin kişilere ver ([SECURITY.md](SECURITY.md))
 - Uygulama başına WAF, hız sınırı, güvenlik başlıkları, şifre koruması, IP listeleri
 - Tüm sunuculardaki Caddy loglarından saldırı ekranı: zaman çizelgesi, en çok saldıran IP'ler, hedeflenen adresler
 - Eşiği aşan IP'ler tüm sunucularda otomatik banlanır
@@ -63,7 +63,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 
 **Alan adları:** Sunucuya kendi wildcard alan adını ver (`*.apps.sirketim.com`), yeni uygulamalar onun altında adres alır. DNS kayıtları panelden denetlenir ("bu kayıt şu IP'yi göstermeli"). Portları açık olmayan sunucular için **Cloudflare Tunnel** desteği.
 
-**Kullanıcılar ve ekip:** Yönetici ve üye rolleri; üyeler projelere **geliştirici** veya **izleyici** olarak eklenir ve yalnız o projeleri görür. **Tek oturum açma (SSO):** Google Workspace, Microsoft Entra, Keycloak, Authentik, GitLab gibi OpenID Connect sağlayıcılarıyla giriş. **İşlem kaydı:** kim, ne zaman, neyi değiştirdi. **API anahtarları:** süreli, istenirse salt okunur; `xb` komut satırı aracı ve CI/CD için. Yeni kullanıcı geçici şifreyle eklenir, ilk girişte kendi şifresini belirler.
+**Kullanıcılar ve ekip:** Yönetici ve üye rolleri; üyeler projelere **geliştirici** veya **izleyici** olarak eklenir ve yalnız o projeleri görmeleri amaçlanır (üye rolü henüz güçlü bir güvenlik sınırı değildir, bkz. [SECURITY.md](SECURITY.md)). **Tek oturum açma (SSO):** Google Workspace, Microsoft Entra, Keycloak, Authentik, GitLab gibi OpenID Connect sağlayıcılarıyla giriş. **İşlem kaydı:** kim, ne zaman, neyi değiştirdi. **API anahtarları:** süreli, istenirse salt okunur; `xb` komut satırı aracı ve CI/CD için. Yeni kullanıcı geçici şifreyle eklenir, ilk girişte kendi şifresini belirler.
 
 **Panel:** Yeni sürüm bildirimi ve panelden tek tıkla güncelleme; saat dilimi ayarı.
 
@@ -219,7 +219,7 @@ install.sh    Tek komutla sunucu kurulumu
 
 - Panel her sunucuya Docker API üzerinden bağlanır: kendi sunucusunda soketle, uzak sunucularda SSH tüneliyle (`docker system dial-stdio`).
 - Her sunucuda bir `xudbin-caddy` konteyneri bulunur. Panel Caddy yapılandırmasını JSON olarak üretip konteynere yazar ve `caddy reload` ile uygular.
-- Her projenin kendi Docker ağı vardır (`xb-p<id>`); bir projedeki uygulama başka projenin uygulamalarına ve veritabanlarına, panelin kendisine de ulaşamaz. Caddy tüm proje ağlarına bağlıdır.
+- Her projenin kendi Docker ağı vardır (`xb-p<id>`); tek konteynerli uygulamalar başka projenin uygulamalarına ve veritabanlarına, panelin kendisine de ulaşamaz (Compose uygulamalarında bu yalıtım şu an aşılabilir, bkz. [SECURITY.md](SECURITY.md)). Caddy tüm proje ağlarına bağlıdır.
 - Çok sunuculu uygulamalarda ana sunucunun Caddy'si ek sunucuların Caddy'sine 443 üzerinden bağlanır; her sunucunun Caddy iç sertifika otoritesi (CA) panel tarafından okunur ve yalnız ona güvenilir. Ek sunucu, uygulamaya özel gizli başlığı taşımayan istekleri reddeder.
 - Caddy erişim logları 20 saniyede bir okunur; WAF (403), hız sınırı (429), banlı IP ve hatalı şifre (401) olayları saldırı ekranına düşer.
 - Git uygulamaları panelin sunucusunda klonlanır, derleme bağlamı hedef sunucunun Docker'ına gönderilip orada derlenir.

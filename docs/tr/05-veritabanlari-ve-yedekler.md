@@ -31,7 +31,7 @@ Sunucu tamamen giderse yedekler de gitmesin diye **Ayarlar > Yedekleme > Uzak de
 
 ## Yedek doğrulama
 
-Yedeğin gerçekten açılıp açılmadığını bilmek için **Yedekleri doğrula** alanına bir sıklık (saat) gir. Otomatik yedeklerden biri düzenli olarak ağsız, geçici bir veritabanına geri yüklenip denenir ve yedeğin yanında "doğrulandı" yazar. 0 bu özelliği kapatır. Tek bir yedeği elle denemek için **Doğrula**'ya bas.
+Yedeğin gerçekten açılıp açılmadığını bilmek için **Yedekleri doğrula** alanına bir sıklık (saat) gir. Otomatik yedeklerden biri düzenli olarak ağsız, geçici bir veritabanına geri yüklenip denenir ve yedeğin yanında "doğrulandı" yazar. 0 bu özelliği kapatır. Doğrulama yalnız veritabanı yedeklerini kapsar; volume ve panel yedekleri doğrulanmaz. Tek bir yedeği elle denemek için **Doğrula**'ya bas.
 
 ## Kalıcı klasör yedekleri
 
