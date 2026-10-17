@@ -27,7 +27,7 @@ import { detectFrameworks, getFramework, publicCatalog } from "../services/frame
 import { config } from "../config.js";
 import fs from "node:fs";
 import path from "node:path";
-import { extractZip, newTempUpload, saveUpload, storeAppUpload, tempUploadFile } from "../services/uploads.js";
+import { beginUpload, extractZip, newTempUpload, saveUpload, storeAppUpload, tempUploadFile, UploadLimitError } from "../services/uploads.js";
 import { getServer } from "../services/servers.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor.js";
 import { scanApp } from "../services/scan.js";
@@ -39,7 +39,7 @@ import { checkDomain } from "../services/dns-check.js";
 import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
-import { accessibleAppIds, accessibleProjectIds, canWriteProject } from "../services/access.js";
+import { accessibleAppIds, accessibleProjectIds, canUpload, canWriteProject } from "../services/access.js";
 import { appsForRepo, completeManifest, gitTokenFor, verifyGithubSignature } from "../services/github-app.js";
 import { extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas } from "../services/remote-replicas.js";
 
@@ -661,10 +661,14 @@ export const appRoutes = new Hono<AppEnv>()
     if (app.source_type !== "upload") throw new HttpError(422, "Bu uygulama dosya yüklemeyle çalışmıyor");
     if (!c.req.raw.body) throw new HttpError(400, "Dosya yok");
     const tmp = newTempUpload();
+    const slot = guardUpload(c.get("user").id);
+    const progress = { bytes: 0 };
     try {
-      await saveUpload(c.req.raw.body, tmp.file);
+      await saveUpload(c.req.raw.body, tmp.file, { maxBytes: slot.maxBytes, progress });
     } catch (err) {
       throw new HttpError(400, (err as Error).message);
+    } finally {
+      slot.finish(progress.bytes);
     }
     storeAppUpload(app.slug, tmp.file);
     const deploymentId = enqueueDeploy(app.id, "manual", { title: "Dosya yüklemesi" });
@@ -1005,16 +1009,32 @@ export const frameworkRoutes = new Hono<AppEnv>()
   });
 
 /** Uygulama oluşturmadan önce arşivi yükleyip proje türünü algılar; dönen uploadId oluştururken kullanılır. */
-export const uploadRoutes = new Hono().post("/", async (c) => {
+/** Yükleme kotasını/eşzamanlılığı uygular; aşılırsa 429 (geçici alan doluysa 507) döner. */
+function guardUpload(userId: number) {
+  try {
+    return beginUpload(userId);
+  } catch (err) {
+    if (err instanceof UploadLimitError) throw new HttpError(err.status, err.message);
+    throw err;
+  }
+}
+
+export const uploadRoutes = new Hono<AppEnv>().post("/", async (c) => {
+  // Projesi olmayan ya da yalnız görüntüleyici olan üye dosya yükleyemez (O9).
+  if (!canUpload(c.get("user"))) throw new HttpError(403, "Dosya yüklemek için en az bir projede yazma yetkin olmalı");
   if (!c.req.raw.body) throw new HttpError(400, "Dosya yok");
+  const slot = guardUpload(c.get("user").id);
   const tmp = newTempUpload();
   let size: number;
+  const progress = { bytes: 0 };
   try {
-    size = await saveUpload(c.req.raw.body, tmp.file);
+    size = await saveUpload(c.req.raw.body, tmp.file, { maxBytes: slot.maxBytes, progress });
   } catch (err) {
+    slot.finish(progress.bytes);
     throw new HttpError(400, (err as Error).message);
   }
   const dest = path.join(config.dataDir, "builds", `detect-${tmp.id}`);
+  // Açma (algılama için) de aynı yükleme yuvasında yapılır; bitince bırakılır.
   try {
     const dir = await extractZip(tmp.file, dest);
     return c.json({ uploadId: tmp.id, size, detect: detectFrameworks(dir) }, 201);
@@ -1022,6 +1042,7 @@ export const uploadRoutes = new Hono().post("/", async (c) => {
     fs.rmSync(tmp.file, { force: true });
     throw new HttpError(400, (err as Error).message);
   } finally {
+    slot.finish(progress.bytes);
     fs.rmSync(dest, { recursive: true, force: true });
   }
 });

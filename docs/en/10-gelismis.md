@@ -28,7 +28,7 @@ For processes without a web server, like Celery, Sidekiq or `queue:work`, set **
 
 **Replicas** on the app's **Settings** tab can be 1–10. For web apps, Caddy spreads traffic across replicas and takes a failed one out of rotation. The change applies on the next deploy.
 
-With **Memory limit (MB)** and **CPU limit (cores)** you keep one app from affecting the whole server; if the limit is exceeded, only that app restarts.
+With **Memory limit (MB)** and **CPU limit (cores)** you keep one app from affecting the whole server; if the limit is exceeded, only that app restarts. The memory limit is empty by default (the right value varies per app; apps without one get a warning in the security score). The number of processes is capped at 512 in every app container so a fork bomb cannot lock up the whole server.
 
 ## Multi-server load balancing
 

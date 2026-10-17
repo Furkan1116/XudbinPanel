@@ -15,7 +15,7 @@ Projenin sayfasında **Uygulama ekle**'ye bas ve kaynağı seç:
 | Kaynak | Ne zaman |
 |---|---|
 | **Git reposu** | GitHub, GitLab, Gitea... Özel repo için **Erişim token'ı** gir ya da [GitHub App](08-git-ve-otomatik-deploy.md) bağlıysa **GitHub'dan seç**. Monorepo'da **Proje klasörü** alanına alt klasörü yaz (ör. `apps/web`). |
-| **Dosya yükle** | Proje klasörünü veya zip dosyasını sürükleyip bırak. `.env` dosyası yüklenmez; değerlerini ortam değişkenlerine gir. |
+| **Dosya yükle** | Proje klasörünü veya zip dosyasını sürükleyip bırak. `.env` dosyası yüklenmez; değerlerini ortam değişkenlerine gir. Yükleme için yönetici ya da en az bir projede geliştirici olmak gerekir; dosya en fazla 300 MB, açıldığında en fazla 3 GB olabilir; kullanıcı başına aynı anda tek yükleme ve saatte 20 yükleme / 1 GB sınırı vardır. |
 | **Docker imajı** | Hazır bir imajı çalıştır, ör. `ghcr.io/kullanici/uygulama:latest`. |
 | **Docker Compose** | Birden çok servis. Compose dosyasını repodan alır ya da yapıştırırsın. |
 

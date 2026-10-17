@@ -64,3 +64,9 @@ export function canWriteProject(user: SessionUser, projectId: number) {
   const r = projectRole(user, projectId);
   return r === "admin" || r === "developer";
 }
+
+/** Dosya yükleme (zip) yalnız yöneticiye ya da en az bir projede "developer" olan üyeye açıktır. */
+export function canUpload(user: SessionUser) {
+  if (user.role === "admin") return true;
+  return Boolean(db.prepare("SELECT 1 FROM project_members WHERE user_id = ? AND role = 'developer' LIMIT 1").get(user.id));
+}

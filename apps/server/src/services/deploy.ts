@@ -21,6 +21,7 @@ import { getServer } from "./servers.js";
 import { getPrivateKey } from "./ssh.js";
 import { extractZip, latestAppUpload } from "./uploads.js";
 import { gitTokenFor } from "./github-app.js";
+import { resourceLimits } from "../lib/limits.js";
 import { assertSafeGitUrl } from "../lib/ssrf.js";
 import { ensureRelayCa, extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas, startRemoteReplicas } from "./remote-replicas.js";
 
@@ -554,8 +555,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
         RestartPolicy: { Name: "unless-stopped" },
         Binds: volumes.map((v) => `xb-${app.slug}-${v.name}:${v.path}`),
         // Sınır yoksa tek bir uygulama tüm sunucuyu (panel dahil) belleksiz bırakabilir.
-        ...(fresh.memory_limit ? { Memory: fresh.memory_limit * 1024 * 1024, MemorySwap: fresh.memory_limit * 1024 * 1024 } : {}),
-        ...(fresh.cpu_limit ? { NanoCpus: Math.round(fresh.cpu_limit * 1e9) } : {}),
+        ...resourceLimits(fresh),
         LogConfig: { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } },
       },
       NetworkingConfig: { EndpointsConfig: { [network]: { Aliases: [`xb-${app.slug}`] } } },

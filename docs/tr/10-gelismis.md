@@ -28,7 +28,7 @@ Celery, Sidekiq veya `queue:work` gibi web sunucusu olmayan süreçler için uyg
 
 Uygulamanın **Ayarlar** sekmesindeki **Kopya sayısı** 1–10 arasında olabilir. Web uygulamalarında Caddy trafiği kopyalara dağıtır ve çöken kopyayı devre dışı bırakır. Değişiklik bir sonraki deploy'da geçerli olur.
 
-**Bellek sınırı (MB)** ve **CPU sınırı (çekirdek)** ile bir uygulamanın tüm sunucuyu etkilemesini önleyebilirsin; sınır aşılırsa yalnız o uygulama yeniden başlatılır.
+**Bellek sınırı (MB)** ve **CPU sınırı (çekirdek)** ile bir uygulamanın tüm sunucuyu etkilemesini önleyebilirsin; sınır aşılırsa yalnız o uygulama yeniden başlatılır. Bellek sınırı varsayılan olarak boştur (doğru değer uygulamaya göre değişir; boş uygulamalar güvenlik puanında uyarı alır). Süreç sayısı ise her uygulama konteynerinde 512 ile sınırlıdır; fork bombası tüm sunucuyu kilitlemesin diye.
 
 ## Çok sunuculu yük dağıtımı
 
