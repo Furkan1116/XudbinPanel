@@ -31,6 +31,40 @@ include: [other.yml]`);
   for (const s of ["privileged", "cap_add", "pid: host", "container:xudbin-caddy", "(/)", "docker.sock", "../x", "(/etc)", "evil", "include"]) assert.ok(issues.includes(s), s);
 });
 
+test("compose: bağımsız incelemenin saydığı kaçış yolları yakalanır (K2/K3/Y1/Y2)", () => {
+  const doc = YAML.parse(`services:
+  a:
+    build: {context: /data, dockerfile_inline: "FROM alpine"}
+  b:
+    image: alpine
+    volumes_from: ["container:xudbin"]
+  c:
+    build: {context: ., additional_contexts: {host: /host}, ssh: [default]}
+    env_file: [/etc/environment]
+  d:
+    image: alpine
+    volumes: [panel:/d, baska-projenin-volumu:/x]
+    networks: [panel_net]
+    container_name: xudbin
+    logging: {driver: syslog, options: {syslog-address: "udp://10.0.0.1:514"}}
+volumes:
+  panel: {external: true, name: xudbin_xudbin-data}
+networks:
+  panel_net: {external: true, name: xudbin-panel}
+secrets:
+  s: {environment: XUDBIN_SECRET}`);
+  const issues = composeHostAccessIssues(doc).join("\n");
+  for (const s of ["build.context", "(/data)", "volumes_from", "container:xudbin", "additional_contexts", "build.ssh", "env_file",
+    "baska-projenin-volumu", "external", "name", "panel_net", "container_name", "syslog", "environment"]) assert.ok(issues.includes(s), s);
+});
+
+test("compose: tanınmayan ayar da izin ister (izin listesi)", () => {
+  const doc = YAML.parse("services:\n  web:\n    image: nginx\n    yeni_bir_ayar: true\n    sysctls: {net.core.somaxconn: 1024}");
+  const issues = composeHostAccessIssues(doc).join("\n");
+  assert.ok(issues.includes("yeni_bir_ayar"));
+  assert.ok(issues.includes("sysctls"));
+});
+
 test("yol kaçışı ve klasör dışına giden kısayollar engellenir", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "xb-paths-"));
   fs.writeFileSync(path.join(root, "ok.txt"), "x");
