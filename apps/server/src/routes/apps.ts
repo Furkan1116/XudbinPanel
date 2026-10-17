@@ -36,6 +36,7 @@ import { deletePreview, handlePrEvent, parsePrEvent } from "../services/previews
 import { appVolumes, backupAppVolumes, restoreVolumeBackup, volumeBackupFile } from "../services/volume-backups.js";
 import { Readable } from "node:stream";
 import { checkDomain } from "../services/dns-check.js";
+import { domainProblem } from "../services/domain-policy.js";
 import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
@@ -549,6 +550,10 @@ export const appRoutes = new Hono<AppEnv>()
     const input = await body(c, z.object({ host: z.string().trim().toLowerCase(), https: z.boolean().default(true) }));
     if (!HOST_RE.test(input.host)) throw new HttpError(400, "Geçerli bir alan adı gir (ör. blog.ornek.com)");
     if (db.prepare("SELECT 1 FROM domains WHERE host = ?").get(input.host)) throw new HttpError(409, "Bu alan adı zaten kullanılıyor");
+    // Panelin kendi alan adı ve alt alanları ile uygulama başına sayı sınırı (O7).
+    const count = (db.prepare("SELECT COUNT(*) AS n FROM domains WHERE app_id = ?").get(app.id) as { n: number }).n;
+    const problem = domainProblem(input.host, c.get("user").role, count);
+    if (problem) throw new HttpError(422, problem);
     // DNS henüz sunucuyu göstermiyorsa alan adı yine eklenir (DNS sonradan düzeltilebilir), ama uyarı döner.
     const dnsServer = getServer(app.server_id);
     const dns = await checkDomain(input.host, dnsServer.public_ip).catch(() => null);
@@ -572,6 +577,8 @@ export const appRoutes = new Hono<AppEnv>()
     const server = getServer(app.server_id);
     const host = generatedHost(`${app.slug.split("-").slice(0, -1).join("-") || "app"}-${randomAlnum(4).toLowerCase()}`, server);
     if (!host) throw new HttpError(422, "Sunucunun dış IP adresi bilinmiyor. Sunucu ayarlarından gir.");
+    const problem = domainProblem(host, c.get("user").role, (db.prepare("SELECT COUNT(*) AS n FROM domains WHERE app_id = ?").get(app.id) as { n: number }).n);
+    if (problem) throw new HttpError(422, problem);
     db.prepare("INSERT INTO domains (app_id, host, https, generated, created_at) VALUES (?, ?, ?, 1, ?)").run(app.id, host, server.https_mode === "off" ? 0 : 1, Date.now());
     if (server.status === "ready") await applyCaddyConfig(server);
     return c.json({ app: publicApp(loadApp(app.id)) }, 201);

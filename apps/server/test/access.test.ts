@@ -8,6 +8,7 @@ import { db } from "../src/db.js";
 import type { AppEnv } from "../src/lib/types.js";
 import { accessibleAppIds, canSeeSecrets, projectAccess, requireSecretAccess, secretsVisible } from "../src/services/access.js";
 import { appTokenAllowed, approvedAppUrl, gitTokenFor } from "../src/services/github-app.js";
+import { domainProblem, MAX_DOMAINS_PER_APP, panelHosts } from "../src/services/domain-policy.js";
 import { updateSettings } from "../src/lib/settings.js";
 import { HttpError, idParam } from "../src/lib/http.js";
 
@@ -145,5 +146,32 @@ test("GitHub App token'ı yalnız yöneticiye ya da projede onaylı repoya veril
     assert.equal(await gitTokenFor(x, "kendi", false), "kendi");
   } finally {
     updateSettings({ githubApp: null });
+  }
+});
+
+test("panel alan adı ve alt alanları üyeye kapalı, uygulama başına alan adı sınırlı (O7)", () => {
+  const panel = ["xudbin.ornek.com", "xudbin.1-2-3-4.sslip.io"];
+  assert.match(domainProblem("xudbin.ornek.com", "member", 0, panel) ?? "", /panelin kendi adresi/);
+  assert.match(domainProblem("xudbin.ornek.com", "admin", 0, panel) ?? "", /panelin kendi adresi/);
+  assert.match(domainProblem("XUDBIN.1-2-3-4.sslip.io", "member", 0, panel) ?? "", /kendi adresi/);
+  assert.match(domainProblem("evil.xudbin.ornek.com", "member", 0, panel) ?? "", /alt alan/);
+  assert.equal(domainProblem("evil.xudbin.ornek.com", "admin", 0, panel), null);
+  assert.equal(domainProblem("blog.ornek.com", "member", 0, panel), null);
+  assert.equal(domainProblem("notxudbin.ornek.com", "member", 0, panel), null);
+  assert.match(domainProblem("a.example.org", "member", MAX_DOMAINS_PER_APP, panel) ?? "", /en fazla/);
+  assert.equal(domainProblem("a.example.org", "admin", MAX_DOMAINS_PER_APP - 1, panel), null);
+  // Ayardaki panel alan adı ve kurulum ortam değişkeni listeye girer.
+  const old = process.env.XUDBIN_DOMAIN;
+  process.env.XUDBIN_DOMAIN = "Panel.Kurulum.Test";
+  updateSettings({ panelDomain: "panel.ayar.test" });
+  try {
+    const hosts = panelHosts();
+    assert.ok(hosts.includes("panel.kurulum.test") && hosts.includes("panel.ayar.test"));
+    assert.ok(domainProblem("panel.ayar.test", "member", 0));
+    assert.ok(domainProblem("x.panel.kurulum.test", "member", 0));
+  } finally {
+    if (old === undefined) delete process.env.XUDBIN_DOMAIN;
+    else process.env.XUDBIN_DOMAIN = old;
+    updateSettings({ panelDomain: "" });
   }
 });
