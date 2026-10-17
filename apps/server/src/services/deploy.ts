@@ -8,7 +8,7 @@ import { config } from "../config.js";
 import { db } from "../db.js";
 import { decrypt, encrypt, randomAlnum } from "../lib/crypto.js";
 import { bus } from "../lib/events.js";
-import { resolveInside } from "../lib/paths.js";
+import { removeEscapingSymlinks, resolveInside, writeInside } from "../lib/paths.js";
 import { detectFrameworks, getFramework, missingDefaultEnv, openRepo, type Framework, type Options } from "./frameworks/index.js";
 import { applyCaddyConfig, CADDY_CONTAINER, certificateReady } from "./caddy.js";
 import { composeHostAccessIssues } from "./compose-policy.js";
@@ -363,6 +363,8 @@ async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void,
   const sha = (await run("git", ["rev-parse", "--short", "HEAD"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   const msg = (await run("git", ["log", "-1", "--pretty=%s"], { cwd: path.join(workdir, "src"), log: () => {} })).trim();
   log(`Commit ${sha}: ${msg}`);
+  const dropped = removeEscapingSymlinks(path.join(workdir, "src"));
+  if (dropped) log(`Repo dışını gösteren ${dropped} kısayol (symlink) yok sayıldı`);
   return { dir: path.join(workdir, "src"), sha, msg };
 }
 
@@ -407,8 +409,8 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
     const env = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off").env;
     const result = fw.build(openRepo(contextDir), opts, env);
     dockerfile = "Dockerfile.xudbin";
-    for (const [name, content] of Object.entries(result.files ?? {})) fs.writeFileSync(path.join(contextDir, name), content);
-    fs.writeFileSync(path.join(contextDir, dockerfile), result.dockerfile);
+    for (const [name, content] of Object.entries(result.files ?? {})) writeInside(contextDir, name, content);
+    writeInside(contextDir, dockerfile, result.dockerfile);
     log(`Framework: ${fw.name}`);
     result.notes?.forEach((n) => log(n));
     log("Üretilen Dockerfile:");
@@ -833,13 +835,16 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
     services: Object.fromEntries(services.map((s) => [s, { networks: ["default", "xudbin"], labels: { "xudbin.managed": "true", "xudbin.app": app.slug } }])),
     networks: { xudbin: { external: true, name: await ensureProjectNetwork(server, app.project_id) } },
   };
-  const overridePath = path.join(dir, "docker-compose.xudbin.yml");
-  fs.writeFileSync(overridePath, YAML.stringify(override));
+  const overridePath = writeInside(dir, "docker-compose.xudbin.yml", YAML.stringify(override));
   // Compose, .env dosyasındaki değişkenleri ${AD} biçimindeki yerlere koyar; yer tutucular önce doldurulur.
   const composeVars = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off").env;
   // Tek tırnak: Compose içini olduğu gibi okur ($ işareti değişken sanılmaz). Tek tırnak içeren değerler çift tırnakla.
   const quote = (v: string) => (v.includes("'") || v.includes("\n") ? JSON.stringify(v) : `'${v}'`);
-  fs.writeFileSync(path.join(dir, ".env"), Object.entries(composeVars).map(([k, v]) => `${k}=${quote(v)}`).join("\n") + "\n", { mode: 0o600 });
+  // Anahtar adı yalnız harf, rakam ve alt çizgi: aksi halde satır sonu ya da = ile .env'e satır eklenebilirdi.
+  const validKey = (k: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k);
+  const skipped = Object.keys(composeVars).filter((k) => !validKey(k));
+  if (skipped.length) log(`Geçersiz adlı ${skipped.length} ortam değişkeni Compose .env dosyasına yazılmadı`);
+  writeInside(dir, ".env", Object.entries(composeVars).filter(([k]) => validKey(k)).map(([k, v]) => `${k}=${quote(v)}`).join("\n") + "\n", 0o600);
 
   const env = composeEnv(server, workdir);
   const args = ["compose", "-p", `xb-${app.slug}`, "-f", composePath, "-f", overridePath];

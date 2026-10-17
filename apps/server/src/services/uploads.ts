@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { removeEscapingSymlinks } from "../lib/paths.js";
 import path from "node:path";
 import { config } from "../config.js";
 import { randomAlnum } from "../lib/crypto.js";
@@ -115,6 +116,8 @@ export async function extractZip(zip: string, dest: string): Promise<string> {
     p.on("error", () => reject(new Error("unzip bulunamadı")));
     p.on("close", (code) => (code === 0 || code === 1 ? resolve() : reject(new Error(`Arşiv açılamadı: ${err.trim().split("\n").pop() || code}`))));
   });
+  // Zip'teki kısayollar (symlink) klasör dışını gösteremez.
+  removeEscapingSymlinks(dest);
   const entries = fs.readdirSync(dest).filter((n) => n !== "__MACOSX" && n !== ".DS_Store");
   if (entries.length === 1 && fs.statSync(path.join(dest, entries[0]!)).isDirectory()) return path.join(dest, entries[0]!);
   return dest;
