@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { getSettings } from "../lib/settings.js";
-import { ACCESS_LOG, applyCaddyConfig, CADDY_CONTAINER } from "./caddy.js";
+import { ipInList } from "../lib/cidr.js";
+import { ACCESS_LOG, applyCaddyConfig, CADDY_CONTAINER, parseSecurity } from "./caddy.js";
 import { dockerFor, execIn, type ServerRow } from "./docker.js";
 import { ingestAnalytics, type AccessEntry } from "./analytics.js";
 import { notify } from "./notify.js";
@@ -9,10 +10,11 @@ import { listServers, updateServer } from "./servers.js";
 type AccessLog = AccessEntry;
 
 /** Erişim logundaki bir isteğin güvenlik olayı olup olmadığını ve türünü belirler. */
-function classify(entry: AccessLog): string | null {
+export function classify(entry: AccessLog): string | null {
   const block = entry.resp_headers?.["X-Xudbin-Block"]?.[0];
+  if (entry.status === 403 && block === "waf") return "waf";
   if (entry.status === 403 && block) return block === "blocklist" ? "blocked" : "denied";
-  if (entry.status === 403) return "waf";
+  // İşaretsiz 403 uygulamanın kendi yanıtıdır (WAF engeli Caddy'de X-Xudbin-Block: waf ile işaretlenir); olay sayılmaz.
   if (entry.status === 429) return "ratelimit";
   if (entry.status === 401) return "auth";
   return null;
@@ -92,6 +94,9 @@ function processLines(serverId: number, lines: string[]) {
   return count;
 }
 
+/** Otomatik banı yalnız Coraza'nın engellediği istekler ve panel girişindeki başarısız denemeler tetikler; uygulamanın kendi 401/403/429 yanıtları saldırı sayılmaz. */
+export const BAN_KINDS = ["waf", "panel_login"] as const;
+
 /** Panelin kendi giriş ekranına yapılan başarısız denemeler de güvenlik olayıdır. */
 export function recordPanelEvent(ip: string, kind: string, path: string, userAgent?: string) {
   db.prepare(
@@ -108,13 +113,15 @@ export async function autoBan() {
   const offenders = db
     .prepare(
       `SELECT ip, COUNT(*) AS n FROM security_events
-       WHERE created_at > ? AND kind IN ('waf', 'ratelimit', 'auth', 'panel_login') AND ip NOT IN (SELECT ip FROM blocked_ips)
+       WHERE created_at > ? AND kind IN (${BAN_KINDS.map((k) => `'${k}'`).join(", ")}) AND ip NOT IN (SELECT ip FROM blocked_ips)
        GROUP BY ip HAVING n >= ?`,
     )
     .all(since, s.autoBanThreshold) as { ip: string; n: number }[];
   const banned: string[] = [];
+  const allow = allAllowIps();
   for (const o of offenders) {
     if (o.ip === "?" || o.ip === "127.0.0.1" || o.ip === "::1") continue;
+    if (ipInList(o.ip, allow)) continue; // izin listesindeki IP asla otomatik banlanmaz
     db.prepare("INSERT OR IGNORE INTO blocked_ips (ip, reason, auto, expires_at, created_at) VALUES (?, ?, 1, ?, ?)").run(
       o.ip,
       `${s.autoBanWindowMin} dakikada ${o.n} engellenen istek`,
@@ -132,8 +139,16 @@ export async function applyToAllServers() {
   await Promise.allSettled(listServers().filter((s) => s.status === "ready").map((s) => applyCaddyConfig(s)));
 }
 
+/** Hiçbir uygulamanın izin listesinde (allowIps) bulunan adresler otomatik banlanmaz. */
+function allAllowIps(): string[] {
+  const rows = db.prepare("SELECT security FROM apps").all() as { security: string }[];
+  return rows.flatMap((r) => parseSecurity(r.security).allowIps ?? []);
+}
+
+/** Engel listesi tek IP ve CIDR (IPv4/IPv6) içerebilir. */
 export function isBlocked(ip: string) {
-  return Boolean(db.prepare("SELECT 1 FROM blocked_ips WHERE ip = ? AND (expires_at IS NULL OR expires_at > ?)").get(ip, Date.now()));
+  const rows = db.prepare("SELECT ip FROM blocked_ips WHERE expires_at IS NULL OR expires_at > ?").all(Date.now()) as { ip: string }[];
+  return ipInList(ip, rows.map((r) => r.ip));
 }
 
 let ticking = false;

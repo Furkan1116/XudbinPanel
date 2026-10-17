@@ -281,6 +281,18 @@ function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; ha
   return { routes, handlers };
 }
 
+/**
+ * Coraza bir isteği kestiğinde Caddy'ye hata olarak döner; bu rota yanıtı X-Xudbin-Block: waf ile işaretler.
+ * Otomatik ban yalnız bu işareti sayar (uygulamanın kendi 403'ü proxy yanıtıdır, hata rotasına girmez).
+ */
+const WAF_ERROR_ROUTES: Route[] = [
+  {
+    match: [{ expression: "{http.error.status_code} == 403" }],
+    handle: [{ handler: "static_response", status_code: 403, headers: { "X-Xudbin-Block": ["waf"] }, body: "Erişim engellendi." }],
+    terminal: true,
+  },
+];
+
 function upstreamsFor(d: DomainRow): string[] {
   if (d.kind === "worker") return [];
   if (d.source_type === "compose") return d.compose_service ? [`xb-${d.app_slug}-${d.compose_service}-1:${d.port}`] : [];
@@ -460,17 +472,18 @@ export function buildCaddyConfig(server: ServerRow) {
       http: {
         servers: httpsOff
           ? {
-              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, automatic_https: { disable: true }, ...clientIp },
+              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, errors: { routes: WAF_ERROR_ROUTES }, automatic_https: { disable: true }, ...clientIp },
             }
           : {
               https: {
                 listen: [":443"],
                 routes: [...relayIn.routes, ...httpsRoutes, fallback],
                 logs: { default_logger_name: "access" },
+                errors: { routes: WAF_ERROR_ROUTES },
                 automatic_https: { skip: httpOnlyHosts },
                 ...clientIp,
               },
-              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, ...clientIp },
+              http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, errors: { routes: WAF_ERROR_ROUTES }, ...clientIp },
             },
       },
       ...(!httpsOff && (relayIn.hosts.length || (tlsPolicies && httpsHosts.length))

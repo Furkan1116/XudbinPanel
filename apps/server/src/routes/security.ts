@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { isValidIpOrCidr } from "../lib/cidr.js";
 import { z } from "zod";
 import { db } from "../db.js";
 import { body, HttpError, idParam } from "../lib/http.js";
@@ -78,7 +79,7 @@ export const securityRoutes = new Hono()
     const input = await body(
       c,
       z.object({
-        ip: z.string().trim().regex(/^[0-9a-f:.]+(\/\d{1,3})?$/i, "Geçerli bir IP veya CIDR gir"),
+        ip: z.string().trim().refine(isValidIpOrCidr, "Geçerli bir IP veya CIDR gir"),
         reason: z.string().trim().max(200).default("Elle engellendi"),
         hours: z.number().int().min(1).max(24 * 365).nullable().default(null),
       }),
