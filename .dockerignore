@@ -5,3 +5,4 @@
 .claude
 *.db
 .env
+**/.data
