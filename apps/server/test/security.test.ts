@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import YAML from "yaml";
 import { resolveInside } from "../src/lib/paths.js";
-import { verifyWebhook } from "../src/routes/apps.js";
+import { sameGitRepo, verifyWebhook } from "../src/routes/apps.js";
 import { composeHostAccessIssues } from "../src/services/compose-policy.js";
 import { openRepo } from "../src/services/frameworks/util.js";
 
@@ -119,4 +119,12 @@ test("GitHub App: repo adı eşleme ve webhook imzası", async () => {
   assert.equal(githubRepoOf("https://github.com.evil.com/a/b"), null);
   // App bağlı değilken hiçbir imza kabul edilmez.
   assert.equal(verifyGithubSignature("{}", "sha256=00"), false);
+});
+
+test("kayıtlı git token'ı yalnız aynı repo adresine gider (O1)", () => {
+  assert.ok(sameGitRepo("https://github.com/Ali/Site.git", "https://github.com/ali/site"));
+  assert.ok(sameGitRepo("https://github.com/ali/site/", "https://github.com/ali/site.git"));
+  assert.ok(!sameGitRepo("https://saldirgan.example/ali/site.git", "https://github.com/ali/site.git"));
+  assert.ok(!sameGitRepo("https://github.com/baska/site", "https://github.com/ali/site"));
+  assert.ok(!sameGitRepo("bozuk", "https://github.com/ali/site"));
 });

@@ -944,6 +944,20 @@ export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
     }
   });
 
+/** İki git adresi aynı repoyu mu gösteriyor? (büyük/küçük harf, sondaki .git ve / farkı yok sayılır) */
+export function sameGitRepo(a: string, b: string): boolean {
+  const norm = (u: string) => {
+    try {
+      const x = new URL(u.trim());
+      return `${x.protocol}//${x.host.toLowerCase()}${x.pathname.replace(/\/+$/, "").replace(/\.git$/i, "").toLowerCase()}`;
+    } catch {
+      return null;
+    }
+  };
+  const na = norm(a);
+  return na !== null && na === norm(b);
+}
+
 /** Framework kataloğu ve repo algılama. */
 export const frameworkRoutes = new Hono<AppEnv>()
   .get("/", (c) => c.json({ frameworks: publicCatalog() }))
@@ -965,9 +979,12 @@ export const frameworkRoutes = new Hono<AppEnv>()
     if (input.appId) {
       const app = loadApp(input.appId);
       if (!accessibleAppIds(c.get("user")).includes(app.id)) throw new HttpError(404, "Uygulama bulunamadı");
+      // Kayıtlı token yalnız uygulamanın kendi reposu için kullanılır; istemcinin verdiği başka bir
+      // adrese gönderilseydi token o sunucuya sızardı (bağımsız inceleme O1).
+      const sameRepo = !input.gitUrl || sameGitRepo(input.gitUrl, app.git_url ?? "");
       url = url || app.git_url || undefined;
       branch = input.gitUrl ? branch : app.git_branch;
-      token = token || decrypt(app.git_token);
+      token = token || (sameRepo ? decrypt(app.git_token) : "");
       context = input.gitUrl ? context : app.build_context;
     }
     if (!url || !/^https:\/\//.test(url)) throw new HttpError(400, "https:// ile başlayan bir repo adresi gerekli");
