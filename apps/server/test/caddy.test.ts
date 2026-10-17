@@ -44,3 +44,25 @@ test("O6: panel rotası gerçek IP'yi başlıkla iletir, panel başlığı XFF'y
   assert.equal(pickForwardedIp("sahte, değer", "1.2.3.4"), "1.2.3.4");
   updateSettings({ panelDomain: "" });
 });
+
+test("O5: panel rotasında WAF var; varsayılan yalnız tespit, gövde denetimi /api/'de kapalı", () => {
+  updateSettings({ panelDomain: "panel.test", panelHttps: false });
+  const wafOf = (mode: "off" | "detect" | "block") => {
+    updateSettings({ panelWaf: mode });
+    const cfg = JSON.stringify(buildCaddyConfig(fakeServer()));
+    const routes = Object.values(JSON.parse(cfg).apps.http.servers as Record<string, { routes: { match?: { host?: string[] }[] }[] }>).flatMap((x) => x.routes);
+    const panel = routes.find((r) => r.match?.[0]?.host?.[0] === "panel.test");
+    const m = /"handler":"waf","load_owasp_crs":true,"directives":"((?:[^"\\]|\\.)*)"/.exec(JSON.stringify(panel));
+    return m ? (JSON.parse(`"${m[1]}"`) as string) : null;
+  };
+  assert.equal(wafOf("off"), null);
+  const detect = wafOf("detect")!;
+  assert.ok(detect.includes("SecRuleEngine DetectionOnly") && !detect.includes("SecRuleEngine On"));
+  assert.ok(detect.includes("ctl:requestBodyAccess=Off") && detect.includes("/api/"));
+  assert.ok(detect.includes("blocking_paranoia_level=1"));
+  assert.ok(wafOf("block")!.includes("SecRuleEngine On"));
+  // kurallar CRS yüklenmeden önce tanımlanmalı
+  assert.ok(detect.indexOf("id:100002") < detect.indexOf("@owasp_crs"));
+  assert.equal(updateSettings({}).panelWaf, "block");
+  updateSettings({ panelDomain: "", panelWaf: "detect" });
+});

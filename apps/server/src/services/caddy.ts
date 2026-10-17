@@ -159,6 +159,8 @@ async function doApply(server: ServerRow) {
   const state = await containerState(docker, CADDY_CONTAINER);
   if (!state.exists) throw new Error("Bu sunucuda Caddy kurulu değil. Önce sunucu kurulumunu çalıştır.");
   const json = JSON.stringify(buildCaddyConfig(server), null, 2);
+  // Geçersiz bir yapılandırma diskte kalırsa Caddy yeniden başlayınca hiç açılmaz; reload başarısızsa eskisi geri yazılır.
+  const previous = state.running ? (await execIn(docker, CADDY_CONTAINER, ["cat", "/etc/caddy/caddy.json"], { timeoutMs: 10_000 }).catch(() => null)) : null;
   await putFile(docker, CADDY_CONTAINER, "/etc/caddy", "caddy.json", json);
   if (!state.running) {
     await docker.getContainer(CADDY_CONTAINER).start();
@@ -168,6 +170,7 @@ async function doApply(server: ServerRow) {
     timeoutMs: 30_000,
   });
   if (res.exitCode !== 0) {
+    if (previous && previous.exitCode === 0 && previous.stdout.trim()) await putFile(docker, CADDY_CONTAINER, "/etc/caddy", "caddy.json", previous.stdout).catch(() => {});
     const msg = (res.stderr || res.stdout).split("\n").filter(Boolean).pop() ?? "bilinmeyen hata";
     throw new Error(`Caddy yapılandırması uygulanamadı: ${msg}`);
   }
@@ -208,6 +211,26 @@ const WAF_DIRECTIVES = [
 const CLIENT_IP = "{http.vars.client_ip}";
 /** Panel ile Caddy arasında gerçek istemci IP'sini taşıyan başlık; lib/client-ip.ts aynı adı okur. */
 export const CLIENT_IP_HEADER = "X-Xudbin-Client-Ip";
+
+/**
+ * Panel rotasının WAF'ı. Uygulamalarla aynı Coraza + OWASP CRS, paranoya düzeyi 1.
+ * Panel API'si JSON gövde, uzun Compose dosyası ve ortam değişkeni taşır; CRS bunlara yanlış pozitif verir,
+ * bu yüzden /api/ isteklerinde gövde denetimi kapalıdır (URL, sorgu, başlık ve çerezler yine denetlenir).
+ * "detect" modunda kural eşleşir ama istek kesilmez; "block" modunda kesilir.
+ */
+export function panelWafDirectives(mode: "detect" | "block"): string {
+  return [
+    "Include @coraza.conf-recommended",
+    "Include @crs-setup.conf.example",
+    'SecAction "id:100001,phase:1,pass,nolog,setvar:tx.blocking_paranoia_level=1,setvar:tx.detection_paranoia_level=1"',
+    'SecRule REQUEST_URI "@beginsWith /api/" "id:100002,phase:1,pass,nolog,ctl:requestBodyAccess=Off"',
+    "Include @owasp_crs/*.conf",
+    mode === "block" ? "SecRuleEngine On" : "SecRuleEngine DetectionOnly",
+    "SecRequestBodyAccess On",
+    "SecResponseBodyAccess Off",
+    "SecAuditEngine Off",
+  ].join("\n");
+}
 
 function blockedIpRanges(): string[] {
   const rows = db
@@ -356,6 +379,7 @@ export function buildCaddyConfig(server: ServerRow) {
                   handler: "rate_limit",
                   rate_limits: { panel: { key: CLIENT_IP, window: "1m", max_events: 600 } },
                 },
+                ...(settings.panelWaf === "off" ? [] : [{ handler: "waf", load_owasp_crs: true, directives: panelWafDirectives(settings.panelWaf) }]),
                 {
                   handler: "reverse_proxy",
                   upstreams: [{ dial: config.panelUpstream }],

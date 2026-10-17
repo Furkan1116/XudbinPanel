@@ -18,6 +18,8 @@ The app's **Security** tab has these settings; click **Save and apply** after ch
 The **Security** page (admins only) reads Caddy logs from every server every 20 seconds:
 
 - **Attacks:** a timeline of blocked requests, the most blocked IPs, and the most targeted paths and sites. Click **Ban** next to an IP to ban it immediately.
+- **Panel WAF:** the panel address itself is checked with the same rules (paranoia level 1). The default mode is **Detect only**, which does not block requests; once you see the panel works fine, switch to **Block** under **Settings > Panel WAF**. Request bodies on `/api/` are not inspected so the panel API's JSON (Compose files, environment variables) does not trigger false alarms.
+- **Automatic ban:** only requests blocked by the WAF and failed panel sign-ins count; an app's own 401/403/429 responses do not. IPs on an allowlist are never banned. Block and allow lists accept single IPs and CIDR ranges (IPv4/IPv6).
 - **Events:** WAF, rate limit, banned IP, IP rule, wrong password and panel sign-in events.
 - **Banned IPs:** use **Ban IP** to ban an IP or CIDR, optionally for a limited time; **Unban** removes it. Banned IPs can't reach any app on any server, or the panel.
 

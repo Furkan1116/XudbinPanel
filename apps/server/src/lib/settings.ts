@@ -4,6 +4,8 @@ import { db } from "../db.js";
 export type Settings = {
   panelDomain: string;
   panelHttps: boolean;
+  /** Panelin kendi adresindeki WAF: kapalı, yalnız tespit (engellemez) veya engelle. */
+  panelWaf: "off" | "detect" | "block";
   autoBanEnabled: boolean;
   autoBanThreshold: number;   // pencere içinde kaç engellenen istek
   autoBanWindowMin: number;
@@ -32,6 +34,7 @@ export type Settings = {
 const DEFAULTS: Settings = {
   panelDomain: "",
   panelHttps: true,
+  panelWaf: "detect",
   autoBanEnabled: true,
   autoBanThreshold: 30,
   autoBanWindowMin: 10,

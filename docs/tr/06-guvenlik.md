@@ -18,6 +18,8 @@ Uygulamanın **Güvenlik** sekmesinde şu ayarlar bulunur; değiştirdikten sonr
 **Güvenlik** sayfası (yalnız yöneticiler) tüm sunuculardaki Caddy loglarını 20 saniyede bir okur:
 
 - **Saldırılar:** engellenen isteklerin zaman çizelgesi, en çok engellenen IP'ler, en çok hedeflenen adresler ve siteler. Bir IP'nin yanındaki **Banla** ile onu hemen banlarsın.
+- **Panelin WAF'ı:** panelin kendi adresi de aynı kurallarla (paranoya 1) denetlenir. Varsayılan mod **Yalnız tespit**'tir, istekleri kesmez; panelin sorunsuz çalıştığını gördükten sonra **Ayarlar > Panel WAF**'tan **Engelle**'ye al. Panel API'sinin JSON gövdeleri (Compose dosyaları, ortam değişkenleri) yanlış alarm vermesin diye `/api/` isteklerinde gövde denetlenmez.
+- **Otomatik ban:** yalnız WAF'ın engellediği istekler ve panel girişindeki hatalı denemeler sayılır; uygulamanın kendi 401/403/429 yanıtları saymaz. İzin listesindeki IP asla banlanmaz. Engel ve izin listeleri tek IP ve CIDR (IPv4/IPv6) kabul eder.
 - **Olaylar:** WAF, hız sınırı, banlı IP, IP kuralı, hatalı şifre ve panel girişi olaylarının listesi.
 - **Banlı IP'ler:** **IP banla** ile bir IP veya CIDR'yi isteğe bağlı bir süreyle banla; **Banı kaldır** ile kaldır. Banlı IP'ler hiçbir sunucudaki uygulamaya ve panele erişemez.
 
