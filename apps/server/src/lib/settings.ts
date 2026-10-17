@@ -25,7 +25,7 @@ export type Settings = {
   geoDbMonth: string | null;
   uptimeEnabled: boolean;
   /** OpenID Connect ile giriş; clientSecret şifreli. */
-  oidc: { issuer: string; clientId: string; clientSecret: string; label: string; autoCreate: boolean; allowedDomains: string } | null;
+  oidc: { issuer: string; clientId: string; clientSecret: string; label: string; autoCreate: boolean; allowedDomains: string; linkExisting?: boolean } | null;
   githubApp: GithubAppConfig | null;
 };
 

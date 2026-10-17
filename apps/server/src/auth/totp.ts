@@ -24,7 +24,7 @@ function base32Decode(s: string) {
   return Buffer.from(bytes);
 }
 
-function codeAt(secret: string, counter: number) {
+export function codeAt(secret: string, counter: number) {
   const buf = Buffer.alloc(8);
   buf.writeBigUInt64BE(BigInt(counter));
   const h = createHmac("sha1", base32Decode(secret)).update(buf).digest();

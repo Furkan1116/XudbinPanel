@@ -9,7 +9,7 @@ import { totpCounter } from "../auth/totp.js";
 import { decrypt } from "../lib/crypto.js";
 import { recordPanelEvent } from "../services/security.js";
 import { recordAudit } from "../services/audit.js";
-import { finishLogin, oidcConfig, startLogin } from "../auth/oidc.js";
+import { finishLogin, oidcConfig, ssoMayLogInto, startLogin } from "../auth/oidc.js";
 
 import { publicOrigin } from "../lib/origin.js";
 import { config } from "../config.js";
@@ -17,8 +17,14 @@ import { db } from "../db.js";
 import { clientIp } from "../lib/client-ip.js";
 import { createRateLimiter } from "../lib/rate-limit.js";
 
+const OIDC_STATE_COOKIE = "xudbin_oidc";
+
 // Aynı IP'den 15 dakikada en fazla 10 başarısız giriş denemesi.
+// Yalnız başarısız denemeler sayılır; başarılı giriş IP sayacını sıfırlamaz (kendi hesabıyla girip sayaç sıfırlanamaz).
 const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
+// Hesap başına başarısız deneme sınırı: dağıtık (çok IP'li) şifre denemesini yavaşlatır. Sınır IP'dekinden yüksektir ki
+// bir saldırgan kurbanı kolayca dışarıda bırakamasın; var olmayan e-postalar da sayılır (varlık sızmasın).
+const accountLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 20, maxKeys: 10_000 });
 
 // Kullanıcı bulunamadığında da hash doğrulaması yapmak için kullanılır.
 const DUMMY_HASH = await hashPassword("zamanlama-saldirisina-karsi-sahte-sifre");
@@ -62,7 +68,11 @@ export const authRoutes = new Hono()
   // --- Tek oturum açma (OpenID Connect) ----------------------------------------------------
   .get("/oidc/start", async (c) => {
     try {
-      return c.redirect(await startLogin(`${publicOrigin(c)}/api/auth/oidc/callback`));
+      const { url, state } = await startLogin(`${publicOrigin(c)}/api/auth/oidc/callback`);
+      // State'i başlatan tarayıcıya bağla: saldırganın başlattığı bir girişi kurbana tamamlatamaz (giriş-CSRF).
+      // Lax: sağlayıcıdan dönüşteki üst düzey GET isteğinde çerez gönderilir.
+      setCookie(c, OIDC_STATE_COOKIE, state, { httpOnly: true, secure: config.secureCookies, sameSite: "Lax", path: "/api/auth/oidc", maxAge: 600 });
+      return c.redirect(url);
     } catch (err) {
       return c.redirect(`/?sso_error=${encodeURIComponent((err as Error).message)}`);
     }
@@ -72,15 +82,22 @@ export const authRoutes = new Hono()
     try {
       const err = c.req.query("error_description") ?? c.req.query("error");
       if (err) throw new Error(`Sağlayıcı: ${err}`);
-      const { email, name, cfg } = await finishLogin(c.req.query("state") ?? "", c.req.query("code") ?? "");
-      let user = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as { id: number } | undefined;
+      const browserState = getCookie(c, OIDC_STATE_COOKIE) ?? "";
+      deleteCookie(c, OIDC_STATE_COOKIE, { path: "/api/auth/oidc" });
+      const { email, name, cfg } = await finishLogin(c.req.query("state") ?? "", c.req.query("code") ?? "", browserState);
+      let user = db.prepare("SELECT id, password_hash, role, totp_secret FROM users WHERE email = ?").get(email) as
+        | { id: number; password_hash: string; role: string; totp_secret: string | null }
+        | undefined;
+      if (user && !ssoMayLogInto(user, cfg)) {
+        throw new Error(`${email} yerel şifreli bir hesap; SSO ile girişe kapalı. Şifrenle gir (yönetici hesapları ve 2FA'lı hesaplar SSO'ya bağlanamaz).`);
+      }
       if (!user) {
         const domain = email.split("@")[1] ?? "";
         const allowed = cfg.allowedDomains.split(/[,\s]+/).map((d) => d.trim().toLowerCase()).filter(Boolean);
         if (!cfg.autoCreate || !allowed.includes(domain)) throw new Error(`${email} bu panelde kayıtlı değil. Bir yöneticinin seni eklemesi gerekiyor.`);
         // SSO ile gelen yeni kullanıcı: üye, şifresi yok (şifreyle giriş yapamaz), proje ataması yönetici tarafından yapılır.
         const id = db.prepare("INSERT INTO users (email, name, password_hash, role, created_at) VALUES (?, ?, '!sso', 'member', ?)").run(email, name.slice(0, 100), Date.now()).lastInsertRowid;
-        user = { id: Number(id) };
+        user = { id: Number(id), password_hash: "!sso", role: "member", totp_secret: null };
       }
       startSession(c, user.id);
       recordAudit({ userId: user.id, email, action: "SSO ile giriş yaptı", method: "GET", path: "/api/auth/oidc/callback", status: 200, ip, via: "panel" });
@@ -104,11 +121,27 @@ export const authRoutes = new Hono()
     }
 
     const { email, name, password } = parsed.data;
-    const result = db
-      .prepare("INSERT INTO users (email, name, password_hash, created_at) VALUES (?, ?, ?, ?)")
-      .run(email, name, await hashPassword(password), Date.now());
+    const hash = await hashPassword(password);
+    // Hash beklerken ikinci bir istek de kurulumu bitirmiş olabilir: sayım ve ekleme tek işlemde, senkron yapılır.
+    const insert = (): number | null => {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        if (userCount() > 0) {
+          db.exec("ROLLBACK");
+          return null;
+        }
+        const id = Number(db.prepare("INSERT INTO users (email, name, password_hash, created_at) VALUES (?, ?, ?, ?)").run(email, name, hash, Date.now()).lastInsertRowid);
+        db.exec("COMMIT");
+        return id;
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+    };
+    const userId = insert();
+    if (userId === null) return c.json({ error: "Kurulum zaten tamamlanmış" }, 409);
     clearSetupToken();
-    startSession(c, Number(result.lastInsertRowid));
+    startSession(c, userId);
     return c.json({ ok: true });
   })
 
@@ -117,7 +150,8 @@ export const authRoutes = new Hono()
     const parsed = credentials.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "E-posta veya şifre hatalı" }, 400);
 
-    const retryAfter = loginLimiter.hit(ip);
+    const email = parsed.data.email.toLowerCase();
+    const retryAfter = loginLimiter.check(ip) ?? accountLimiter.check(email);
     if (retryAfter) {
       c.header("Retry-After", String(retryAfter));
       return c.json({ error: `Çok fazla deneme. ${Math.ceil(retryAfter / 60)} dakika sonra tekrar deneyin.` }, 429);
@@ -129,6 +163,8 @@ export const authRoutes = new Hono()
     // Kullanıcı yoksa da hash doğrulaması yapılır ki yanıt süresi e-postanın varlığını ele vermesin.
     const valid = await verifyPassword(parsed.data.password, user?.password_hash ?? DUMMY_HASH);
     if (!user || !valid) {
+      loginLimiter.fail(ip);
+      accountLimiter.fail(email);
       recordPanelEvent(ip, "panel_login", "/api/auth/login", c.req.header("user-agent"));
       recordAudit({ userId: user?.id ?? null, email: parsed.data.email, action: "Başarısız giriş denemesi", method: "POST", path: "/api/auth/login", status: 401, ip, via: "panel" });
       return c.json({ error: "E-posta veya şifre hatalı" }, 401);
@@ -138,13 +174,15 @@ export const authRoutes = new Hono()
       // Aynı kod, geçerli olduğu süre içinde ikinci kez kullanılamaz (izlenip tekrar gönderilen kodlara karşı).
       const counter = totpCounter(decrypt(user.totp_secret), parsed.data.code);
       if (counter === null || (user.totp_last_counter !== null && counter <= user.totp_last_counter)) {
+        loginLimiter.fail(ip);
+        accountLimiter.fail(email);
         recordPanelEvent(ip, "panel_login", "/api/auth/login (2FA)", c.req.header("user-agent"));
         return c.json({ error: "Doğrulama kodu hatalı ya da zaten kullanıldı", needsCode: true }, 401);
       }
       db.prepare("UPDATE users SET totp_last_counter = ? WHERE id = ?").run(counter, user.id);
     }
 
-    loginLimiter.reset(ip);
+    accountLimiter.reset(email);
     startSession(c, user.id);
     recordAudit({ userId: user.id, email: parsed.data.email, action: "Giriş yaptı", method: "POST", path: "/api/auth/login", status: 200, ip, via: "panel" });
     return c.json({ ok: true });

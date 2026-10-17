@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, createVerify, randomBytes } from "node:crypto";
+import { createHash, createPublicKey, createVerify, randomBytes, timingSafeEqual } from "node:crypto";
 import { decrypt } from "../lib/crypto.js";
 import { getSettings } from "../lib/settings.js";
 
@@ -14,7 +14,21 @@ export type OidcConfig = {
   label: string;
   autoCreate: boolean;
   allowedDomains: string; // virgülle; boşsa yalnız mevcut kullanıcılar
+  /** Yerel şifresi olan bir üye hesabına SSO ile girişe izin verir (varsayılan kapalı). Şifreli yönetici hesapları hiçbir zaman bağlanmaz. */
+  linkExisting?: boolean;
 };
+
+/**
+ * Var olan bir hesaba SSO ile girilebilir mi? Kimlik sağlayıcıya güven, hesabın yerel korumasını (şifre, 2FA) aşmamalı:
+ *  - SSO ile oluşturulmuş hesaplar ('!sso', yerel şifresi yok): evet.
+ *  - Yerel şifreli yönetici ya da 2FA'lı hesap: hayır (e-posta eşleşmesiyle devralma ve 2FA atlama kapalı).
+ *  - Yerel şifreli üye: yalnız yönetici "mevcut hesaplara bağlanmaya izin ver" ayarını açtıysa.
+ */
+export function ssoMayLogInto(user: { password_hash: string; role: string; totp_secret: string | null }, cfg: Pick<OidcConfig, "linkExisting">) {
+  if (user.password_hash === "!sso") return true;
+  if (user.role === "admin" || user.totp_secret) return false;
+  return cfg.linkExisting === true;
+}
 
 type Jwk = { kty: string; kid?: string; alg?: string; [k: string]: unknown };
 
@@ -51,15 +65,19 @@ const b64url = (b: Buffer) => b.toString("base64url");
 
 // Bekleyen girişler: state → { nonce, verifier, redirectUri, at }. 10 dakika geçerli.
 const pending = new Map<string, { nonce: string; verifier: string; redirectUri: string; at: number }>();
+// /oidc/start yetkisiz olduğundan harita sınırlıdır: yüzlerce sahte başlatma belleği şişirmesin.
+const MAX_PENDING = 500;
 function sweep() {
   for (const [k, v] of pending) if (Date.now() - v.at > 10 * 60_000) pending.delete(k);
 }
 
-export async function startLogin(redirectUri: string) {
+/** Giriş başlatır. `state` aynı zamanda tarayıcıya kısa ömürlü HttpOnly çerezle bağlanır (giriş-CSRF'ye karşı). */
+export async function startLogin(redirectUri: string): Promise<{ url: string; state: string }> {
   const cfg = oidcConfig();
   if (!cfg) throw new Error("Tek oturum açma (SSO) yapılandırılmamış");
   const doc = await discovery(cfg.issuer);
   sweep();
+  if (pending.size >= MAX_PENDING) throw new Error("Çok fazla bekleyen giriş var; birkaç dakika sonra tekrar dene");
   const state = b64url(randomBytes(24));
   const nonce = b64url(randomBytes(24));
   const verifier = b64url(randomBytes(48));
@@ -73,7 +91,7 @@ export async function startLogin(redirectUri: string) {
   url.searchParams.set("nonce", nonce);
   url.searchParams.set("code_challenge", b64url(createHash("sha256").update(verifier).digest()));
   url.searchParams.set("code_challenge_method", "S256");
-  return url.toString();
+  return { url: url.toString(), state };
 }
 
 /** id_token'ı doğrular ve içeriğini döndürür. */
@@ -109,11 +127,15 @@ export async function verifyIdToken(token: string, cfg: { issuer: string; client
   return payload;
 }
 
-export async function finishLogin(state: string, code: string) {
+/** `browserState`: girişi başlatan tarayıcıya verilen çerezdeki değer; callback'teki state ile aynı olmalı. */
+export async function finishLogin(state: string, code: string, browserState: string) {
   const cfg = oidcConfig();
   if (!cfg) throw new Error("Tek oturum açma (SSO) yapılandırılmamış");
   const p = pending.get(state);
   pending.delete(state);
+  const a = Buffer.from(state);
+  const b = Buffer.from(browserState);
+  if (!state || a.length !== b.length || !timingSafeEqual(a, b)) throw new Error("Giriş isteği bu tarayıcıdan başlatılmamış; tekrar dene");
   if (!p || Date.now() - p.at > 10 * 60_000) throw new Error("Giriş isteğinin süresi doldu; tekrar dene");
   const doc = await discovery(cfg.issuer);
   const res = await fetch(doc.token_endpoint, {
@@ -134,6 +156,6 @@ export async function finishLogin(state: string, code: string) {
   const claims = await verifyIdToken(body.id_token, cfg, doc.jwks_uri, p.nonce);
   const email = String(claims.email ?? "").toLowerCase();
   if (!email) throw new Error("Sağlayıcı e-posta adresi göndermedi (scope: email)");
-  if (claims.email_verified === false) throw new Error("E-posta adresi sağlayıcıda doğrulanmamış");
+  if (claims.email_verified !== true) throw new Error("E-posta adresi sağlayıcıda doğrulanmamış");
   return { email, name: String(claims.name ?? claims.preferred_username ?? email.split("@")[0]), cfg };
 }

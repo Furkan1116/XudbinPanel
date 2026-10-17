@@ -4,13 +4,13 @@ import { Button, CopyField, Field, Section, Toggle, useAction } from "@/componen
 import { api } from "@/lib/api";
 import { t } from "@/lib/i18n";
 
-type Sso = { issuer: string; clientId: string; clientSecret: string; label: string; autoCreate: boolean; allowedDomains: string; hasSecret?: boolean };
+type Sso = { issuer: string; clientId: string; clientSecret: string; label: string; autoCreate: boolean; allowedDomains: string; linkExisting?: boolean; hasSecret?: boolean };
 
 /** OpenID Connect ile tek oturum açma (Google, Microsoft, Keycloak, Authentik...). */
 export function SsoSettings() {
   const { data } = useQuery({ queryKey: ["settings", "sso"], queryFn: () => api.get<{ sso: Sso | null; redirectUri: string }>("/settings/sso") });
   const [form, setForm] = useState<Sso | null>(null);
-  const f = form ?? data?.sso ?? { issuer: "", clientId: "", clientSecret: "", label: "", autoCreate: false, allowedDomains: "" };
+  const f = form ?? data?.sso ?? { issuer: "", clientId: "", clientSecret: "", label: "", autoCreate: false, allowedDomains: "", linkExisting: false };
   const set = (k: keyof Sso) => (e: { target: { value: string } }) => setForm({ ...f, [k]: e.target.value });
   const save = useAction(() => api.put("/settings/sso", f), { success: t("SSO ayarları kaydedildi"), invalidate: [["settings", "sso"], ["auth"]], onSuccess: () => setForm(null) });
   const off = useAction(() => api.del("/settings/sso"), { success: t("SSO kapatıldı"), invalidate: [["settings", "sso"], ["auth"]], onSuccess: () => setForm(null) });
@@ -41,12 +41,13 @@ export function SsoSettings() {
             <input className="input font-mono text-[13px]" type="password" autoComplete="new-password" value={f.clientSecret} onChange={set("clientSecret")} />
           </Field>
         </div>
-        <Toggle checked={f.autoCreate} onChange={(v) => setForm({ ...f, autoCreate: v })} label={t("Yeni kullanıcıları otomatik oluştur")} description={t("Kapalıysa yalnız panelde zaten kayıtlı e-postalar SSO ile girebilir. Açıksa aşağıdaki alan adlarından gelenler üye olarak oluşturulur (projelere sen eklersin).")} />
+        <Toggle checked={f.autoCreate} onChange={(v) => setForm({ ...f, autoCreate: v })} label={t("Yeni kullanıcıları otomatik oluştur")} description={t("Kapalıysa yalnız SSO ile oluşturulmuş hesaplar SSO ile girebilir. Açıksa aşağıdaki alan adlarından gelenler üye olarak oluşturulur (projelere sen eklersin).")} />
         {f.autoCreate && (
           <Field label={t("İzin verilen e-posta alan adları")} hint={t("Virgülle ayır, ör. sirketim.com")}>
             <input className="input" value={f.allowedDomains} onChange={set("allowedDomains")} />
           </Field>
         )}
+        <Toggle checked={Boolean(f.linkExisting)} onChange={(v) => setForm({ ...f, linkExisting: v })} label={t("Şifreli üye hesaplarına SSO ile girişe izin ver")} description={t("Kapalıyken yönetici eklediği ve şifresi olan hesaplar SSO ile girmez (e-posta eşleşmesiyle hesap devralınmasın diye). Yöneticiler ve 2FA'lı hesaplar bu ayardan bağımsız olarak hep şifreyle girer; SSO 2FA'yı atladığı için.")} />
         <div className="flex justify-end gap-2">
           {data.sso && <Button type="button" variant="ghost" onClick={() => off.mutate()}>{t("SSO'yu kapat")}</Button>}
           <Button type="submit" variant="primary" loading={save.isPending}>{t("Kaydet")}</Button>
