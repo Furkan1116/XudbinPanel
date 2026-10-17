@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { createGunzip, createGzip } from "node:zlib";
+import { createGzip } from "node:zlib";
+import { ENCRYPTED_EXT, encryptStream, openBackupPlain } from "../lib/backup-crypto.js";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { s3Delete, s3Download, s3Upload } from "../lib/s3.js";
@@ -61,13 +62,13 @@ export function backupAppVolumes(appId: number, trigger: "manual" | "schedule" =
     const results: number[] = [];
     for (const volume of volumes) {
       const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const file = `${volume}-${stamp}.tar.gz`;
+      const file = `${volume}-${stamp}.tar.gz${ENCRYPTED_EXT}`;
       const id = Number(db.prepare("INSERT INTO volume_backups (app_id, volume, file, status, trigger, created_at) VALUES (?, ?, ?, 'running', ?, ?)").run(app.id, volume, file, trigger, Date.now()).lastInsertRowid);
       const full = path.join(DIR, app.slug, file);
       const h = await helper(app, volume, true);
       try {
         const archive = await h.c.getArchive({ path: "/v" });
-        await withTimeout(pipeline(archive, createGzip(), fs.createWriteStream(full)), 60 * 60_000, "Yedek 1 saatte bitmedi");
+        await withTimeout(pipeline(archive, createGzip(), encryptStream(), fs.createWriteStream(full, { mode: 0o600 })), 60 * 60_000, "Yedek 1 saatte bitmedi");
         const size = fs.statSync(full).size;
         db.prepare("UPDATE volume_backups SET status = 'success', size = ? WHERE id = ?").run(size, id);
         const target = offsiteTarget();
@@ -140,7 +141,7 @@ export function restoreVolumeBackup(appId: number, backupId: number) {
       await removeContainer(wipe.docker, wipe.name);
       const h = await helper(app, b.volume, false);
       try {
-        await h.c.putArchive(fs.createReadStream(full).pipe(createGunzip()), { path: "/" });
+        await h.c.putArchive(await openBackupPlain(full), { path: "/" });
       } finally {
         await removeContainer(h.docker, h.name);
       }

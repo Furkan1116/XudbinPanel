@@ -31,8 +31,8 @@ import { appManifest, disconnectGithubApp, githubApp, githubRepoOf, listRepos, n
 const pendingTotp = new Map<number, string>();
 const sessionKey = (hash: string) => hash.slice(0, 16);
 
-/** install.sh'nin yazdığı son güncelleme sonucu (sunucu kökü panel konteynerine salt okunur bağlı). */
-export function lastUpdateStatus(file = path.join(config.diskPath, "opt/xudbin/.update-status")): { state: string; tag: string } | null {
+/** install.sh'nin yazdığı son güncelleme sonucu (yalnız durum klasörü panel konteynerine salt okunur bağlı). */
+export function lastUpdateStatus(file = config.updateStatusFile): { state: string; tag: string } | null {
   try {
     const [state = "", tag = ""] = fs.readFileSync(file, "utf8").trim().split(/\s+/);
     return /^(ok|verify-failed|pull-failed)$/.test(state) ? { state, tag } : null;

@@ -43,6 +43,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Elle veya zamanlanmış yedekleme, saklama sayısı, indirme ve geri yükleme
 - Yedekler S3 uyumlu uzak depolamaya da yüklenir (AWS S3, Cloudflare R2, Backblaze B2, MinIO)
 - **Doğrulanmış veritabanı yedeği:** otomatik veritabanı yedeklerinden biri düzenli olarak ağsız geçici bir veritabanına geri yüklenip denenir ("son yedek doğrulandı, 12 tablo"); volume ve panel yedekleri doğrulanmaz
+- **Şifreli yedekler:** veritabanı ve volume yedekleri varsayılan olarak AES-256-GCM ile şifrelenir (anahtar panelin `secret.key` dosyasından türetilir; panel yedeğini kur); indirilen yedek `xudbin backup decrypt` ile açılır
 - **Panel yedeği:** panelin kendi verisi ve şifreleme anahtarı şifreli olarak yedeklenir; sunucu giderse yeni kurulumda `xudbin restore` ile geri gelir
 
 **Güvenlik**
@@ -113,6 +114,7 @@ xudbin user reset-password ali@ornek.com
 xudbin user disable-2fa ali@ornek.com # telefon kaybolduysa
 xudbin unban 203.0.113.7
 sudo xudbin restore /root/xudbin-panel-....xbk   # panel yedeğini geri yükler (s3://bucket/anahtar da olur)
+sudo xudbin backup decrypt yedek.sql.gz.xbe     # şifreli veritabanı/volume yedeğini gzip'e çevirir
 sudo xudbin update                    # Xudbin'i günceller, verilere dokunmaz
 xudbin logs                           # panel logları
 ```

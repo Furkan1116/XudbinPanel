@@ -11,6 +11,7 @@ import QRCode from "qrcode";
 import { ensureSetupToken } from "./auth/setup-token.js";
 import { db } from "./db.js";
 import { config } from "./config.js";
+import { decryptBackupFile, deriveFromKeyFile } from "./lib/backup-crypto.js";
 import { decrypt } from "./lib/crypto.js";
 import { s3Download } from "./lib/s3.js";
 import { getSettings } from "./lib/settings.js";
@@ -98,6 +99,19 @@ async function main() {
       console.log(n ? `${G}Ban kaldırıldı:${X} ${ip} (Caddy bir sonraki güncellemede uygular; panelde Güvenlik > Banlı IP'ler'den de kaldırabilirsin)` : `${ip} banlı değil`);
       return;
     }
+    case "backup": {
+      // xudbin backup decrypt <dosya> [--out çıktı.gz] [--key-file secret.key]: şifreli veritabanı/volume yedeğini gzip'e çevirir.
+      const [sub, ...rest] = args;
+      if (sub !== "decrypt") throw new Error("Kullanım: xudbin backup decrypt <dosya> [--out <çıktı>] [--key-file <secret.key>]");
+      const opt = (n: string) => (rest.includes(`--${n}`) ? rest[rest.indexOf(`--${n}`) + 1] : undefined);
+      const input = rest.find((a, i) => !a.startsWith("--") && !rest[i - 1]?.startsWith("--"));
+      if (!input) throw new Error("Yedek dosyası gerekli");
+      const keyFile = opt("key-file");
+      const out = opt("out");
+      await decryptBackupFile(input, out ? fs.createWriteStream(out, { mode: 0o600 }) : process.stdout, keyFile ? deriveFromKeyFile(keyFile) : undefined);
+      if (out) console.error(`${G}Çözüldü:${X} ${out} ${D}(gzip; açmak için gunzip)${X}`);
+      return;
+    }
     case "restore": {
       await restorePanel(args);
       return;
@@ -114,6 +128,8 @@ async function main() {
   unban <ip>                    IP banını kaldırır
   restore <dosya | s3://bucket/anahtar> [--endpoint URL --access-key K --secret-key S --region R]
                                 Panel yedeğini geri yükler (yedek şifresi sorulur), ardından paneli yeniden başlatır
+  backup decrypt <dosya> [--out çıktı.gz]
+                                Şifreli veritabanı/volume yedeğini (.xbe) gzip'e çevirir (secret.key bu panelde olmalı)
   update                        Xudbin'i günceller (sunucudaki betik)
   logs                          Panel loglarını izler (sunucudaki betik)`);
   }
@@ -144,9 +160,9 @@ async function restorePanel(argv: string[]) {
     console.log(`${D}İndiriliyor: ${source}${X}`);
     await s3Download(target, rest.join("/"), file);
   } else {
-    // Sunucunun dosya sistemi konteynerde /host altında salt okunur bağlı.
-    file = fs.existsSync(source) ? source : path.join("/host", path.resolve("/", source));
-    if (!fs.existsSync(file)) throw new Error(`Dosya bulunamadı: ${source}`);
+    // Panel konteyneri sunucu dosya sistemini görmez; `xudbin` betiği yerel dosyayı konteynere kopyalayıp yolunu verir.
+    file = source;
+    if (!fs.existsSync(file)) throw new Error(`Dosya bulunamadı: ${source} (konteyner içinde aranır; sunucudaki dosyayı \`sudo xudbin restore <dosya>\` ile ver)`);
   }
   const pass = opt("passphrase") ?? (await ask("Yedek şifresi: "));
   const files = await unpackTar(gunzipSync(decryptArchive(fs.readFileSync(file), pass)));

@@ -139,3 +139,14 @@ test("son güncelleme durumu: yalnız bilinen durumlar okunur (Y3)", () => {
   assert.equal(lastUpdateStatus(f), null);
   assert.equal(lastUpdateStatus(path.join(dir, "yok")), null);
 });
+
+test("panel konteyneri: sunucu kökü bağlı değil, ayrıcalıklar düşürülmüş (O11)", () => {
+  const svc = YAML.parse(fs.readFileSync(path.join(import.meta.dirname, "../../../docker-compose.yml"), "utf8")).services.xudbin;
+  const vols: string[] = svc.volumes;
+  assert.ok(!vols.some((v) => /^\/:/.test(v) || v.includes(":/host:") || v.endsWith(":/host")), "sunucu kökü bağlanmamalı");
+  assert.ok(vols.some((v) => v === "/opt/xudbin/status:/host-status:ro"));
+  assert.ok(svc.security_opt.includes("no-new-privileges:true"));
+  assert.deepEqual(svc.cap_drop, ["ALL"]);
+  assert.deepEqual([...svc.cap_add].sort(), ["CHOWN", "DAC_OVERRIDE", "FOWNER"]);
+  assert.equal(svc.environment.DISK_PATH, "/data");
+});

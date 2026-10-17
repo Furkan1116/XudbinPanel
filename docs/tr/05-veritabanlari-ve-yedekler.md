@@ -25,6 +25,23 @@ Geri yükleme veritabanındaki mevcut verileri yedektekilerle değiştirir; önc
 
 Tüm veritabanı ve klasör yedeklerinin durumunu **Yedekler** sayfasında topluca görürsün.
 
+## Yedeklerin şifrelenmesi
+
+Veritabanı ve kalıcı klasör (volume) yedekleri **varsayılan olarak şifrelenir** (AES-256-GCM, akış halinde; kapatılamaz). Dosya adı `.xbe` ile biter (ör. `blog-2026-10-17T10-00-00.sql.gz.xbe`); diskte ve uzak depolamada (S3) düz veri bulunmaz. Her dosya için ayrı anahtar, panelin `secret.key` dosyasından (HKDF ile) türetilir; ek bir şifre sormaz, bu yüzden zamanlanmış yedekler kendiliğinden şifreli kalır. Geri yükleme ve **Doğrula** şifreli dosyayla çalışır; dosya bozuk ya da kesikse işlem başlamadan reddedilir. Bu özellikten önce alınmış eski `.gz` yedekler şifresizdir; yine geri yüklenir ama şifreli değildir, istersen yeni yedek alıp eskileri sil.
+
+**Önemli:** yedekleri açan anahtar panelin `secret.key` dosyasıdır. Bu dosyayı ve panel verisini birlikte kaybedersen (ör. sunucu gider) şifreli veritabanı/volume yedekleri de açılamaz. Bu yüzden **Panel yedeği**'ni mutlaka kur: panel yedeği `secret.key`'i taşır, yeni sunucuda `xudbin restore` ile geri yüklenince uzak depolamadaki yedekler yine açılır. Panel yedeği şifresini kaybedersen ve sunucu da giderse yedekler kurtarılamaz. Bu yöntem, `secret.key`'e erişebilen birinin (ör. sunucuda root) yedekleri de açabileceği anlamına gelir; amaç diskte/S3'te açıkta duran yedek dosyasının ele geçirilmesine karşı korumaktır.
+
+### İndirilen yedeği açmak
+
+İndirdiğin `.xbe` dosyasını bir veritabanına doğrudan veremezsin. Panelin kurulu olduğu sunucuya kopyalayıp şu komutla düz gzip'e çevir:
+
+```bash
+sudo xudbin backup decrypt blog-2026-10-17T10-00-00.sql.gz.xbe   # blog-...sql.gz oluşur
+gunzip blog-2026-10-17T10-00-00.sql.gz                           # .sql dosyası
+```
+
+Çıktı, girdinin `.xbe` uzantısı atılmış adıyla yazılır; farklı bir ad için komutun sonuna yaz. Komut konteynerde, panelin kendi `secret.key`'iyle çalışır. Başka bir makinede açmak için `secret.key` kopyası gerekir: `docker exec xudbin node dist/cli.js backup decrypt /yol/dosya.xbe --key-file /yol/secret.key --out cikti.gz` (dosyalar konteynerde olmalı).
+
 ## Uzak depolama (S3)
 
 Sunucu tamamen giderse yedekler de gitmesin diye **Ayarlar > Yedekleme > Uzak depolama** bölümünde **Yedekleri uzak depolamaya da yükle**'yi aç. AWS S3, Cloudflare R2, Backblaze B2 ve MinIO desteklenir. Adres (endpoint), Bucket, Access key, Secret key, Bölge (R2 için `auto`) ve isteğe bağlı Klasör (önek) gir; **Bağlantıyı dene** yazma iznini kontrol eder.
