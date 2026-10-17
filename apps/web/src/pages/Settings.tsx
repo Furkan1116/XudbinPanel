@@ -254,6 +254,7 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
   const [setup, setSetup] = useState<{ secret: string; qr: string } | null>(null);
   const [code, setCode] = useState("");
   const [disabling, setDisabling] = useState(false);
+  const [password, setPassword] = useState("");
   const start = useAction(() => api.post<{ secret: string; qr: string }>("/settings/account/totp/setup"), { onSuccess: setSetup });
   const enable = useAction(() => api.post("/settings/account/totp/enable", { code }), {
     success: t("İki adımlı doğrulama açıldı"),
@@ -263,12 +264,13 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
       setCode("");
     },
   });
-  const disable = useAction(() => api.post("/settings/account/totp/disable", { code }), {
+  const disable = useAction(() => api.post("/settings/account/totp/disable", { code, password }), {
     success: t("İki adımlı doğrulama kapatıldı"),
     invalidate: [["account"]],
     onSuccess: () => {
       setDisabling(false);
       setCode("");
+      setPassword("");
     },
   });
   const codeInput = (
@@ -303,10 +305,11 @@ function TwoFactor({ enabled }: { enabled: boolean }) {
           </div>
         )}
       </div>
-      <Dialog open={disabling} onClose={() => setDisabling(false)} title={t("İki adımlı doğrulama kapatılsın mı?")} description={t("Onaylamak için uygulamadaki güncel kodu gir.")}>
-        <div className="flex items-center gap-2">
+      <Dialog open={disabling} onClose={() => setDisabling(false)} title={t("İki adımlı doğrulama kapatılsın mı?")} description={t("Onaylamak için şifreni ve uygulamadaki güncel kodu gir.")}>
+        <div className="flex flex-wrap items-center gap-2">
+          <input className="input w-56" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t("Şifren")} />
           {codeInput}
-          <Button variant="primary" onClick={() => disable.mutate()} loading={disable.isPending} disabled={code.length !== 6}>{t("Kapat")}</Button>
+          <Button variant="primary" onClick={() => disable.mutate()} loading={disable.isPending} disabled={code.length !== 6 || !password}>{t("Kapat")}</Button>
         </div>
       </Dialog>
     </Section>

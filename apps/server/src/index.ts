@@ -14,8 +14,7 @@ import { ensureSetupToken } from "./auth/setup-token.js";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { clientIp } from "./lib/client-ip.js";
-import { HttpError } from "./lib/http.js";
-import { TooBusyError } from "./auth/password.js";
+import { errorResponse } from "./lib/http.js";
 import { sameOrigin } from "./lib/same-origin.js";
 import type { AppEnv } from "./lib/types.js";
 import { appRoutes, deploymentRoutes, frameworkRoutes, projectRoutes, uploadRoutes, webhookRoutes } from "./routes/apps.js";
@@ -108,12 +107,7 @@ if (fs.existsSync(config.webDist)) {
   app.get("*", serveStatic({ root, path: "index.html" }));
 }
 
-app.onError((err, c) => {
-  if (err instanceof HttpError) return c.json({ error: err.message }, err.status);
-  if (err instanceof TooBusyError) return c.json({ error: err.message }, 503);
-  console.error(err);
-  return c.json({ error: (err as Error).message || "Sunucu hatası" }, 500);
-});
+app.onError(errorResponse);
 
 startSystemSampler();
 purgeExpiredSessions();

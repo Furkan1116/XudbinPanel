@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { getCookie } from "hono/cookie";
 import QRCode from "qrcode";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import { getSettings, updateSettings } from "../lib/settings.js";
 import { VERSION } from "../lib/version.js";
 import { updateInfo } from "../lib/update-check.js";
 import { config } from "../config.js";
+import { createRateLimiter } from "../lib/rate-limit.js";
 import { hostExec } from "../services/firewall.js";
 import { createApiToken } from "../auth/api-tokens.js";
 import type { AppEnv } from "../lib/types.js";
@@ -29,6 +30,14 @@ import { accessibleProjectIds } from "../services/access.js";
 import { appManifest, disconnectGithubApp, githubApp, githubRepoOf, listRepos, newManifestState } from "../services/github-app.js";
 
 const pendingTotp = new Map<number, string>();
+// Oturumu ele geçirmiş biri 2FA'yı kapatmak için kod/parola denemesin: kullanıcı başına 15 dakikada 5 hatalı deneme.
+const totpDisableLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
+
+/** Kullanıcının bu istekteki oturum dışındaki tüm oturumlarını kapatır (e-posta/2FA/şifre değişince eski cihazlar düşer). */
+function revokeOtherSessions(c: Context, userId: number) {
+  const current = createHash("sha256").update(getCookie(c, SESSION_COOKIE) ?? "").digest("hex");
+  db.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").run(userId, current);
+}
 const sessionKey = (hash: string) => hash.slice(0, 16);
 
 /** install.sh'nin yazdığı son güncelleme sonucu (yalnız durum klasörü panel konteynerine salt okunur bağlı). */
@@ -118,6 +127,7 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
     } catch {
       throw new HttpError(409, "Bu e-posta başka bir hesapta kullanılıyor");
     }
+    if (input.email !== user.email) revokeOtherSessions(c, user.id);
     return c.json({ ok: true });
   })
 
@@ -128,8 +138,7 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
     if (!(await verifyPassword(input.current, row.password_hash))) throw new HttpError(403, "Mevcut şifre hatalı");
     db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(await hashPassword(input.next), user.id);
     // Diğer cihazlardaki oturumları kapat.
-    const current = createHash("sha256").update(getCookie(c, SESSION_COOKIE) ?? "").digest("hex");
-    db.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").run(user.id, current);
+    revokeOtherSessions(c, user.id);
     return c.json({ ok: true });
   })
 
@@ -149,16 +158,28 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
     if (!verifyTotp(secret, code)) throw new HttpError(400, "Kod hatalı. Uygulamadaki güncel kodu gir.");
     db.prepare("UPDATE users SET totp_secret = ? WHERE id = ?").run(encrypt(secret), user.id);
     pendingTotp.delete(user.id);
+    revokeOtherSessions(c, user.id);
     return c.json({ ok: true });
   })
 
   .post("/account/totp/disable", async (c) => {
     const user = c.get("user");
-    const { code } = await body(c, z.object({ code: z.string().max(10) }));
-    const row = db.prepare("SELECT totp_secret FROM users WHERE id = ?").get(user.id) as { totp_secret: string | null };
+    // Parola da istenir: yalnız açık bir oturum (ya da çalınmış çerez) 2FA'yı kapatmaya yetmesin.
+    const { code, password } = await body(c, z.object({ code: z.string().max(10), password: z.string().max(256).default("") }));
+    const row = db.prepare("SELECT totp_secret, password_hash FROM users WHERE id = ?").get(user.id) as { totp_secret: string | null; password_hash: string };
     if (!row.totp_secret) return c.json({ ok: true });
-    if (!verifyTotp(decrypt(row.totp_secret), code)) throw new HttpError(400, "Kod hatalı");
+    const key = String(user.id);
+    const wait = totpDisableLimiter.check(key);
+    if (wait) throw new HttpError(403, `Çok fazla hatalı deneme. ${Math.ceil(wait / 60)} dakika sonra tekrar dene`);
+    // SSO'dan gelen hesaplarda yerel parola yoktur ('!sso'); onlar için yalnız kod istenir.
+    const passwordOk = row.password_hash === "!sso" || (await verifyPassword(password, row.password_hash));
+    if (!passwordOk || !verifyTotp(decrypt(row.totp_secret), code)) {
+      totpDisableLimiter.fail(key);
+      throw new HttpError(400, "Şifre ya da kod hatalı");
+    }
+    totpDisableLimiter.reset(key);
     db.prepare("UPDATE users SET totp_secret = NULL WHERE id = ?").run(user.id);
+    revokeOtherSessions(c, user.id);
     return c.json({ ok: true });
   })
 
@@ -232,6 +253,7 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
           label: z.string().trim().max(60).default(""),
           autoCreate: z.boolean().default(false),
           allowedDomains: z.string().trim().max(500).default(""),
+          linkExisting: z.boolean().default(false),
         }),
     );
     const current = getSettings().oidc;

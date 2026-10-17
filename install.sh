@@ -180,9 +180,16 @@ ok "xudbin komutu kuruldu (xudbin link, xudbin status, xudbin update...)"
 
 # --- Ayarlar (.env) ---
 CLI_DOMAIN=${XUDBIN_DOMAIN:-}; CLI_EMAIL=${ACME_EMAIL:-}; CLI_HTTPS=${XUDBIN_HTTPS:-}
+# .env bir kabuk betiği gibi çalıştırılmaz (içine yazılmış komutlar root olarak çalışırdı); yalnız bilinen anahtarlar,
+# güvenli karakterlerden oluşan değerlerle okunur.
 if [[ -f .env ]]; then
-  # shellcheck disable=SC1091
-  source .env
+  while IFS='=' read -r key value; do
+    value=${value%\"}; value=${value#\"}
+    [[ $value =~ ^[A-Za-z0-9@._:/+-]*$ ]] || continue
+    case $key in
+      XUDBIN_DOMAIN|ACME_EMAIL|XUDBIN_HTTPS|XUDBIN_PUBLIC_IP) printf -v "$key" '%s' "$value" ;;
+    esac
+  done < .env
 fi
 XUDBIN_DOMAIN=${CLI_DOMAIN:-${XUDBIN_DOMAIN:-}}; ACME_EMAIL=${CLI_EMAIL:-${ACME_EMAIL:-}}
 XUDBIN_HTTPS=${CLI_HTTPS:-${XUDBIN_HTTPS:-1}}; XUDBIN_IMAGE=$PANEL_IMAGE
@@ -217,13 +224,20 @@ if [[ $MODE == install ]]; then
       firewall-cmd -q --reload
       F2B_BACKEND=systemd
     fi
+    FW_DONE=0
+    command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active' && FW_DONE=1
+    command -v firewall-cmd >/dev/null && firewall-cmd -q --state 2>/dev/null && FW_DONE=1
     if [[ -d /etc/fail2ban ]]; then
       printf '[sshd]\nenabled = true\nport = %s\nbackend = %s\nmaxretry = 5\nfindtime = 10m\nbantime = 1h\n' "$SSH_PORT" "${F2B_BACKEND:-auto}" > /etc/fail2ban/jail.d/xudbin.local
       systemctl enable --now fail2ban >/dev/null 2>&1 || true
       systemctl restart fail2ban || true
     fi
-    ok "Güvenlik duvarı açık: yalnız $SSH_PORT (SSH), 80, 443"
-    ok "fail2ban: 10 dakikada 5 hatalı SSH girişi 1 saat ban"
+    if [[ $FW_DONE == 1 ]]; then
+      ok "Güvenlik duvarı açık: yalnız $SSH_PORT (SSH), 80, 443"
+    else
+      info "Uyarı: apt-get/dnf bulunamadı ya da güvenlik duvarı etkinleşmedi; güvenlik duvarını elle kur (yalnız $SSH_PORT, 80, 443 açık olmalı)"
+    fi
+    if [[ -d /etc/fail2ban ]]; then ok "fail2ban: 10 dakikada 5 hatalı SSH girişi 1 saat ban"; else info "fail2ban kurulmadı"; fi
   else
     info "Atlandı (XUDBIN_HARDEN=0)"
   fi
@@ -258,7 +272,10 @@ ENV
 chmod 600 .env
 # Panel bu klasörü salt okunur bağlar (güncelleme durumu); yoksa Docker kökle oluştururdu.
 mkdir -p /opt/xudbin/status
-docker compose up -d $BUILD_FLAG >/tmp/xudbin-compose.log 2>&1 || { tail -20 /tmp/xudbin-compose.log; fail "Panel başlatılamadı."; }
+# Öngörülebilir /tmp yolu yerine mktemp (başka bir kullanıcı sembolik bağ koyup root'a dosya ezdiremesin).
+COMPOSE_LOG=$(mktemp /tmp/xudbin-compose.XXXXXX)
+docker compose up -d $BUILD_FLAG >"$COMPOSE_LOG" 2>&1 || { tail -20 "$COMPOSE_LOG"; fail "Panel başlatılamadı."; }
+rm -f "$COMPOSE_LOG"
 ok "Panel konteyneri çalışıyor"
 status "ok ${TAG:-yerel}"
 
