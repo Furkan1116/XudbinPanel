@@ -40,8 +40,8 @@ info() { echo "   ${D}$*${X}"; }
 fail() { echo; echo "   ${R}✗ Hata:${X} $*" >&2; exit 1; }
 
 # Güncelleme sonucu panelde gösterilir (Ayarlar > Panel).
-STATUS_FILE=/opt/xudbin/.update-status
-status() { mkdir -p /opt/xudbin && printf '%s\n' "$*" > "$STATUS_FILE" 2>/dev/null || true; }
+STATUS_FILE=/opt/xudbin/status/update-status
+status() { mkdir -p /opt/xudbin/status && printf '%s\n' "$*" > "$STATUS_FILE" 2>/dev/null || true; }
 
 # En yeni sürüm etiketi (v1.2.3). main dalı panellere inmez; yalnız etiketlenmiş sürümler kurulur.
 latest_tag() {
@@ -256,6 +256,8 @@ SECURE_COOKIES=${SECURE_COOKIES}
 HOST_HOSTNAME=$(hostname)
 ENV
 chmod 600 .env
+# Panel bu klasörü salt okunur bağlar (güncelleme durumu); yoksa Docker kökle oluştururdu.
+mkdir -p /opt/xudbin/status
 docker compose up -d $BUILD_FLAG >/tmp/xudbin-compose.log 2>&1 || { tail -20 /tmp/xudbin-compose.log; fail "Panel başlatılamadı."; }
 ok "Panel konteyneri çalışıyor"
 status "ok ${TAG:-yerel}"

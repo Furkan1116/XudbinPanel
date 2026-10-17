@@ -11,8 +11,10 @@ export const config = {
   dataDir: path.resolve(env.DATA_DIR ?? "./data"),
   /** Derlenmiş arayüz dosyalarının yeri (production'da sunucu bunları servis eder). */
   webDist: path.resolve(env.WEB_DIST ?? "../web/dist"),
-  /** Disk kullanımını ölçeceğimiz yol. Konteyner içinde host diski /host olarak bağlanır. */
+  /** Disk kullanımını ölçeceğimiz yol. Konteynerde /data (Docker volume'u) sunucunun diskinde durur; sunucu kökü panele bağlanmaz. */
   diskPath: env.DISK_PATH ?? "/",
+  /** install.sh'nin güncelleme sonucunu yazdığı dosya; sunucudaki /opt/xudbin/status klasörü konteynere salt okunur bağlanır. */
+  updateStatusFile: env.UPDATE_STATUS_FILE ?? "/host-status/update-status",
   /** Panel bir proxy (Caddy) arkasındaysa X-Forwarded-For başlığına güven. */
   trustProxy: env.TRUST_PROXY === "true",
   /** HTTPS üzerinden servis ediliyorsa cookie'leri Secure işaretle. */

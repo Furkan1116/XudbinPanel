@@ -10,7 +10,7 @@ services:
     environment:
       TRUST_PROXY: "true"
       SECURE_COOKIES: ${SECURE_COOKIES:-true}
-      DISK_PATH: /host
+      DISK_PATH: /data
       HOST_HOSTNAME: ${HOST_HOSTNAME:-}
       XUDBIN_DOMAIN: ${XUDBIN_DOMAIN:-}
       ACME_EMAIL: ${ACME_EMAIL:-}
@@ -22,7 +22,13 @@ services:
     volumes:
       - xudbin-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
-      - /:/host:ro
+      # Yalnız güncelleme durumu dosyası (install.sh yazar); sunucu kökü panele bağlanmaz.
+      - /opt/xudbin/status:/host-status:ro
+    # Panel yalnız docker.sock ve /data ile çalışır: tüm yetkiler düşürülür, yalnız dosya sahipliği/erişimi
+    # için gerekenler geri verilir (Compose uygulama dizinlerini ve yedekleri root olmayan UID'lerle paylaşır).
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
     # Panel yalnız Caddy ile aynı ağda; uygulamalar panelin API'sine doğrudan ulaşamaz.
     networks: [panel]
 

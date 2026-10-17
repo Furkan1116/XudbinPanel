@@ -58,4 +58,6 @@ On **Settings > Account**:
 
 A panel admin effectively has root on your servers, so always turn on 2FA for admin accounts. If you lose your phone, run `xudbin user disable-2fa <email>` on the server.
 
+The panel container cannot see the server's filesystem (only its own `/data` folder and, read-only, the update-status file), runs with `no-new-privileges`, and most Linux capabilities are dropped. Because it still talks to the Docker socket, compromising the panel container still means compromising the server; this is an architectural limit (see SECURITY.md).
+
 If you find a security vulnerability, don't open a public issue; use **Security > Report a vulnerability** on GitHub.

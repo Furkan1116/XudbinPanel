@@ -144,9 +144,9 @@ async function restorePanel(argv: string[]) {
     console.log(`${D}İndiriliyor: ${source}${X}`);
     await s3Download(target, rest.join("/"), file);
   } else {
-    // Sunucunun dosya sistemi konteynerde /host altında salt okunur bağlı.
-    file = fs.existsSync(source) ? source : path.join("/host", path.resolve("/", source));
-    if (!fs.existsSync(file)) throw new Error(`Dosya bulunamadı: ${source}`);
+    // Panel konteyneri sunucu dosya sistemini görmez; `xudbin` betiği yerel dosyayı konteynere kopyalayıp yolunu verir.
+    file = source;
+    if (!fs.existsSync(file)) throw new Error(`Dosya bulunamadı: ${source} (konteyner içinde aranır; sunucudaki dosyayı \`sudo xudbin restore <dosya>\` ile ver)`);
   }
   const pass = opt("passphrase") ?? (await ask("Yedek şifresi: "));
   const files = await unpackTar(gunzipSync(decryptArchive(fs.readFileSync(file), pass)));

@@ -10,7 +10,17 @@ case "${1:-}" in
   logs) exec docker logs -f --tail 200 xudbin ;;
   restart) docker restart xudbin >/dev/null && echo "Panel yeniden başlatıldı" ;;
   restore)
-    docker exec -i $TTY xudbin node dist/cli.js "$@"
+    # Panel konteyneri sunucu dosya sistemini görmez: yerel dosya önce konteynere kopyalanır.
+    shift; ARGS=(); COPIED=""
+    for a in "$@"; do
+      if [ -z "$COPIED" ] && [ -f "$a" ]; then
+        COPIED="/tmp/xudbin-restore-in.xbk"
+        docker cp "$a" "xudbin:$COPIED" >/dev/null || { echo "Dosya konteynere kopyalanamadı"; exit 1; }
+        ARGS+=("$COPIED")
+      else ARGS+=("$a"); fi
+    done
+    docker exec -i $TTY xudbin node dist/cli.js restore "${ARGS[@]}"
+    [ -z "$COPIED" ] || docker exec xudbin rm -f "$COPIED" >/dev/null 2>&1 || true
     docker restart xudbin >/dev/null && echo "Panel yedekten başlatıldı" ;;
   *) exec docker exec -i $TTY xudbin node dist/cli.js "$@" ;;
 esac

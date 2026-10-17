@@ -58,4 +58,6 @@ Her sunucunun durumunu **Sunucular > sunucu > Durum** sekmesindeki **Sunucu güv
 
 Panelde yönetici olan biri sunucularda root yetkisine sahiptir; yönetici hesaplarında 2FA'yı mutlaka aç. Telefonunu kaybedersen sunucuda `xudbin user disable-2fa <e-posta>` çalıştır.
 
+Panel konteyneri sunucunun dosya sistemini görmez (yalnızca kendi `/data` klasörünü ve güncelleme durumu dosyasını salt okunur görür), `no-new-privileges` ile çalışır ve Linux yetkilerinin (capabilities) çoğu düşürülmüştür. Yine de Docker soketine eriştiği için panel konteynerinin ele geçirilmesi sunucunun ele geçirilmesi demektir; bu, kapsam dışı bir mimari sınırdır (bkz. SECURITY.md).
+
 Bir güvenlik açığı bulursan herkese açık issue açma; GitHub'daki **Security > Report a vulnerability** bağlantısını kullan.
