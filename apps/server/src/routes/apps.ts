@@ -33,7 +33,7 @@ import { getServer } from "../services/servers.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor.js";
 import { scanApp } from "../services/scan.js";
 import { uptimeSummary } from "../services/uptime.js";
-import { deletePreview, handlePrEvent, parsePrEvent } from "../services/previews.js";
+import { deletePreview, handlePrEvent, parsePrEvent, pushSkipReason } from "../services/previews.js";
 import { appVolumes, backupAppVolumes, restoreVolumeBackup, volumeBackupFile } from "../services/volume-backups.js";
 import { Readable } from "node:stream";
 import { checkDomain } from "../services/dns-check.js";
@@ -932,9 +932,8 @@ export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
     return c.json(await handlePrEvent(app, pr), 202);
   }
   if (!app.auto_deploy) return c.json({ ok: false, reason: "Otomatik deploy kapalı" });
-  if (payload.ref && payload.ref !== `refs/heads/${app.git_branch}`) {
-    return c.json({ ok: false, reason: `Yalnızca ${app.git_branch} dalı deploy edilir` });
-  }
+  const skip = pushSkipReason((h) => c.req.header(h), payload, app.git_branch);
+  if (skip) return c.json({ ok: false, reason: skip });
   const id = enqueueDeploy(app.id, "webhook", { title: payload.head_commit?.message?.split("\n")[0] ?? "" });
   return c.json({ ok: true, deploymentId: id }, 202);
 })

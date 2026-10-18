@@ -18,6 +18,21 @@ import { getServer } from "./servers.js";
 export type PrEvent = { action: "open" | "update" | "close"; number: number; branch: string; title: string; sameRepo: boolean; commentUrl?: string; repo?: string };
 
 /** GitHub / Gitea / Forgejo / GitLab PR olaylarını ortak biçime çevirir; PR olayı değilse null. */
+/**
+ * Push webhook'unda deploy başlatılmaması gereken olaylar: Git sağlayıcısının olay başlığı varsa yalnız push
+ * deploy eder (ping, etiket, işlenmeyen PR olayları deploy başlatmaz); silinen dala push ve başka dal da atlanır.
+ * Olay başlığı olmayan düz istekler (ör. CI'dan curl) eskisi gibi deploy eder. Döner: atlama nedeni ya da null.
+ */
+export function pushSkipReason(header: (n: string) => string | undefined, payload: Record<string, any>, branch: string): string | null {
+  const event = header("x-github-event") ?? header("x-gitea-event") ?? header("x-forgejo-event") ?? header("x-gogs-event");
+  if (event !== undefined && event !== "push") return `"${event}" olayı deploy başlatmaz`;
+  const gitlab = header("x-gitlab-event");
+  if (gitlab !== undefined && gitlab !== "Push Hook") return `"${gitlab}" olayı deploy başlatmaz`;
+  if (payload.deleted === true) return "Silinen dal deploy edilmez";
+  if (payload.ref && payload.ref !== `refs/heads/${branch}`) return `Yalnızca ${branch} dalı deploy edilir`;
+  return null;
+}
+
 export function parsePrEvent(header: (n: string) => string | undefined, payload: Record<string, any>): PrEvent | null {
   const gh = header("x-github-event") ?? header("x-gitea-event") ?? header("x-forgejo-event") ?? header("x-gogs-event");
   if (gh === "pull_request" && payload.pull_request) {

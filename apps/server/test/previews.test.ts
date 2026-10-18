@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { encrypt } from "../src/lib/crypto.js";
 import { stripRemoteToken } from "../src/services/deploy.js";
-import { buildPreviewEnv } from "../src/services/previews.js";
+import { buildPreviewEnv, pushSkipReason } from "../src/services/previews.js";
 
 test("önizleme ortamı: üretim değişkenleri kopyalanmaz, yalnız ayrı liste + XUDBIN_PREVIEW (O10)", () => {
   // Üretim env'i ayrı alanda; buildPreviewEnv yalnız preview_env'e bakar.
@@ -30,4 +30,20 @@ test("git token'ı klonlamadan sonra .git/config'te kalmaz (O10)", async () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("push webhook'u: ping ve push olmayan olaylar deploy başlatmaz, düz istek eskisi gibi deploy eder", () => {
+  const h = (headers: Record<string, string>) => (n: string) => headers[n];
+  const push = { ref: "refs/heads/main", head_commit: { message: "x" } };
+  // GitHub webhook'u eklenince gelen ping (ref yok) deploy başlatmamalı.
+  assert.match(pushSkipReason(h({ "x-github-event": "ping" }), { zen: "z", hook_id: 1 }, "main")!, /ping/);
+  assert.match(pushSkipReason(h({ "x-github-event": "pull_request" }), { action: "labeled" }, "main")!, /pull_request/);
+  assert.match(pushSkipReason(h({ "x-gitea-event": "create" }), {}, "main")!, /create/);
+  assert.match(pushSkipReason(h({ "x-gitlab-event": "Tag Push Hook" }), { ref: "refs/tags/v1" }, "main")!, /Tag Push Hook/);
+  assert.match(pushSkipReason(h({ "x-github-event": "push" }), { ...push, deleted: true }, "main")!, /Silinen/);
+  assert.match(pushSkipReason(h({ "x-github-event": "push" }), { ref: "refs/heads/dev" }, "main")!, /main/);
+  assert.equal(pushSkipReason(h({ "x-github-event": "push" }), push, "main"), null);
+  assert.equal(pushSkipReason(h({ "x-gitlab-event": "Push Hook" }), push, "main"), null);
+  // Olay başlığı olmayan düz istek (CI'dan curl) deploy eder.
+  assert.equal(pushSkipReason(h({}), {}, "main"), null);
 });
