@@ -52,6 +52,8 @@ Linki kaçırdıysan sunucuda tekrar göster:
 xudbin link
 ```
 
+Sunucuya SSH ile her girişte de panel adresi (kurulum bitmediyse kurulum linki) kendiliğinden görünür. Bunu yalnız Docker'a erişebilen kullanıcılar (root ya da `docker` grubu) görür; kapatmak için `sudo mkdir -p /etc/xudbin && sudo touch /etc/xudbin/no-login-link`.
+
 Linki kimseyle paylaşma. Hesabı oluşturduktan sonra **Ayarlar > Hesap** bölümünden iki adımlı doğrulamayı açman önerilir.
 
 ## `xudbin` komutu

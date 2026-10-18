@@ -52,6 +52,8 @@ If you missed the link, show it again on the server:
 xudbin link
 ```
 
+The panel address (or the setup link, if setup is not finished) is also shown every time you log in over SSH. Only users who can reach Docker (root or the `docker` group) see it; to turn it off: `sudo mkdir -p /etc/xudbin && sudo touch /etc/xudbin/no-login-link`.
+
 Don't share the link. After creating the account, turn on two-factor authentication under **Settings > Account**.
 
 ## The `xudbin` command

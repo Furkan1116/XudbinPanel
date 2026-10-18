@@ -29,7 +29,7 @@ function panelUrl() {
 }
 
 /** Linki çerçeve içinde ve telefondan okutulabilir QR kodla gösterir. */
-async function showLink(title: string, url: string, note?: string) {
+async function showLink(title: string, url: string, note?: string, qr = true) {
   const width = Math.max(url.length, title.length, note?.length ?? 0) + 4;
   const line = "─".repeat(width);
   console.log(`\n  ${R}┌${line}┐${X}`);
@@ -37,8 +37,9 @@ async function showLink(title: string, url: string, note?: string) {
   console.log(`  ${R}│${X}  ${G}${url}${X}${" ".repeat(width - url.length - 2)}${R}│${X}`);
   if (note) console.log(`  ${R}│${X}  ${D}${note}${X}${" ".repeat(width - note.length - 2)}${R}│${X}`);
   console.log(`  ${R}└${line}┘${X}\n`);
-  const qr = await QRCode.toString(url, { type: "terminal", small: true, errorCorrectionLevel: "L" });
-  console.log(qr.split("\n").map((l) => `  ${l}`).join("\n"));
+  if (!qr) return;
+  const code = await QRCode.toString(url, { type: "terminal", small: true, errorCorrectionLevel: "L" });
+  console.log(code.split("\n").map((l) => `  ${l}`).join("\n"));
 }
 
 const findUser = (email: string) => {
@@ -50,9 +51,11 @@ const findUser = (email: string) => {
 async function main() {
   switch (cmd) {
     case "link": {
+      // --short: SSH girişinde gösterilen kısa hâl (QR kodu yok).
+      const qr = !args.includes("--short");
       const users = (db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number }).n;
-      if (users === 0) await showLink("Kurulum linki: yönetici hesabını oluştur", `${panelUrl()}/?setup=${ensureSetupToken()}`, "Linki kimseyle paylaşma.");
-      else await showLink("Xudbin paneli", panelUrl());
+      if (users === 0) await showLink("Kurulum linki: yönetici hesabını oluştur", `${panelUrl()}/?setup=${ensureSetupToken()}`, "Linki kimseyle paylaşma.", qr);
+      else await showLink("Xudbin paneli", panelUrl(), undefined, qr);
       return;
     }
     case "status": {

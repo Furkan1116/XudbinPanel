@@ -177,6 +177,9 @@ fi
 cd "$INSTALL_DIR"
 install -m 0755 "$INSTALL_DIR/scripts/xudbin" /usr/local/bin/xudbin
 ok "xudbin komutu kuruldu (xudbin link, xudbin status, xudbin update...)"
+# SSH girişinde panel adresi (yalnız Docker erişimi olan kullanıcılar görür; kapatmak: touch /etc/xudbin/no-login-link)
+install -m 0644 "$INSTALL_DIR/scripts/login-link.sh" /etc/profile.d/xudbin.sh
+ok "SSH girişinde panel linki gösterilecek"
 
 # --- Ayarlar (.env) ---
 CLI_DOMAIN=${XUDBIN_DOMAIN:-}; CLI_EMAIL=${ACME_EMAIL:-}; CLI_HTTPS=${XUDBIN_HTTPS:-}

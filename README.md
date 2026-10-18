@@ -138,7 +138,7 @@ echo 'XUDBIN_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory' | s
 cd /opt/xudbin && sudo docker compose up -d
 ```
 
-Kurulum linkini kaçırırsan `xudbin link` komutunu çalıştır.
+Kurulum linkini kaçırırsan `xudbin link` komutunu çalıştır; SSH ile her girişte de panel adresi görünür (yalnız Docker erişimi olan kullanıcılara; kapatmak: `/etc/xudbin/no-login-link`).
 
 ## Bilmen gerekenler
 
