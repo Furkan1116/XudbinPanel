@@ -19,9 +19,9 @@ The script shows every step in the terminal:
 1. Checks the system; adds 2 GB of swap if RAM is under 3 GB.
 2. Installs Docker if it's missing.
 3. Downloads Xudbin to `/opt/xudbin` and installs the `xudbin` command.
-4. Opens only SSH, 80 and 443 in the firewall and installs fail2ban for SSH.
+4. Opens only SSH, 80, 443 and 8443 (the panel's IP access) in the firewall and installs fail2ban for SSH.
 5. Pulls the prebuilt image (`ghcr.io/furkan1116/xudbin`); if it can't, builds from source.
-6. Generates a panel address from the server's IP, like `xudbin.1-2-3-4.sslip.io`, and gets an HTTPS certificate.
+6. Generates a panel address from the server's IP, like `xudbin.1-2-3-4.sslip.io`, and gets an HTTPS certificate. The panel also opens at `https://1.2.3.4:8443` (see below).
 7. Prints the setup link and a QR code.
 
 ### Install options
@@ -37,6 +37,14 @@ curl -fsSL https://raw.githubusercontent.com/Furkan1116/XudbinPanel/main/install
 ```
 
 Set `XUDBIN_HARDEN=0` to skip the firewall and fail2ban setup.
+
+### Access by IP (`https://<ip>:8443`)
+
+Besides its domain, the panel also opens at the server's IP address on port 8443. That address uses a certificate from Caddy's own certificate authority (self-signed), so your browser shows a "connection is not private" warning on first visit; accept it and the panel opens. The same protections as the domain (WAF, rate limit, IP blocking) apply. The domain has a Let's Encrypt certificate browsers trust, so we recommend it for daily use.
+
+- To turn it off: **Settings → Panel → Access by IP** (the port is closed in the firewall too).
+- Different port: `XUDBIN_IP_PORT=9443` at install; `XUDBIN_IP_PORT=0` disables it. If 8443 is already used by another service on the server, the installer turns IP access off by itself.
+- There is no IP access on installs with HTTPS off (`XUDBIN_HTTPS=0`).
 
 ## First admin account
 

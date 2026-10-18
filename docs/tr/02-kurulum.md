@@ -19,9 +19,9 @@ Betik her adımı terminalde gösterir:
 1. Sistemi kontrol eder; RAM 3 GB'tan azsa 2 GB swap açar.
 2. Docker yoksa kurar.
 3. Xudbin'i `/opt/xudbin` klasörüne indirir ve `xudbin` komutunu kurar.
-4. Güvenlik duvarında yalnız SSH, 80 ve 443'ü açar, SSH için fail2ban kurar.
+4. Güvenlik duvarında yalnız SSH, 80, 443 ve panelin IP girişi için 8443'ü açar, SSH için fail2ban kurar.
 5. Hazır imajı (`ghcr.io/furkan1116/xudbin`) indirir; bulamazsa kaynaktan derler.
-6. Sunucunun IP'sinden `xudbin.1-2-3-4.sslip.io` gibi bir panel adresi üretir ve HTTPS sertifikasını alır.
+6. Sunucunun IP'sinden `xudbin.1-2-3-4.sslip.io` gibi bir panel adresi üretir ve HTTPS sertifikasını alır. Panel ayrıca `https://1.2.3.4:8443` adresinden de açılır (aşağıya bak).
 7. Kurulum linkini ve QR kodunu gösterir.
 
 ### Kurulum seçenekleri
@@ -37,6 +37,14 @@ curl -fsSL https://raw.githubusercontent.com/Furkan1116/XudbinPanel/main/install
 ```
 
 `XUDBIN_HARDEN=0` verirsen güvenlik duvarı ve fail2ban kurulmaz.
+
+### IP ile giriş (`https://<ip>:8443`)
+
+Panel, alan adının yanında sunucunun IP adresi ve 8443 portuyla da açılır. Bu adresin sertifikası Caddy'nin kendi sertifika otoritesinden gelir (kendinden imzalı); tarayıcı ilk girişte "bağlantı gizli değil" uyarısı verir, uyarıyı kabul edince panel açılır. Alan adındaki korumalar (WAF, hız sınırı, IP engeli) bu adreste de geçerlidir. Alan adının sertifikası tarayıcıların güvendiği Let's Encrypt sertifikası olduğu için günlük kullanımda alan adını öneririz.
+
+- Kapatmak için: **Ayarlar → Panel → IP ile giriş** (port güvenlik duvarında da kapanır).
+- Başka port: kurulumda `XUDBIN_IP_PORT=9443`; tamamen kapatmak için `XUDBIN_IP_PORT=0`. 8443 sunucuda başka bir serviste kullanılıyorsa kurulum IP girişini kendisi kapatır.
+- HTTPS kapalı kurulumlarda (`XUDBIN_HTTPS=0`) IP girişi yoktur.
 
 ## İlk yönetici hesabı
 

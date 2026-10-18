@@ -47,7 +47,7 @@ When **Scan images after deploy** (on **Security > Score**) is on, the image is 
 
 ## Server firewall
 
-The installer opens only SSH, 80 and 443 in the firewall and installs fail2ban (5 failed SSH logins in 10 minutes means a 1-hour ban). Docker is also prevented from bypassing the firewall: from outside, containers can only be reached on 80/443 and on database ports you open in the panel.
+The installer opens only SSH, 80, 443 and 8443 (the panel's IP access) in the firewall and installs fail2ban (5 failed SSH logins in 10 minutes means a 1-hour ban). Docker is also prevented from bypassing the firewall: from outside, containers can only be reached on 80/443, the panel's IP access (8443; turning it off in Settings → Panel closes this port too) and database ports you open in the panel.
 
 You can see each server's state in the **Server security** section of **Servers > server > Status**; **Harden** sets up the firewall and fail2ban.
 

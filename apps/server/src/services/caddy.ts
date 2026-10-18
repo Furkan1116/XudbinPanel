@@ -1,3 +1,4 @@
+import { isIPv4, isIPv6 } from "node:net";
 import tarStream from "tar-stream";
 import { incomingRelays, outgoingRelays } from "./remote-replicas.js";
 import { config } from "../config.js";
@@ -18,6 +19,36 @@ import {
 
 export const CADDY_CONTAINER = "xudbin-caddy";
 export const ACCESS_LOG = "/data/logs/access.log";
+/** Caddy'nin konteyner içinde panel için IP üzerinden dinlediği port; sunucudaki karşılığı config.panelIpPort. */
+const PANEL_IP_LISTEN = 8443;
+/** Caddy konteynerinin hangi IP portuyla oluşturulduğu; değişince konteyner yeniden oluşturulur. */
+const IP_PORT_LABEL = "xudbin.panel-ip-port";
+
+/**
+ * Panelin IP ile açıldığı adres (CloudPanel gibi https://<ip>:8443). Yalnız panelin çalıştığı sunucuda,
+ * HTTPS açıksa ve ayarlardan kapatılmadıysa. Sertifika Caddy'nin iç CA'sından: tarayıcı ilk girişte uyarı verir.
+ */
+export function panelIpHost(server: ServerRow | undefined): string | null {
+  if (!server || server.kind !== "local" || server.https_mode === "off") return null;
+  if (!config.panelIpPort || !getSettings().panelIpAccess) return null;
+  const ip = server.public_ip?.trim() ?? "";
+  return isIPv4(ip) || isIPv6(ip) ? ip : null;
+}
+
+export function panelIpUrl(server: ServerRow | undefined): string | null {
+  const ip = panelIpHost(server);
+  return ip ? `https://${isIPv6(ip) ? `[${ip}]` : ip}:${config.panelIpPort}` : null;
+}
+
+function caddyPortBindings(server: ServerRow): Record<string, { HostPort: string }[]> {
+  const bindings: Record<string, { HostPort: string }[]> = {
+    "80/tcp": [{ HostPort: "80" }],
+    "443/tcp": [{ HostPort: "443" }],
+    "443/udp": [{ HostPort: "443" }],
+  };
+  if (server.kind === "local" && config.panelIpPort) bindings[`${PANEL_IP_LISTEN}/tcp`] = [{ HostPort: String(config.panelIpPort) }];
+  return bindings;
+}
 
 const CADDY_DOCKERFILE = `
 FROM caddy:2.11-builder AS builder
@@ -85,21 +116,16 @@ export async function ensureCaddy(server: ServerRow, log: (line: string) => void
     });
   }
 
-  const state = await containerState(docker, CADDY_CONTAINER);
-  if (!state.exists) {
-    log("Caddy konteyneri oluşturuluyor...");
+  const wantIpPort = server.kind === "local" ? String(config.panelIpPort) : "0";
+  const create = async (bindings: Record<string, { HostPort: string }[]>, ipPortLabel = wantIpPort) => {
     await docker.createContainer({
       name: CADDY_CONTAINER,
       Image: config.caddyImage,
       Cmd: ["caddy", "run", "--config", "/etc/caddy/caddy.json"],
-      Labels: { "xudbin.managed": "true", "xudbin.role": "proxy" },
-      ExposedPorts: { "80/tcp": {}, "443/tcp": {}, "443/udp": {} },
+      Labels: { "xudbin.managed": "true", "xudbin.role": "proxy", [IP_PORT_LABEL]: ipPortLabel },
+      ExposedPorts: Object.fromEntries(Object.keys(bindings).map((k) => [k, {}])),
       HostConfig: {
-        PortBindings: {
-          "80/tcp": [{ HostPort: "80" }],
-          "443/tcp": [{ HostPort: "443" }],
-          "443/udp": [{ HostPort: "443" }],
-        },
+        PortBindings: bindings,
         Binds: ["xudbin-caddy-data:/data", "xudbin-caddy-config:/config"],
         RestartPolicy: { Name: "unless-stopped" },
         NetworkMode: config.network,
@@ -107,10 +133,36 @@ export async function ensureCaddy(server: ServerRow, log: (line: string) => void
       },
     });
     await putFile(docker, CADDY_CONTAINER, "/etc/caddy", "caddy.json", JSON.stringify(buildCaddyConfig(server), null, 2));
+  };
+
+  let state = await containerState(docker, CADDY_CONTAINER);
+  // Panelin IP portu sonradan eklendi (1.3.2) ya da .env'de değişti: port bağlantısı ancak konteyner yeniden
+  // oluşturulunca değişir. Sertifikalar xudbin-caddy-data biriminde kalır; siteler birkaç saniye kesilir.
+  if (state.exists && server.kind === "local") {
+    if (state.info?.Config.Labels?.[IP_PORT_LABEL] !== wantIpPort) {
+      log(config.panelIpPort ? `Caddy konteyneri panelin IP portu (${config.panelIpPort}) için yeniden oluşturuluyor...` : "Caddy konteyneri IP portu kapatılarak yeniden oluşturuluyor...");
+      await docker.getContainer(CADDY_CONTAINER).remove({ force: true });
+      state = { ...state, exists: false, running: false };
+    }
+  }
+  if (!state.exists) {
+    log("Caddy konteyneri oluşturuluyor...");
+    await create(caddyPortBindings(server));
   }
   if (!state.running) {
     log("Caddy başlatılıyor...");
-    await docker.getContainer(CADDY_CONTAINER).start();
+    try {
+      await docker.getContainer(CADDY_CONTAINER).start();
+    } catch (err) {
+      // IP portu sunucuda başka bir serviste (ör. CloudPanel 8443) ise siteler kapalı kalmasın: o port olmadan aç.
+      if (server.kind !== "local" || !config.panelIpPort || state.exists) throw err;
+      log(`Uyarı: ${config.panelIpPort} portu kullanılamadı (${(err as Error).message}); panel yalnız alan adıyla açılacak. Portu boşaltınca: xudbin restart`);
+      await docker.getContainer(CADDY_CONTAINER).remove({ force: true });
+      const { [`${PANEL_IP_LISTEN}/tcp`]: _ip, ...rest } = caddyPortBindings(server);
+      // Etiket "0": panel bir sonraki açılışta portu yeniden dener.
+      await create(rest, "0");
+      await docker.getContainer(CADDY_CONTAINER).start();
+    }
   }
 }
 
@@ -365,35 +417,35 @@ export function buildCaddyConfig(server: ServerRow) {
     }
   };
 
-  if (server.kind === "local" && settings.panelDomain) {
-    add(settings.panelDomain, settings.panelHttps, {
-      match: [{ host: [settings.panelDomain] }],
-      handle: [
+  // Alan adı ve IP girişi aynı korumalardan geçer: engelli IP'ler, hız sınırı, WAF.
+  const panelHandle = [
+    {
+      handler: "subroute",
+      routes: [
+        ...(blocked.length ? [blockRoute(blocked, "blocklist")] : []),
         {
-          handler: "subroute",
-          routes: [
-            ...(blocked.length ? [blockRoute(blocked, "blocklist")] : []),
+          handle: [
             {
-              handle: [
-                {
-                  handler: "rate_limit",
-                  rate_limits: { panel: { key: CLIENT_IP, window: "1m", max_events: 600 } },
-                },
-                ...(settings.panelWaf === "off" ? [] : [{ handler: "waf", load_owasp_crs: true, directives: panelWafDirectives(settings.panelWaf) }]),
-                {
-                  handler: "reverse_proxy",
-                  upstreams: [{ dial: config.panelUpstream }],
-                  // Panel gerçek ziyaretçi IP'sini yalnız bu başlıktan okur; set istemcinin gönderdiği değeri ezer.
-                  headers: { request: { set: { [CLIENT_IP_HEADER]: [CLIENT_IP] } } },
-                },
-              ],
+              handler: "rate_limit",
+              rate_limits: { panel: { key: CLIENT_IP, window: "1m", max_events: 600 } },
+            },
+            ...(settings.panelWaf === "off" ? [] : [{ handler: "waf", load_owasp_crs: true, directives: panelWafDirectives(settings.panelWaf) }]),
+            {
+              handler: "reverse_proxy",
+              upstreams: [{ dial: config.panelUpstream }],
+              // Panel gerçek ziyaretçi IP'sini yalnız bu başlıktan okur; set istemcinin gönderdiği değeri ezer.
+              headers: { request: { set: { [CLIENT_IP_HEADER]: [CLIENT_IP] } } },
             },
           ],
         },
       ],
-      terminal: true,
-    });
+    },
+  ];
+  if (server.kind === "local" && settings.panelDomain) {
+    add(settings.panelDomain, settings.panelHttps, { match: [{ host: [settings.panelDomain] }], handle: panelHandle, terminal: true });
   }
+  // https://<ip>:8443 — tarayıcılar IP için SNI göndermez; sertifika default_sni ile seçilir.
+  const panelIp = panelIpHost(server);
 
   // Çok sunuculu dağıtım: bu sunucu ana sunucuysa uzak kopyalara aktarma, ek sunucuysa gelen aktarma rotaları.
   const relayOut = outgoingRelays(server);
@@ -480,6 +532,8 @@ export function buildCaddyConfig(server: ServerRow) {
           ]
         : undefined;
 
+  const internalHosts = [...relayIn.hosts, ...(panelIp && !httpsOff ? [panelIp] : [])];
+
   return {
     admin: { listen: "localhost:2019" },
     logging: {
@@ -508,16 +562,32 @@ export function buildCaddyConfig(server: ServerRow) {
                 ...clientIp,
               },
               http: { listen: [":80"], routes: [...httpRoutes, fallback], logs: { default_logger_name: "access" }, errors: { routes: WAF_ERROR_ROUTES }, ...clientIp },
+              ...(panelIp
+                ? {
+                    panel_ip: {
+                      listen: [`:${PANEL_IP_LISTEN}`],
+                      // Yalnız TCP portu açılır; HTTP/3 (UDP) duyurulmasın.
+                      protocols: ["h1", "h2"],
+                      routes: [{ handle: panelHandle, terminal: true }],
+                      logs: { default_logger_name: "access" },
+                      errors: { routes: WAF_ERROR_ROUTES },
+                      tls_connection_policies: [{ default_sni: panelIp }],
+                      automatic_https: { disable: true },
+                      ...clientIp,
+                    },
+                  }
+                : {}),
             },
       },
-      ...(!httpsOff && (relayIn.hosts.length || (tlsPolicies && httpsHosts.length))
+      ...(!httpsOff && (internalHosts.length || (tlsPolicies && httpsHosts.length))
         ? {
             tls: {
-              // Sunucular arası aktarma adresleri: Caddy'nin iç CA'sından sertifika (ana sunucu bu CA'ya güvenir).
-              ...(relayIn.hosts.length ? { certificates: { automate: relayIn.hosts } } : {}),
+              // Sunucular arası aktarma adresleri ve panelin IP adresi: Caddy'nin iç CA'sından sertifika
+              // (ana sunucu bu CA'ya güvenir; tarayıcı güvenmez, IP girişinde uyarı verir).
+              ...(internalHosts.length ? { certificates: { automate: internalHosts } } : {}),
               automation: {
                 policies: [
-                  ...(relayIn.hosts.length ? [{ subjects: relayIn.hosts, issuers: [{ module: "internal" }] }] : []),
+                  ...(internalHosts.length ? [{ subjects: internalHosts, issuers: [{ module: "internal" }] }] : []),
                   ...(tlsPolicies && httpsHosts.length ? tlsPolicies : []),
                 ],
               },

@@ -1,12 +1,14 @@
 import { config } from "../config.js";
 import { db } from "../db.js";
+import { panelIpHost } from "./caddy.js";
 import { dockerFor, imageExists, withTimeout, type ServerRow } from "./docker.js";
 import { listServers } from "./servers.js";
 
 /**
  * Docker, yayınlanan portlar için iptables kurallarını kendisi yazdığından UFW/firewalld bu portları engelleyemez.
- * Burada DOCKER-USER zincirine bir XUDBIN-FW zinciri eklenir: dışarıdan konteynerlere yalnız 80/443 ve
- * panelden dışarı açılmış veritabanı portları ulaşır; compose'taki "ports:" dahil gerisi kapalıdır.
+ * Burada DOCKER-USER zincirine bir XUDBIN-FW zinciri eklenir: dışarıdan konteynerlere yalnız 80/443,
+ * panelin IP girişi (açıksa, varsayılan 8443) ve panelden dışarı açılmış veritabanı portları ulaşır;
+ * compose'taki "ports:" dahil gerisi kapalıdır.
  * Kurallar kalıcı değildir (yeniden başlatmada silinir); panel açılışta ve periyodik olarak yeniden uygular.
  */
 export function firewallScript(openPorts: number[]) {
@@ -67,6 +69,8 @@ export async function applyDockerFirewall(server: ServerRow, opts: { force?: boo
   const ports = (db.prepare("SELECT external_port FROM databases WHERE server_id = ? AND external_port IS NOT NULL").all(server.id) as { external_port: number }[]).map(
     (r) => r.external_port,
   );
+  // Panelin IP girişi ayarlardan kapatılınca port güvenlik duvarında da kapanır.
+  if (panelIpHost(server)) ports.push(config.panelIpPort);
   const script = firewallScript(ports);
   if (!opts.force && lastApplied.get(server.id) === script) return;
   await hostExec(server, script).catch((e: Error) => {

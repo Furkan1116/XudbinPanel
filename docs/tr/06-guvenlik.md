@@ -47,7 +47,7 @@ Düzeltilebilen kontrollerin yanında tek tıklık düğmeler bulunur; ör. **WA
 
 ## Sunucu güvenlik duvarı
 
-Kurulum betiği güvenlik duvarında yalnız SSH, 80 ve 443'ü açar ve fail2ban kurar (10 dakikada 5 hatalı SSH girişi 1 saat ban). Ayrıca Docker'ın güvenlik duvarını atlaması engellenir: dışarıdan konteynerlere yalnız 80/443 ve panelden açılan veritabanı portları ulaşır.
+Kurulum betiği güvenlik duvarında yalnız SSH, 80, 443 ve panelin IP girişi için 8443'ü açar ve fail2ban kurar (10 dakikada 5 hatalı SSH girişi 1 saat ban). Ayrıca Docker'ın güvenlik duvarını atlaması engellenir: dışarıdan konteynerlere yalnız 80/443, panelin IP girişi (8443; Ayarlar → Panel'den kapatılınca bu port da kapanır) ve panelden açılan veritabanı portları ulaşır.
 
 Her sunucunun durumunu **Sunucular > sunucu > Durum** sekmesindeki **Sunucu güvenliği** bölümünde görürsün; **Sıkılaştır** güvenlik duvarını ve fail2ban'ı kurar.
 

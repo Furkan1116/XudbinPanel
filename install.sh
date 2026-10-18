@@ -14,6 +14,8 @@
 #   XUDBIN_VERIFY  0 yapılırsa imaj imzası doğrulanmaz (önerilmez; kendi imajın/çatalın için)
 #   XUDBIN_HARDEN  0 yapılırsa güvenlik duvarı ve fail2ban kurulmaz (varsayılan 1)
 #   XUDBIN_HTTPS   0 yapılırsa HTTPS kapalı kurulur (dış IP'si olmayan yerel ağ/test sunucuları için)
+#   XUDBIN_IP_PORT Panelin IP ile de açıldığı port: https://<ip>:8443 (varsayılan 8443, kendinden imzalı
+#                  sertifika, tarayıcı uyarı verir). 0 yapılırsa kapalı; port doluysa kurulum kendisi kapatır.
 # Betiğin tamamı bir fonksiyonun içinde ve en sonda çağrılıyor: "curl | bash" sırasında bağlantı kesilirse
 # yarım inmiş betiğin hiçbir satırı çalışmaz.
 xudbin_install() {
@@ -182,7 +184,7 @@ install -m 0644 "$INSTALL_DIR/scripts/login-link.sh" /etc/profile.d/xudbin.sh
 ok "SSH girişinde panel linki gösterilecek"
 
 # --- Ayarlar (.env) ---
-CLI_DOMAIN=${XUDBIN_DOMAIN:-}; CLI_EMAIL=${ACME_EMAIL:-}; CLI_HTTPS=${XUDBIN_HTTPS:-}
+CLI_DOMAIN=${XUDBIN_DOMAIN:-}; CLI_EMAIL=${ACME_EMAIL:-}; CLI_HTTPS=${XUDBIN_HTTPS:-}; CLI_IP_PORT=${XUDBIN_IP_PORT:-}
 # .env bir kabuk betiği gibi çalıştırılmaz (içine yazılmış komutlar root olarak çalışırdı); yalnız bilinen anahtarlar,
 # güvenli karakterlerden oluşan değerlerle okunur.
 if [[ -f .env ]]; then
@@ -190,12 +192,21 @@ if [[ -f .env ]]; then
     value=${value%\"}; value=${value#\"}
     [[ $value =~ ^[A-Za-z0-9@._:/+-]*$ ]] || continue
     case $key in
-      XUDBIN_DOMAIN|ACME_EMAIL|XUDBIN_HTTPS|XUDBIN_PUBLIC_IP) printf -v "$key" '%s' "$value" ;;
+      XUDBIN_DOMAIN|ACME_EMAIL|XUDBIN_HTTPS|XUDBIN_PUBLIC_IP|XUDBIN_IP_PORT) printf -v "$key" '%s' "$value" ;;
     esac
   done < .env
 fi
 XUDBIN_DOMAIN=${CLI_DOMAIN:-${XUDBIN_DOMAIN:-}}; ACME_EMAIL=${CLI_EMAIL:-${ACME_EMAIL:-}}
 XUDBIN_HTTPS=${CLI_HTTPS:-${XUDBIN_HTTPS:-1}}; XUDBIN_IMAGE=$PANEL_IMAGE
+XUDBIN_IP_PORT=${CLI_IP_PORT:-${XUDBIN_IP_PORT:-8443}}
+[[ $XUDBIN_IP_PORT =~ ^[0-9]{1,5}$ ]] && (( XUDBIN_IP_PORT < 65536 )) && [[ $XUDBIN_IP_PORT != 80 && $XUDBIN_IP_PORT != 443 ]] || XUDBIN_IP_PORT=0
+[[ $XUDBIN_HTTPS == 0 ]] && XUDBIN_IP_PORT=0
+# Panelin IP portu sunucuda başka bir serviste (ör. CloudPanel 8443) ise IP girişi kapatılır; siteler etkilenmez.
+if [[ $XUDBIN_IP_PORT != 0 ]] && ss -ltnH "sport = :$XUDBIN_IP_PORT" 2>/dev/null | grep -q . \
+  && ! docker port xudbin-caddy 8443/tcp 2>/dev/null | grep -q ":$XUDBIN_IP_PORT\$"; then
+  info "Uyarı: $XUDBIN_IP_PORT portu kullanımda; panel IP ile açılmayacak, yalnız alan adıyla (başka port: XUDBIN_IP_PORT=9443)"
+  XUDBIN_IP_PORT=0
+fi
 if [[ $XUDBIN_HTTPS == 0 ]]; then SCHEME=http; SECURE_COOKIES=false; else SCHEME=https; SECURE_COOKIES=true; fi
 PUBLIC_IP=${XUDBIN_PUBLIC_IP:-}
 if [[ -z ${XUDBIN_DOMAIN:-} ]]; then
@@ -218,12 +229,14 @@ if [[ $MODE == install ]]; then
     if command -v apt-get >/dev/null; then
       DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw fail2ban >/dev/null
       for p in "$SSH_PORT/tcp" 80/tcp 443/tcp 443/udp; do ufw allow "$p" >/dev/null; done
+      [[ $XUDBIN_IP_PORT != 0 ]] && ufw allow "$XUDBIN_IP_PORT/tcp" >/dev/null
       ufw --force enable >/dev/null
       F2B_BACKEND=auto
     elif command -v dnf >/dev/null; then
       dnf install -y -q epel-release >/dev/null && dnf install -y -q firewalld fail2ban >/dev/null
       systemctl enable --now firewalld >/dev/null 2>&1
       for p in "$SSH_PORT/tcp" 80/tcp 443/tcp 443/udp; do firewall-cmd -q --permanent --add-port="$p"; done
+      [[ $XUDBIN_IP_PORT != 0 ]] && firewall-cmd -q --permanent --add-port="$XUDBIN_IP_PORT/tcp"
       firewall-cmd -q --reload
       F2B_BACKEND=systemd
     fi
@@ -235,10 +248,11 @@ if [[ $MODE == install ]]; then
       systemctl enable --now fail2ban >/dev/null 2>&1 || true
       systemctl restart fail2ban || true
     fi
+    FW_PORTS="$SSH_PORT (SSH), 80, 443$([[ $XUDBIN_IP_PORT != 0 ]] && echo ", $XUDBIN_IP_PORT (panel IP girişi)")"
     if [[ $FW_DONE == 1 ]]; then
-      ok "Güvenlik duvarı açık: yalnız $SSH_PORT (SSH), 80, 443"
+      ok "Güvenlik duvarı açık: yalnız $FW_PORTS"
     else
-      info "Uyarı: apt-get/dnf bulunamadı ya da güvenlik duvarı etkinleşmedi; güvenlik duvarını elle kur (yalnız $SSH_PORT, 80, 443 açık olmalı)"
+      info "Uyarı: apt-get/dnf bulunamadı ya da güvenlik duvarı etkinleşmedi; güvenlik duvarını elle kur (yalnız $FW_PORTS açık olmalı)"
     fi
     if [[ -d /etc/fail2ban ]]; then ok "fail2ban: 10 dakikada 5 hatalı SSH girişi 1 saat ban"; else info "fail2ban kurulmadı"; fi
   else
@@ -266,6 +280,7 @@ XUDBIN_DOMAIN=${XUDBIN_DOMAIN}
 ACME_EMAIL=${ACME_EMAIL:-}
 XUDBIN_HTTPS=${XUDBIN_HTTPS}
 XUDBIN_PUBLIC_IP=${PUBLIC_IP:-}
+XUDBIN_IP_PORT=${XUDBIN_IP_PORT}
 XUDBIN_IMAGE=${XUDBIN_IMAGE}
 XUDBIN_CADDY_IMAGE=${CADDY_IMAGE}
 XUDBIN_VERSION=${TAG#v}

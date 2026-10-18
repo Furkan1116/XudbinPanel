@@ -31,6 +31,8 @@ export const config = {
   trivyImage: env.XUDBIN_TRIVY_IMAGE ?? "aquasec/trivy:0.58.1",
   /** Hazır Caddy imajı (CI'da çok mimarili derlenir); çekilemezse sunucuda derlenir. */
   caddyPrebuilt: env.XUDBIN_CADDY_IMAGE ?? "ghcr.io/furkan1116/xudbin-caddy:1",
+  /** Panelin IP ile açıldığı sunucu portu (https://<ip>:8443, CloudPanel gibi); 0 ise kapalı. install.sh port doluysa 0 yazar. */
+  panelIpPort: parseIpPort(env.XUDBIN_IP_PORT),
   /** Varsayılan Let's Encrypt yerine kullanılacak ACME dizini, ör. staging: https://acme-staging-v02.api.letsencrypt.org/directory */
   acmeCa: env.XUDBIN_ACME_CA || null,
   /** ACME sunucusu herkese açık bir sertifika kullanmıyorsa, Caddy konteynerindeki kök sertifika dosyası. */
@@ -50,4 +52,11 @@ function findDockerSocket() {
     path.join(os.homedir(), ".docker/run/docker.sock"),
   ];
   return candidates.find((p) => fs.existsSync(p)) ?? "/var/run/docker.sock";
+}
+
+/** 80 ve 443 Caddy'nin kendi portları; onlarla çakışan ya da geçersiz değer IP girişini kapatır. */
+export function parseIpPort(raw: string | undefined) {
+  if (raw === undefined || raw === "") return 8443;
+  const n = /^\d{1,5}$/.test(raw) ? Number(raw) : 0;
+  return n > 0 && n < 65536 && n !== 80 && n !== 443 ? n : 0;
 }

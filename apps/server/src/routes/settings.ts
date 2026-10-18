@@ -17,7 +17,7 @@ import { VERSION } from "../lib/version.js";
 import { updateInfo } from "../lib/update-check.js";
 import { config } from "../config.js";
 import { createRateLimiter } from "../lib/rate-limit.js";
-import { hostExec } from "../services/firewall.js";
+import { applyDockerFirewall, hostExec } from "../services/firewall.js";
 import { createApiToken } from "../auth/api-tokens.js";
 import type { AppEnv } from "../lib/types.js";
 import { applyCaddyConfig } from "../services/caddy.js";
@@ -54,7 +54,19 @@ export const settingsRoutes = new Hono<AppEnv>()
   .get("/", (c) => {
     const s = getSettings();
     const local = listServers().find((x) => x.kind === "local");
-    return c.json({ panelDomain: s.panelDomain, panelHttps: s.panelHttps, panelWaf: s.panelWaf, localServerIp: local?.public_ip ?? null, version: VERSION, timezone: s.timezone, uptimeEnabled: s.uptimeEnabled });
+    return c.json({
+      panelDomain: s.panelDomain,
+      panelHttps: s.panelHttps,
+      panelWaf: s.panelWaf,
+      panelIpAccess: s.panelIpAccess,
+      // IP girişi sunucuda kullanılabilir mi (port .env'de kapalı değil, HTTPS açık, IP biliniyor) ve adresi.
+      panelIpPort: config.panelIpPort,
+      panelIpAvailable: Boolean(config.panelIpPort && local && local.https_mode !== "off" && local.public_ip),
+      localServerIp: local?.public_ip ?? null,
+      version: VERSION,
+      timezone: s.timezone,
+      uptimeEnabled: s.uptimeEnabled,
+    });
   })
 
   .get("/update", async (c) => c.json({ ...(await updateInfo()), canSelfUpdate: config.isProd, lastUpdate: lastUpdateStatus() }))
@@ -87,13 +99,18 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
         panelDomain: z.union([z.string().trim().toLowerCase().regex(/^([a-z0-9-]+\.)+[a-z]{2,63}$/, "Geçerli bir alan adı gir"), z.literal("")]),
         panelHttps: z.boolean(),
         panelWaf: z.enum(["off", "detect", "block"]).optional(),
+        panelIpAccess: z.boolean().optional(),
         timezone: z.string().max(60).refine((tz) => Intl.supportedValuesOf("timeZone").includes(tz) || tz === "UTC", "Geçersiz saat dilimi").optional(),
         uptimeEnabled: z.boolean().optional(),
       }),
     );
     updateSettings(input);
     const local = listServers().find((x) => x.kind === "local");
-    if (local?.status === "ready") await applyCaddyConfig(local);
+    if (local?.status === "ready") {
+      await applyCaddyConfig(local);
+      // IP girişi açılıp kapanınca port Docker güvenlik duvarında da açılır/kapanır; 15 dakikada bir yeniden de uygulanır.
+      await applyDockerFirewall(local).catch((err) => console.error((err as Error).message));
+    }
     return c.json({ ok: true });
   })
 

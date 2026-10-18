@@ -54,10 +54,10 @@ export function SettingsPage() {
 function PanelSettings() {
   const { data } = useQuery({
     queryKey: ["settings"],
-    queryFn: () => api.get<{ panelDomain: string; panelHttps: boolean; panelWaf: "off" | "detect" | "block"; localServerIp: string | null; version: string; timezone: string; uptimeEnabled: boolean }>("/settings"),
+    queryFn: () => api.get<{ panelDomain: string; panelHttps: boolean; panelWaf: "off" | "detect" | "block"; panelIpAccess: boolean; panelIpPort: number; panelIpAvailable: boolean; localServerIp: string | null; version: string; timezone: string; uptimeEnabled: boolean }>("/settings"),
   });
-  const [form, setForm] = useState<{ panelDomain: string; panelHttps: boolean; panelWaf: "off" | "detect" | "block"; timezone: string; uptimeEnabled: boolean } | null>(null);
-  const f = form ?? (data ? { panelDomain: data.panelDomain, panelHttps: data.panelHttps, panelWaf: data.panelWaf, timezone: data.timezone, uptimeEnabled: data.uptimeEnabled } : null);
+  const [form, setForm] = useState<{ panelDomain: string; panelHttps: boolean; panelWaf: "off" | "detect" | "block"; panelIpAccess: boolean; timezone: string; uptimeEnabled: boolean } | null>(null);
+  const f = form ?? (data ? { panelDomain: data.panelDomain, panelHttps: data.panelHttps, panelWaf: data.panelWaf, panelIpAccess: data.panelIpAccess, timezone: data.timezone, uptimeEnabled: data.uptimeEnabled } : null);
   const save = useAction(() => api.put("/settings/panel", f), { success: t("Ayarlar kaydedildi"), invalidate: [["settings"]] });
   const zones = useMemo(() => {
     try {
@@ -84,6 +84,14 @@ function PanelSettings() {
           <input className="input" value={f.panelDomain} onChange={(e) => setForm({ ...f, panelDomain: e.target.value.trim().toLowerCase() })} placeholder="panel.ornek.com" />
         </Field>
         <Toggle checked={f.panelHttps} onChange={(v) => setForm({ ...f, panelHttps: v })} label={t("HTTPS")} description={t("Ücretsiz Let's Encrypt sertifikası otomatik alınır.")} />
+        {data.panelIpAvailable && data.localServerIp && (
+          <Toggle
+            checked={f.panelIpAccess}
+            onChange={(v) => setForm({ ...f, panelIpAccess: v })}
+            label={t("IP ile giriş")}
+            description={t("Panel https://{ip}:{port} adresinden de açılır. Bu adresin sertifikası kendinden imzalı olduğu için tarayıcı ilk girişte uyarı verir. Alan adındaki korumalar (WAF, hız sınırı, IP engeli) burada da geçerli.", { ip: data.localServerIp, port: String(data.panelIpPort) })}
+          />
+        )}
         <Field label={t("Panel WAF")} hint={t("Panelin adresini OWASP kurallarıyla (Coraza, paranoya 1) denetler. \"Yalnız tespit\" istekleri kesmez; panelin sorunsuz çalıştığını gördükten sonra \"Engelle\"ye geç.")}>
           <select className="input" value={f.panelWaf} onChange={(e) => setForm({ ...f, panelWaf: e.target.value as "off" | "detect" | "block" })}>
             <option value="off">{t("Kapalı")}</option>

@@ -322,7 +322,7 @@ on("GET", "/analytics/sites", () => ({ sites: D.analyticsSites }));
 on("GET", "/analytics/report", ({ query }) => D.analyticsReport(query.get("site") ?? "all", query.get("range") ?? "7d"));
 
 // --- Ayarlar ----------------------------------------------------------------
-on("GET", "/settings", () => ({ panelDomain: "panel.ornekfirma.com.tr", panelHttps: true, panelWaf: "detect", localServerIp: "203.0.113.24", version: "1.3.0", timezone: "Europe/Istanbul", uptimeEnabled: true }));
+on("GET", "/settings", () => ({ panelDomain: "panel.ornekfirma.com.tr", panelHttps: true, panelWaf: "detect", panelIpAccess: true, panelIpPort: 8443, panelIpAvailable: true, localServerIp: "203.0.113.24", version: "1.3.0", timezone: "Europe/Istanbul", uptimeEnabled: true }));
 on("GET", "/settings/update", () => ({ current: "1.3.0", latest: "1.3.0", updateAvailable: false, url: "https://github.com/xudbin/xudbin/releases", canSelfUpdate: true }));
 on("GET", "/settings/account", () => ({
   user: { id: D.demoUser.id, name: D.demoUser.name, email: D.demoUser.email },

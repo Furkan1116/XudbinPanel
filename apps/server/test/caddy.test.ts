@@ -3,7 +3,8 @@ import { test } from "node:test";
 import { db } from "../src/db.js";
 import { updateSettings } from "../src/lib/settings.js";
 import { pickForwardedIp } from "../src/lib/client-ip.js";
-import { buildCaddyConfig, CLIENT_IP_HEADER } from "../src/services/caddy.js";
+import { parseIpPort } from "../src/config.js";
+import { buildCaddyConfig, CLIENT_IP_HEADER, panelIpUrl } from "../src/services/caddy.js";
 import type { ServerRow } from "../src/services/docker.js";
 
 function fakeServer(over: Partial<ServerRow> = {}): ServerRow {
@@ -65,4 +66,46 @@ test("O5: panel rotasında WAF var; varsayılan yalnız tespit, gövde denetimi 
   assert.ok(detect.indexOf("id:100002") < detect.indexOf("@owasp_crs"));
   assert.equal(updateSettings({}).panelWaf, "block");
   updateSettings({ panelDomain: "", panelWaf: "detect" });
+});
+
+test("Panel IP girişi: https://<ip>:8443 iç CA sertifikasıyla, alan adıyla aynı korumalar", () => {
+  updateSettings({ panelDomain: "", panelWaf: "detect", panelIpAccess: true });
+  const server = fakeServer({ id: 987002, https_mode: "auto", public_ip: "203.0.113.10" });
+  const cfg = buildCaddyConfig(server) as unknown as {
+    apps: { http: { servers: Record<string, { listen: string[]; routes: unknown[]; tls_connection_policies?: { default_sni: string }[] }> }; tls?: { certificates?: { automate: string[] }; automation: { policies: { subjects?: string[]; issuers: { module: string }[] }[] } } };
+  };
+  const ipServer = cfg.apps.http.servers.panel_ip!;
+  assert.deepEqual(ipServer.listen, [":8443"]);
+  // Tarayıcı IP için SNI göndermez; sertifika default_sni ile seçilir.
+  assert.deepEqual(ipServer.tls_connection_policies, [{ default_sni: "203.0.113.10" }]);
+  const route = JSON.stringify(ipServer.routes);
+  assert.ok(route.includes('"handler":"reverse_proxy"') && route.includes('"handler":"rate_limit"') && route.includes('"handler":"waf"'));
+  assert.ok(route.includes(`"${CLIENT_IP_HEADER}":["{http.vars.client_ip}"]`));
+  assert.ok(cfg.apps.tls?.certificates?.automate.includes("203.0.113.10"));
+  const policy = cfg.apps.tls!.automation.policies.find((p) => p.subjects?.includes("203.0.113.10"));
+  assert.deepEqual(policy?.issuers, [{ module: "internal" }], "IP sertifikası Let's Encrypt'ten değil, iç CA'dan");
+  assert.equal(panelIpUrl(server), "https://203.0.113.10:8443");
+  assert.equal(panelIpUrl(fakeServer({ https_mode: "auto", public_ip: "2001:db8::1" })), "https://[2001:db8::1]:8443");
+
+  // Ayardan kapalı, HTTPS kapalı, uzak sunucu ya da IP bilinmiyorsa IP girişi yok.
+  for (const [over, settings] of [
+    [{}, { panelIpAccess: false }],
+    [{ https_mode: "off" }, {}],
+    [{ kind: "ssh" }, {}],
+    [{ public_ip: null }, {}],
+  ] as [Partial<ServerRow>, object][]) {
+    updateSettings({ panelIpAccess: true, ...settings });
+    const s2 = fakeServer({ id: 987002, https_mode: "auto", public_ip: "203.0.113.10", ...over });
+    const text = JSON.stringify(buildCaddyConfig(s2));
+    assert.ok(!text.includes("panel_ip") && !text.includes("203.0.113.10"), JSON.stringify(over));
+    assert.equal(panelIpUrl(s2), null);
+  }
+  updateSettings({ panelIpAccess: true });
+});
+
+test("XUDBIN_IP_PORT: varsayılan 8443, 0/geçersiz/80/443 kapatır", () => {
+  assert.equal(parseIpPort(undefined), 8443);
+  assert.equal(parseIpPort(""), 8443);
+  assert.equal(parseIpPort("9443"), 9443);
+  for (const bad of ["0", "443", "80", "70000", "abc", "84 43"]) assert.equal(parseIpPort(bad), 0, bad);
 });

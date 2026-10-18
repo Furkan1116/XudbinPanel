@@ -1019,6 +1019,9 @@ export const en: Record<string, string> = {
   "Uygulamayı sil": "Delete app",
   "Uygun": "Compatible",
   "Ücretsiz Let's Encrypt sertifikası otomatik alınır.": "A free Let's Encrypt certificate is issued automatically.",
+  "IP ile giriş": "Access by IP",
+  "Panel https://{ip}:{port} adresinden de açılır. Bu adresin sertifikası kendinden imzalı olduğu için tarayıcı ilk girişte uyarı verir. Alan adındaki korumalar (WAF, hız sınırı, IP engeli) burada da geçerli.":
+    "The panel also opens at https://{ip}:{port}. This address uses a self-signed certificate, so your browser shows a warning on first visit. The same protections as the domain (WAF, rate limit, IP blocking) apply here.",
   "Üye": "Member",
   "Üye: proje, uygulama ve veritabanları": "Member: projects, apps and databases",
   "Vazgeç": "Cancel",

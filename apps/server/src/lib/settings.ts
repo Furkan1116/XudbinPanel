@@ -6,6 +6,8 @@ export type Settings = {
   panelHttps: boolean;
   /** Panelin kendi adresindeki WAF: kapalı, yalnız tespit (engellemez) veya engelle. */
   panelWaf: "off" | "detect" | "block";
+  /** Panel https://<sunucu IP'si>:8443 adresinden de açılır (kendinden imzalı sertifika, tarayıcı uyarı verir). */
+  panelIpAccess: boolean;
   autoBanEnabled: boolean;
   autoBanThreshold: number;   // pencere içinde kaç engellenen istek
   autoBanWindowMin: number;
@@ -35,6 +37,7 @@ const DEFAULTS: Settings = {
   panelDomain: "",
   panelHttps: true,
   panelWaf: "detect",
+  panelIpAccess: true,
   autoBanEnabled: true,
   autoBanThreshold: 30,
   autoBanWindowMin: 10,

@@ -15,6 +15,8 @@ import { decryptBackupFile, deriveFromKeyFile } from "./lib/backup-crypto.js";
 import { decrypt } from "./lib/crypto.js";
 import { s3Download } from "./lib/s3.js";
 import { getSettings } from "./lib/settings.js";
+import { panelIpUrl } from "./services/caddy.js";
+import type { ServerRow } from "./services/docker.js";
 import { decryptArchive, unpackTar } from "./services/panel-backup.js";
 import { createUser, deleteUser, resetPassword, type UserRow } from "./services/users.js";
 
@@ -28,14 +30,19 @@ function panelUrl() {
   return ip ? `http://${ip}` : "http://localhost";
 }
 
-/** Linki çerçeve içinde ve telefondan okutulabilir QR kodla gösterir. */
-async function showLink(title: string, url: string, note?: string, qr = true) {
-  const width = Math.max(url.length, title.length, note?.length ?? 0) + 4;
+/** Panelin IP ile açıldığı adres (https://<ip>:8443); kapalıysa null. */
+function panelIpLink() {
+  return panelIpUrl(db.prepare("SELECT * FROM servers WHERE kind = 'local'").get() as ServerRow | undefined);
+}
+
+/** Linki çerçeve içinde ve telefondan okutulabilir QR kodla gösterir (QR yalnız ana link için). */
+async function showLink(title: string, url: string, notes: string[] = [], qr = true) {
+  const width = Math.max(url.length, title.length, ...notes.map((n) => n.length)) + 4;
   const line = "─".repeat(width);
   console.log(`\n  ${R}┌${line}┐${X}`);
   console.log(`  ${R}│${X}  ${B}${title}${X}${" ".repeat(width - title.length - 2)}${R}│${X}`);
   console.log(`  ${R}│${X}  ${G}${url}${X}${" ".repeat(width - url.length - 2)}${R}│${X}`);
-  if (note) console.log(`  ${R}│${X}  ${D}${note}${X}${" ".repeat(width - note.length - 2)}${R}│${X}`);
+  for (const note of notes) console.log(`  ${R}│${X}  ${D}${note}${X}${" ".repeat(width - note.length - 2)}${R}│${X}`);
   console.log(`  ${R}└${line}┘${X}\n`);
   if (!qr) return;
   const code = await QRCode.toString(url, { type: "terminal", small: true, errorCorrectionLevel: "L" });
@@ -54,13 +61,18 @@ async function main() {
       // --short: SSH girişinde gösterilen kısa hâl (QR kodu yok).
       const qr = !args.includes("--short");
       const users = (db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number }).n;
-      if (users === 0) await showLink("Kurulum linki: yönetici hesabını oluştur", `${panelUrl()}/?setup=${ensureSetupToken()}`, "Linki kimseyle paylaşma.", qr);
-      else await showLink("Xudbin paneli", panelUrl(), undefined, qr);
+      const ip = panelIpLink();
+      // IP adresinin sertifikası kendinden imzalı; kullanıcı uyarıyı görünce şaşırmasın.
+      const ipNotes = ip ? [`IP ile: ${ip}`, "(kendinden imzalı sertifika: tarayıcı uyarı verir)"] : [];
+      if (users === 0) await showLink("Kurulum linki: yönetici hesabını oluştur", `${panelUrl()}/?setup=${ensureSetupToken()}`, ["Linki kimseyle paylaşma.", ...ipNotes], qr);
+      else await showLink("Xudbin paneli", panelUrl(), ipNotes, qr);
       return;
     }
     case "status": {
       const q = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
       console.log(`${B}Xudbin${X}  ${panelUrl()}`);
+      const ip = panelIpLink();
+      if (ip) console.log(`  IP ile:       ${ip} ${D}(kendinden imzalı sertifika)${X}`);
       console.log(`  Sunucular:    ${q("SELECT COUNT(*) n FROM servers")} (${q("SELECT COUNT(*) n FROM servers WHERE status = 'ready'")} hazır)`);
       console.log(`  Uygulamalar:  ${q("SELECT COUNT(*) n FROM apps")} (${q("SELECT COUNT(*) n FROM apps WHERE status = 'running'")} çalışıyor)`);
       console.log(`  Veritabanları: ${q("SELECT COUNT(*) n FROM databases")}`);

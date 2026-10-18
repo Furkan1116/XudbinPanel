@@ -48,7 +48,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 
 **Güvenlik**
 - **Güvenlik puanı:** panel, sunucular ve uygulamalar için kontroller (2FA, yedekler, güvenlik duvarı, fail2ban, SSH ayarları, otomatik güncellemeler, WAF, debug modu, imaj açıkları...) ve tek tıkla düzeltmeler
-- Docker'ın güvenlik duvarını atlaması engellenir: dışarıdan konteynerlere yalnız 80/443 ve panelden açılan veritabanı portları ulaşır
+- Docker'ın güvenlik duvarını atlaması engellenir: dışarıdan konteynerlere yalnız 80/443, panelin IP girişi (8443, kapatılabilir) ve panelden açılan veritabanı portları ulaşır
 - Compose'ta sunucuya erişim (privileged, sunucu klasörü bağlama, host ağı) için yönetici onayı gerekir; ancak bu denetim şu an tam değildir, üye rolünü yalnız güvendiğin kişilere ver ([SECURITY.md](SECURITY.md))
 - Uygulama başına WAF, hız sınırı, güvenlik başlıkları, şifre koruması, IP listeleri
 - Tüm sunuculardaki Caddy loglarından saldırı ekranı: zaman çizelgesi, en çok saldıran IP'ler, hedeflenen adresler
@@ -98,9 +98,9 @@ Betik şunları yapar ve her adımı terminalde gösterir:
 1. Sistemi kontrol eder; RAM 3 GB'tan azsa 2 GB swap açar.
 2. Docker kurulu değilse kurar.
 3. Xudbin'i indirir ve `xudbin` komutunu kurar.
-4. Güvenlik duvarında yalnız SSH, 80 ve 443'ü açar, SSH için fail2ban kurar (`XUDBIN_HARDEN=0` ile atlanır).
+4. Güvenlik duvarında yalnız SSH, 80, 443 ve panelin IP girişi için 8443'ü açar, SSH için fail2ban kurar (`XUDBIN_HARDEN=0` ile atlanır).
 5. Paneli başlatır: hazır imaj varsa indirir, yoksa kaynaktan derler.
-6. Sunucunun IP'sinden bir panel adresi üretir (`xudbin.1-2-3-4.sslip.io`) ve HTTPS sertifikasını alır.
+6. Sunucunun IP'sinden bir panel adresi üretir (`xudbin.1-2-3-4.sslip.io`) ve HTTPS sertifikasını alır. Panel `https://1.2.3.4:8443` adresinden de açılır; bu adresin sertifikası kendinden imzalıdır, tarayıcı ilk girişte uyarı verir (Ayarlar → Panel'den kapatılır, `XUDBIN_IP_PORT=0` ile hiç açılmaz).
 7. **Kurulum linkini** çerçeve içinde ve telefondan okutulabilir QR kodla gösterir. Yönetici hesabı yalnız bu linkle oluşturulabilir; böylece panel internete açıldığı anda başkası kurulumu senden önce ele geçiremez.
 
 ## Sunucudaki `xudbin` komutu
