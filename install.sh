@@ -9,7 +9,7 @@
 #   XUDBIN_DOMAIN  Panel için kendi alan adın (boşsa <ip>.sslip.io adresi üretilir)
 #   ACME_EMAIL     Let's Encrypt bildirimleri için e-posta (isteğe bağlı)
 #   XUDBIN_REPO    Kaynak kodun git adresi (varsayılan: resmi repo)
-#   XUDBIN_IMAGE   Hazır panel imajı (varsayılan: son sürüm etiketi, ör. ghcr.io/furkan1116/xudbin:1.3.1)
+#   XUDBIN_IMAGE   Hazır panel imajı (varsayılan: son sürüm etiketi, ör. ghcr.io/furkan1116/xudbin:1.3.2)
 #   XUDBIN_REF     Kurulacak sürüm etiketi (varsayılan: GitHub'daki en yeni v* etiketi)
 #   XUDBIN_VERIFY  0 yapılırsa imaj imzası doğrulanmaz (önerilmez; kendi imajın/çatalın için)
 #   XUDBIN_HARDEN  0 yapılırsa güvenlik duvarı ve fail2ban kurulmaz (varsayılan 1)
