@@ -1,5 +1,7 @@
 # Xudbin
 
+**[xudbin.com](https://xudbin.com)** · [Canlı demo](https://xudbin.com/canli-demo/) · [Belgeler](https://xudbin.com/belgeler/) · [Sürümler](https://xudbin.com/surumler/) · [Güvenlik](https://xudbin.com/guvenlik/) · [English](https://xudbin.com/en/)
+
 Sunucularını tek panelden yönet. Dokploy ve Coolify'dan ilham alan, self-hosted bir sunucu yönetim paneli.
 Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 
@@ -184,7 +186,7 @@ API'yi doğrudan da kullanabilirsin: `curl -X POST -H "Authorization: Bearer xb_
 Yayınlanan imajlar GitHub Actions'ta derlenip [Sigstore](https://www.sigstore.dev) ile imzalanır; SBOM ve köken (provenance) bilgisi imajla birlikte yayınlanır. İmzayı doğrulamak için:
 
 ```bash
-cosign verify ghcr.io/furkan1116/xudbin:1.3.0 \
+cosign verify ghcr.io/furkan1116/xudbin:1.3.2 \
   --certificate-identity-regexp '^https://github\.com/Furkan1116/XudbinPanel/\.github/workflows/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
