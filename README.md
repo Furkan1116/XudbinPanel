@@ -1,189 +1,195 @@
 # Xudbin
 
-**[xudbin.com](https://xudbin.com)** · [Canlı demo](https://xudbin.com/canli-demo/) · [Belgeler](https://xudbin.com/belgeler/) · [Sürümler](https://xudbin.com/surumler/) · [Güvenlik](https://xudbin.com/guvenlik/) · [English](https://xudbin.com/en/)
+**English** · [Türkçe](README.tr.md)
 
-Sunucularını tek panelden yönet. Dokploy ve Coolify'dan ilham alan, self-hosted bir sunucu yönetim paneli.
-Bu panellerde eksik kalan üç şeyi baştan çözüyor:
+**[xudbin.com](https://xudbin.com/en/)** · [Live demo](https://xudbin.com/en/live-demo/) · [Docs](https://xudbin.com/en/docs/) · [Changelog](https://xudbin.com/en/changelog/) · [Security](https://xudbin.com/en/security/)
 
-- **Domain almadan çalışan adres:** Her uygulamaya otomatik olarak `uygulama-x7k2.1-2-3-4.sslip.io` gibi bir adres verilir. DNS ayarı gerekmez.
-- **Ücretsiz, otomatik HTTPS:** Caddy, Let's Encrypt sertifikalarını hem otomatik adreslerde hem kendi alan adlarında alır ve yeniler.
-- **Yerleşik saldırı koruması:** WAF (Coraza + OWASP Core Rule Set), IP başına hız sınırı, otomatik IP banı, güvenlik başlıkları, şifre koruması, IP izin/engel listeleri ve canlı saldırı ekranı.
+![Xudbin panel: overview, adding an app, the app page and the security screen (sample data)](.github/images/en-tour.gif)
 
-## Özellikler
+<sub>Screens from the live demo with sample data. Try it yourself: [xudbin.com/en/live-demo](https://xudbin.com/en/live-demo/) (no account needed).</sub>
 
-**Sunucular**
-- Panelin kendi sunucusu ve SSH ile bağlanan sınırsız uzak sunucu
-- Sunucu eklerken ed25519 SSH anahtarı otomatik üretilir; Docker yoksa kurulur, Caddy hazırlanır
-- Tüm sunucuların canlı CPU, bellek ve disk kullanımı (uzak sunucular dahil)
-- Tek tıkla sıkılaştırma: UFW güvenlik duvarı ve SSH için fail2ban
-- Erişilemeyen sunucu için bildirim
+Manage your servers from one panel. A self-hosted server management panel inspired by Dokploy and Coolify.
+It tackles three things these panels leave out from the start:
 
-**Uygulamalar**
-- Kaynak: Git reposu (özel repolar için token), sürükle-bırak dosya yükleme (klasör veya zip), Docker imajı veya Docker Compose
-- Framework'e göre deploy: uygulama eklerken repo taranır, uygun framework önerilir; her framework'ün ayarları, gereken ortam değişkenleri ve "deploy'da ne olacak" adımları gösterilir
-- Kodda okunan ortam değişkenleri ve `.env.example` tek tıkla eklenir; gizli anahtar, alan adı gibi değerler otomatik üretilir
-- Kesintisiz deploy: trafik, yeni sürüm gerçek alan adıyla yapılan HTTP isteğine sağlıklı yanıt verince geçer; 400/5xx dönerse eski sürüm yayında kalır
-- **Deploy Doktoru:** başarısız deploy'larda loglardaki bilinen hataları (Django ALLOWED_HOSTS, CSRF, eksik gizli anahtar, veritabanı bağlantısı, migration, eksik paket veya ortam değişkeni, bellek yetmezliği) açıklar, uygun olanları tek tıkla düzeltip yeniden deploy eder
-- Framework'ün istediği zorunlu ve alan adına bağlı ortam değişkenleri eksikse deploy sırasında eklenir; Django'da settings.py'nin hangi değişken adını okuduğu bulunur
-- Uygulama başına bellek/CPU sınırı; çalışan deploy iptal edilebilir, 30 dakikada biten zaman aşımı
-- Her deploy'dan sonra imaj Trivy ile bilinen güvenlik açıklarına karşı taranır
-- Tek tıkla önceki sürüme dönüş, canlı deploy ve uygulama logları
-- Git push webhook'u ile otomatik deploy (GitHub, GitLab, Gitea...), HMAC imza doğrulamalı
-- **GitHub App:** panelden tek tıkla oluşturulur; özel repolar token girmeden deploy edilir, repolar listeden seçilir, push ve PR olayları webhook kurmadan gelir
-- **Pull request önizlemeleri:** her PR ayrı bir adreste açılır, yeni commit'lerde güncellenir, PR kapanınca silinir; adres PR'a yorum olarak yazılır. Fork'tan gelen PR'lar deploy edilmez
-- **Hazır şablonlar:** WordPress, Ghost, n8n, Uptime Kuma, Vaultwarden, Gitea, Nextcloud, Metabase, Grafana, Directus, Matomo ve daha fazlası tek tıkla
-- Arka plan işçileri (portu olmayan servisler) ve web uygulamaları için birden çok kopya (replica); Caddy kopyalar arasında yük dağıtır, çöken kopyayı devre dışı bırakır
-- **Çok sunuculu yük dağıtımı:** uygulama ek sunucularda da çalışır; istekler tüm kopyalara dağıtılır, ulaşılamayan sunucu atlanır. Sunucular arası trafik TLS ile şifrelidir
-- **Ayrı derleme sunucusu:** ağır derlemeler başka bir sunucuda yapılır, hazır imaj aktarılır
-- **Zamanlanmış görevler (cron):** uygulamanın imajında komut çalıştırma, çıktı ve süre geçmişi
-- Kalıcı klasör (volume) yedekleri: zamanlanmış, S3'e de yüklenebilen, tek tıkla geri yükleme
-- Canlı loglarda anlık filtre; geçmiş loglarda (son 1 saat – 14 gün) tüm kopyalar ve Compose servislerinde arama
-- Şifreli ortam değişkenleri, kalıcı depolama klasörleri, CPU/bellek izleme
+- **An address without buying a domain:** every app automatically gets an address like `app-x7k2.1-2-3-4.sslip.io`. No DNS setup needed.
+- **Free, automatic HTTPS:** Caddy obtains and renews Let's Encrypt certificates for both automatic addresses and your own domains.
+- **Built-in attack protection:** WAF (Coraza + OWASP Core Rule Set), per-IP rate limiting, automatic IP bans, security headers, password protection, IP allow/deny lists and a live attack screen.
 
-**Veritabanları**
-- PostgreSQL, MySQL, MariaDB, MongoDB, Redis; kullanıcı ve şifre otomatik üretilir
-- Elle veya zamanlanmış yedekleme, saklama sayısı, indirme ve geri yükleme
-- Yedekler S3 uyumlu uzak depolamaya da yüklenir (AWS S3, Cloudflare R2, Backblaze B2, MinIO)
-- **Doğrulanmış veritabanı yedeği:** otomatik veritabanı yedeklerinden biri düzenli olarak ağsız geçici bir veritabanına geri yüklenip denenir ("son yedek doğrulandı, 12 tablo"); volume ve panel yedekleri doğrulanmaz
-- **Şifreli yedekler:** veritabanı ve volume yedekleri varsayılan olarak AES-256-GCM ile şifrelenir (anahtar panelin `secret.key` dosyasından türetilir; panel yedeğini kur); indirilen yedek `xudbin backup decrypt` ile açılır
-- **Panel yedeği:** panelin kendi verisi ve şifreleme anahtarı şifreli olarak yedeklenir; sunucu giderse yeni kurulumda `xudbin restore` ile geri gelir
+## Features
 
-**Güvenlik**
-- **Güvenlik puanı:** panel, sunucular ve uygulamalar için kontroller (2FA, yedekler, güvenlik duvarı, fail2ban, SSH ayarları, otomatik güncellemeler, WAF, debug modu, imaj açıkları...) ve tek tıkla düzeltmeler
-- Docker'ın güvenlik duvarını atlaması engellenir: dışarıdan konteynerlere yalnız 80/443, panelin IP girişi (8443, kapatılabilir) ve panelden açılan veritabanı portları ulaşır
-- Compose'ta sunucuya erişim (privileged, sunucu klasörü bağlama, host ağı) için yönetici onayı gerekir; ancak bu denetim şu an tam değildir, üye rolünü yalnız güvendiğin kişilere ver ([SECURITY.md](SECURITY.md))
-- Uygulama başına WAF, hız sınırı, güvenlik başlıkları, şifre koruması, IP listeleri
-- Tüm sunuculardaki Caddy loglarından saldırı ekranı: zaman çizelgesi, en çok saldıran IP'ler, hedeflenen adresler
-- Eşiği aşan IP'ler tüm sunucularda otomatik banlanır
-- Panel: kurulum anahtarı, iki adımlı doğrulama (TOTP), giriş hız sınırı, panel adresinde WAF (varsayılan yalnız tespit; Ayarlar > Panel WAF), CSRF koruması, oturum yönetimi
-- SSH anahtarları, git token'ları, ortam değişkenleri ve veritabanı şifreleri AES-256-GCM ile şifrelenir
+**Servers**
+- The panel's own server plus unlimited remote servers connected over SSH
+- An ed25519 SSH key is generated when you add a server; Docker is installed if missing and Caddy is set up
+- Live CPU, memory and disk usage for all servers (remote ones included)
+- One-click hardening: UFW firewall and fail2ban for SSH
+- Notification when a server becomes unreachable
 
-**Trafik analitiği:** Google Analytics benzeri, çerezsiz ve ek kod gerektirmeyen site istatistikleri. Ziyaretçi, sayfa görüntüleme, hemen çıkma; en çok ziyaret edilen sayfalar, trafik kaynakları (yönlendiren siteler ve UTM kampanyaları), ülkeler, tarayıcılar, işletim sistemleri ve cihazlar. Veriler Caddy erişim loglarından, panelin kendi sunucusunda hesaplanır.
+**Apps**
+- Sources: Git repository (token for private repos), drag-and-drop upload (folder or zip), Docker image or Docker Compose
+- Framework-aware deploys: the repo is scanned when you add an app and a matching framework is suggested; each framework shows its settings, required environment variables and what will happen on deploy
+- Environment variables read in the code and `.env.example` can be added in one click; values such as secret keys and domains are generated automatically
+- Zero-downtime deploys: traffic switches only after the new version answers a real HTTP request on its actual domain; if it returns 400/5xx, the old version stays live
+- **Deploy Doctor:** explains known errors in the logs of failed deploys (Django ALLOWED_HOSTS, CSRF, missing secret key, database connection, migrations, missing packages or environment variables, out of memory) and fixes the suitable ones in one click with a redeploy
+- Mandatory and domain-dependent environment variables a framework needs are added during deploy if missing; for Django, the variable names `settings.py` actually reads are detected
+- Per-app memory/CPU limits; running deploys can be cancelled, with a 30-minute timeout
+- After every deploy the image is scanned for known vulnerabilities with Trivy
+- One-click rollback to a previous version, live deploy and app logs
+- Automatic deploys from Git push webhooks (GitHub, GitLab, Gitea...) with HMAC signature verification
+- **GitHub App:** created from the panel in one click; private repos deploy without entering a token, repos are picked from a list, push and PR events arrive without setting up webhooks
+- **Pull request previews:** each PR gets its own address, updates on new commits and is removed when the PR closes; the address is posted as a PR comment. PRs from forks are not deployed
+- **One-click templates:** WordPress, Ghost, n8n, Uptime Kuma, Vaultwarden, Gitea, Nextcloud, Metabase, Grafana, Directus, Matomo and more
+- Background workers (services without a port) and multiple replicas for web apps; Caddy load-balances between replicas and takes a crashed one out of rotation
+- **Multi-server load balancing:** an app can also run on additional servers; requests are spread across all replicas and an unreachable server is skipped. Traffic between servers is TLS-encrypted
+- **Separate build server:** heavy builds run on another server and the finished image is transferred
+- **Scheduled jobs (cron):** run commands in the app's image, with output and duration history
+- Persistent volume backups: scheduled, optionally uploaded to S3, one-click restore
+- Instant filtering in live logs; search across all replicas and Compose services in past logs (last hour to 14 days)
+- Encrypted environment variables, persistent storage folders, CPU/memory monitoring
 
-**Erişilebilirlik izleme:** Tüm siteler dakikada bir denenir; site çökünce ve düzelince bildirim gelir (kesinti süresiyle). Uygulama başına son 24 saat / 30 gün erişilebilirlik oranı ve kesinti geçmişi.
+**Databases**
+- PostgreSQL, MySQL, MariaDB, MongoDB, Redis; user and password generated automatically
+- Manual or scheduled backups, retention count, download and restore
+- Backups are also uploaded to S3-compatible remote storage (AWS S3, Cloudflare R2, Backblaze B2, MinIO)
+- **Verified database backups:** one of the automatic database backups is regularly restored into a temporary database with no network and checked ("last backup verified, 12 tables"); volume and panel backups are not verified
+- **Encrypted backups:** database and volume backups are encrypted with AES-256-GCM by default (the key is derived from the panel's `secret.key`; set up a panel backup); a downloaded backup is opened with `xudbin backup decrypt`
+- **Panel backup:** the panel's own data and its encryption key are backed up encrypted; if the server is lost, `xudbin restore` brings it back on a new install
 
-**Bildirimler:** E-posta (SMTP), Discord, Telegram, Slack, genel webhook. Olaylar: site çöktü / düzeldi, deploy sonucu, imajda kritik güvenlik açığı, HTTPS sertifikası bitmek üzere, sunucuda disk veya bellek doluyor, başarısız zamanlanmış görev, banlanan IP, başarısız yedek, erişilemeyen sunucu.
+**Security**
+- **Security score:** checks for the panel, servers and apps (2FA, backups, firewall, fail2ban, SSH settings, automatic updates, WAF, debug mode, image vulnerabilities...) with one-click fixes
+- Docker is prevented from bypassing the firewall: from outside, containers are reachable only on 80/443, the panel's IP login (8443, can be turned off) and database ports opened from the panel
+- Host access in Compose (privileged, mounting host folders, host network) requires admin approval; this check is not complete yet, so give the member role only to people you trust ([SECURITY.md](SECURITY.md))
+- Per-app WAF, rate limit, security headers, password protection, IP lists
+- Attack screen built from the Caddy logs of all servers: timeline, top attacking IPs, targeted addresses
+- IPs over the threshold are banned automatically on all servers
+- Panel: setup key, two-factor authentication (TOTP), login rate limiting, WAF on the panel address (detect-only by default; Settings > Panel WAF), CSRF protection, session management
+- SSH keys, git tokens, environment variables and database passwords are encrypted with AES-256-GCM
 
-**Alan adları:** Sunucuya kendi wildcard alan adını ver (`*.apps.sirketim.com`), yeni uygulamalar onun altında adres alır. DNS kayıtları panelden denetlenir ("bu kayıt şu IP'yi göstermeli"). Portları açık olmayan sunucular için **Cloudflare Tunnel** desteği.
+**Traffic analytics:** cookie-free site statistics similar to Google Analytics, with no extra code. Visitors, page views, bounce rate; top pages, traffic sources (referring sites and UTM campaigns), countries, browsers, operating systems and devices. Computed from Caddy access logs on the panel's own server.
 
-**Kullanıcılar ve ekip:** Yönetici ve üye rolleri; üyeler projelere **geliştirici** veya **izleyici** olarak eklenir ve yalnız o projeleri görmeleri amaçlanır (üye rolü henüz güçlü bir güvenlik sınırı değildir, bkz. [SECURITY.md](SECURITY.md)). **Tek oturum açma (SSO):** Google Workspace, Microsoft Entra, Keycloak, Authentik, GitLab gibi OpenID Connect sağlayıcılarıyla giriş. **İşlem kaydı:** kim, ne zaman, neyi değiştirdi. **API anahtarları:** süreli, istenirse salt okunur; `xb` komut satırı aracı ve CI/CD için. Yeni kullanıcı geçici şifreyle eklenir, ilk girişte kendi şifresini belirler.
+**Uptime monitoring:** every site is checked once a minute; you get notified when a site goes down and when it recovers (with the outage duration). Per-app uptime for the last 24 hours / 30 days and outage history.
 
-**Panel:** Yeni sürüm bildirimi ve panelden tek tıkla güncelleme; saat dilimi ayarı.
+**Notifications:** email (SMTP), Discord, Telegram, Slack, generic webhook. Events: site down / recovered, deploy result, critical image vulnerability, HTTPS certificate expiring, server disk or memory filling up, failed scheduled job, banned IP, failed backup, unreachable server.
 
-**Arayüz:** Türkçe ve İngilizce, açık ve koyu tema.
+**Domains:** give a server your own wildcard domain (`*.apps.mycompany.com`) and new apps get addresses under it. DNS records are checked from the panel ("this record should point to this IP"). **Cloudflare Tunnel** support for servers without open ports.
 
-## Desteklenen frameworkler
+**Users and teams:** admin and member roles; members are added to projects as **developer** or **viewer** and are meant to see only those projects (the member role is not yet a strong security boundary, see [SECURITY.md](SECURITY.md)). **Single sign-on (SSO):** log in with OpenID Connect providers such as Google Workspace, Microsoft Entra, Keycloak, Authentik and GitLab. **Audit log:** who changed what and when. **API tokens:** with expiry, optionally read-only; for the `xb` command-line tool and CI/CD. New users are added with a temporary password and set their own on first login.
 
-Dockerfile'ı olmayan projeler için Xudbin şu türleri tanır ve Dockerfile'ı kendisi üretir (üretilen Dockerfile deploy logunda görünür):
+**Panel:** new-version notification and one-click update from the panel; time zone setting.
 
-| Dil | Frameworkler |
+**Interface:** Turkish and English, light and dark theme.
+
+## Supported frameworks
+
+For projects without a Dockerfile, Xudbin recognizes these types and generates the Dockerfile itself (the generated Dockerfile appears in the deploy log):
+
+| Language | Frameworks |
 |---|---|
-| Python | Django (Gunicorn + WhiteNoise, başlangıçta collectstatic/migrate), Flask, FastAPI, genel Python |
-| JavaScript / TypeScript | Next.js (standalone dahil), Nuxt, SvelteKit, Astro, Remix / React Router, NestJS, React/Vue/Angular SPA, Express/Fastify/Hono, Bun, Deno |
-| PHP | Laravel, genel PHP ve WordPress (FrankenPHP, Nginx gerekmez) |
+| Python | Django (Gunicorn + WhiteNoise, collectstatic/migrate on start), Flask, FastAPI, generic Python |
+| JavaScript / TypeScript | Next.js (including standalone), Nuxt, SvelteKit, Astro, Remix / React Router, NestJS, React/Vue/Angular SPA, Express/Fastify/Hono, Bun, Deno |
+| PHP | Laravel, generic PHP and WordPress (FrankenPHP, no Nginx needed) |
 | .NET | ASP.NET Core |
 | Go, Rust, Java | Go, Rust, Spring Boot (Maven/Gradle) |
 | Ruby | Rails |
-| Diğer | Statik site, kendi Dockerfile'ın |
+| Other | Static site, your own Dockerfile |
 
-Bunlar dışındaki projeler repodaki Dockerfile ile deploy edilir.
+Other projects are deployed with the Dockerfile in the repo.
 
-## Kurulum
+## Installation
 
-Ubuntu, Debian veya AlmaLinux/Rocky bir sunucuda, 80 ve 443 portları boşken tek komut:
+On an Ubuntu, Debian or AlmaLinux/Rocky server, with ports 80 and 443 free, one command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Furkan1116/XudbinPanel/main/install.sh | sudo bash
 ```
 
-Betik şunları yapar ve her adımı terminalde gösterir:
-1. Sistemi kontrol eder; RAM 3 GB'tan azsa 2 GB swap açar.
-2. Docker kurulu değilse kurar.
-3. Xudbin'i indirir ve `xudbin` komutunu kurar.
-4. Güvenlik duvarında yalnız SSH, 80, 443 ve panelin IP girişi için 8443'ü açar, SSH için fail2ban kurar (`XUDBIN_HARDEN=0` ile atlanır).
-5. Paneli başlatır: hazır imaj varsa indirir, yoksa kaynaktan derler.
-6. Sunucunun IP'sinden bir panel adresi üretir (`xudbin.1-2-3-4.sslip.io`) ve HTTPS sertifikasını alır. Panel `https://1.2.3.4:8443` adresinden de açılır; bu adresin sertifikası kendinden imzalıdır, tarayıcı ilk girişte uyarı verir (Ayarlar → Panel'den kapatılır, `XUDBIN_IP_PORT=0` ile hiç açılmaz).
-7. **Kurulum linkini** çerçeve içinde ve telefondan okutulabilir QR kodla gösterir. Yönetici hesabı yalnız bu linkle oluşturulabilir; böylece panel internete açıldığı anda başkası kurulumu senden önce ele geçiremez.
+The script does the following and shows each step in the terminal:
+1. Checks the system; if RAM is under 3 GB, enables 2 GB of swap.
+2. Installs Docker if it is missing.
+3. Downloads Xudbin and installs the `xudbin` command.
+4. Opens only SSH, 80, 443 and 8443 (the panel's IP login) in the firewall and installs fail2ban for SSH (skipped with `XUDBIN_HARDEN=0`).
+5. Starts the panel: pulls the prebuilt image if available, otherwise builds from source.
+6. Generates a panel address from the server's IP (`xudbin.1-2-3-4.sslip.io`) and obtains an HTTPS certificate. The panel also opens at `https://1.2.3.4:8443`; that address uses a self-signed certificate, so the browser warns on first visit (turn it off in Settings → Panel, or never open it with `XUDBIN_IP_PORT=0`).
+7. Shows the **setup link** in a frame and as a QR code you can scan with your phone. The admin account can only be created with this link, so nobody can take over the setup before you once the panel is online.
 
-## Sunucudaki `xudbin` komutu
+## The `xudbin` command on the server
 
 ```bash
-xudbin link                           # panel adresi (ilk kurulumda kurulum linki), QR kodla
-xudbin status                         # özet durum
-xudbin user list                      # kullanıcılar
-xudbin user create ali@ornek.com Ali --member   # kullanıcı ekler, geçici şifre verir
-xudbin user reset-password ali@ornek.com
-xudbin user disable-2fa ali@ornek.com # telefon kaybolduysa
+xudbin link                           # panel address (setup link on first install), with QR code
+xudbin status                         # summary
+xudbin user list                      # users
+xudbin user create ali@example.com Ali --member   # add a user, prints a temporary password
+xudbin user reset-password ali@example.com
+xudbin user disable-2fa ali@example.com   # if the phone is lost
 xudbin unban 203.0.113.7
-sudo xudbin restore /root/xudbin-panel-....xbk   # panel yedeğini geri yükler (s3://bucket/anahtar da olur)
-sudo xudbin backup decrypt yedek.sql.gz.xbe     # şifreli veritabanı/volume yedeğini gzip'e çevirir
-sudo xudbin update                    # Xudbin'i günceller, verilere dokunmaz
-xudbin logs                           # panel logları
+sudo xudbin restore /root/xudbin-panel-....xbk   # restore a panel backup (s3://bucket/key also works)
+sudo xudbin backup decrypt backup.sql.gz.xbe     # turn an encrypted database/volume backup into gzip
+sudo xudbin update                    # update Xudbin, leaves your data untouched
+xudbin logs                           # panel logs
 ```
 
-Kendi alan adınla (A kaydı sunucuya yönlendirilmiş olmalı):
+With your own domain (its A record must point to the server):
 
 ```bash
-sudo XUDBIN_DOMAIN=panel.ornek.com ACME_EMAIL=sen@ornek.com ./install.sh
+sudo XUDBIN_DOMAIN=panel.example.com ACME_EMAIL=you@example.com ./install.sh
 ```
 
-Dış IP'si olmayan bir yerel ağ sunucusunda (ev sunucusu, test makinesi) Let's Encrypt sertifika veremez; HTTPS'i kapatarak kur:
+On a local network server without a public IP (home server, test machine), Let's Encrypt cannot issue certificates; install with HTTPS off:
 
 ```bash
 sudo XUDBIN_HTTPS=0 ./install.sh
 ```
 
-Sertifika denemelerinde Let's Encrypt limitlerine takılmamak için staging ortamını kullanabilirsin (tarayıcılar bu sertifikalara güvenmez, yalnız deneme içindir):
+To avoid Let's Encrypt rate limits while testing certificates, you can use the staging environment (browsers don't trust these certificates; for testing only):
 
 ```bash
 echo 'XUDBIN_ACME_CA=https://acme-staging-v02.api.letsencrypt.org/directory' | sudo tee -a /opt/xudbin/.env
 cd /opt/xudbin && sudo docker compose up -d
 ```
 
-Kurulum linkini kaçırırsan `xudbin link` komutunu çalıştır; SSH ile her girişte de panel adresi görünür (yalnız Docker erişimi olan kullanıcılara; kapatmak: `/etc/xudbin/no-login-link`).
+If you miss the setup link, run `xudbin link`; the panel address is also shown on every SSH login (only to users with Docker access; to turn it off: `/etc/xudbin/no-login-link`).
 
-## Bilmen gerekenler
+## Good to know
 
-- **Let's Encrypt:** Xudbin HTTPS sertifikalarını Caddy aracılığıyla Let's Encrypt'ten alır. Bu sırada Caddy, paneli kuran kişi adına [Let's Encrypt Abonelik Sözleşmesi](https://letsencrypt.org/repository/)'ni kabul eder.
-- **Otomatik adresler (sslip.io):** Domain almadan verilen `uygulama.1-2-3-4.sslip.io` adresleri ücretsiz, üçüncü taraf bir DNS hizmetine dayanır. Let's Encrypt bu hizmetin tüm kullanıcıları için ortak bir haftalık sertifika kotası uygular; kota dolarsa yeni otomatik adreslere bir süre sertifika alınamayabilir. Canlı siteler için kendi alan adını kullan.
-- **Kişisel veriler (KVKK/GDPR):** Panel, saldırı tespiti ve trafik analitiği için uygulamalarına gelen isteklerin IP adresi, adresi, tarayıcı bilgisi ve yönlendiren sayfasını kendi sunucunda tutar (saldırı kayıtları 30 gün, analitik özetleri 400 gün; ziyaretçi sayımı için IP'ler günlük değişen bir anahtarla tek yönlü özetlenir, saklanmaz). Bu verilerin sorumlusu paneli kuran kişidir. Panel hiçbir yere telemetri göndermez; derlenen Next.js, Nuxt ve Astro projelerinin telemetrisi de kapatılır.
-- **Logolar:** Framework logoları ve adları sahiplerinin markasıdır; Xudbin'in bu projelerle bir bağlantısı yoktur. Ayrıntılar: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- **Güvenlik:** Açık bildirmek için [SECURITY.md](SECURITY.md).
+- **Let's Encrypt:** Xudbin obtains HTTPS certificates from Let's Encrypt through Caddy. In doing so, Caddy accepts the [Let's Encrypt Subscriber Agreement](https://letsencrypt.org/repository/) on behalf of the person installing the panel.
+- **Automatic addresses (sslip.io):** the `app.1-2-3-4.sslip.io` addresses given without a domain rely on a free, third-party DNS service. Let's Encrypt applies a shared weekly certificate quota to all users of that service; if the quota runs out, new automatic addresses may not get certificates for a while. Use your own domain for production sites.
+- **Personal data (GDPR/KVKK):** for attack detection and traffic analytics, the panel stores the IP address, URL, browser details and referrer of requests to your apps on your own server (attack records for 30 days, analytics summaries for 400 days; for visitor counting, IPs are hashed one-way with a key that changes daily and are not stored). The person who installs the panel is the controller of this data. The panel sends no telemetry anywhere; telemetry of built Next.js, Nuxt and Astro projects is also turned off.
+- **Logos:** framework logos and names are trademarks of their owners; Xudbin is not affiliated with these projects. Details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **Security:** to report a vulnerability, see [SECURITY.md](SECURITY.md).
 
-## Hazır imajlar
+## Prebuilt images
 
-Repo GitHub'a gönderildiğinde `.github/workflows/ci.yml` testleri çalıştırır; geçerse panel ve Caddy imajlarını (amd64 + arm64, her biri kendi mimarisinde) `ghcr.io/<sahip>/xudbin` ve `ghcr.io/<sahip>/xudbin-caddy` olarak imzalı yayınlar. İlk yayından sonra GitHub > Packages'ta iki paketi de **Public** yap; kurulumlar derleme yapmadan bu imajları kullanır.
+When the repo is pushed to GitHub, `.github/workflows/ci.yml` runs the tests; if they pass, it publishes signed panel and Caddy images (amd64 + arm64, each built on its own architecture) as `ghcr.io/<owner>/xudbin` and `ghcr.io/<owner>/xudbin-caddy`. After the first publish, make both packages **Public** under GitHub > Packages; installs then use these images without building.
 
-## Komut satırı (xb) ve CI/CD
+## Command line (xb) and CI/CD
 
-Panelde **Ayarlar > Hesap > API anahtarları** bölümünden bir anahtar oluştur (CI için salt okunur değil, süreli bir anahtar önerilir).
+Create a token in the panel under **Settings > Account > API tokens** (for CI, a token with an expiry that is not read-only is recommended).
 
 ```bash
 sudo curl -fsSL https://raw.githubusercontent.com/Furkan1116/XudbinPanel/main/cli/xb.mjs -o /usr/local/bin/xb && sudo chmod +x /usr/local/bin/xb
-xb login https://panel.ornek.com xb_...
-xb apps                      # uygulamalar
-xb deploy blog --wait        # deploy et, logu izle; başarısızsa çıkış kodu 2
-xb logs blog                 # canlı loglar
-xb rollback blog 42          # #42 numaralı deploy'a dön
+xb login https://panel.example.com xb_...
+xb apps                      # apps
+xb deploy blog --wait        # deploy and follow the log; exit code 2 on failure
+xb logs blog                 # live logs
+xb rollback blog 42          # roll back to deploy #42
 ```
 
-GitHub Actions'ta (anahtarı depo ayarlarında `XUDBIN_TOKEN` gizli değişkeni olarak sakla):
+In GitHub Actions (store the token as the `XUDBIN_TOKEN` secret in the repo settings):
 
 ```yaml
-- name: Xudbin'e deploy
+- name: Deploy to Xudbin
   run: |
     curl -fsSL https://raw.githubusercontent.com/Furkan1116/XudbinPanel/main/cli/xb.mjs -o xb.mjs
     node xb.mjs deploy blog --wait
   env:
-    XUDBIN_URL: https://panel.ornek.com
+    XUDBIN_URL: https://panel.example.com
     XUDBIN_TOKEN: ${{ secrets.XUDBIN_TOKEN }}
 ```
 
-API'yi doğrudan da kullanabilirsin: `curl -X POST -H "Authorization: Bearer xb_..." -H "Content-Type: application/json" -d '{}' https://panel.ornek.com/api/apps/<no>/deploy`
+You can also call the API directly: `curl -X POST -H "Authorization: Bearer xb_..." -H "Content-Type: application/json" -d '{}' https://panel.example.com/api/apps/<id>/deploy`
 
-## İmajların doğrulanması
+## Verifying images
 
-Yayınlanan imajlar GitHub Actions'ta derlenip [Sigstore](https://www.sigstore.dev) ile imzalanır; SBOM ve köken (provenance) bilgisi imajla birlikte yayınlanır. İmzayı doğrulamak için:
+Published images are built in GitHub Actions and signed with [Sigstore](https://www.sigstore.dev); an SBOM and provenance are published with the image. To verify the signature:
 
 ```bash
 cosign verify ghcr.io/furkan1116/xudbin:1.3.2 \
@@ -191,50 +197,50 @@ cosign verify ghcr.io/furkan1116/xudbin:1.3.2 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-## Uzak sunucu eklemek
+## Adding a remote server
 
-1. Panelde **Sunucular > Sunucu ekle**. Panel bu sunucu için bir SSH anahtarı üretir.
-2. Gösterilen komutu sunucuda çalıştırarak açık anahtarı `authorized_keys` dosyasına ekle.
-3. **Bağlantıyı dene**, ardından **Kurulumu başlat**. Docker ve Caddy otomatik kurulur.
+1. In the panel, go to **Servers > Add server**. The panel generates an SSH key for this server.
+2. Run the command shown on the server to add the public key to `authorized_keys`.
+3. **Test connection**, then **Start setup**. Docker and Caddy are installed automatically.
 
-Kullanıcı root değilse şifresiz sudo yetkisine sahip olmalı.
+If the user is not root, it needs passwordless sudo.
 
-## Geliştirme
+## Development
 
-Node.js 22 veya üstü ve çalışan bir Docker gerekir (Mac'te [OrbStack](https://orbstack.dev) önerilir).
+Requires Node.js 22 or newer and a running Docker (on a Mac, [OrbStack](https://orbstack.dev) is recommended).
 
 ```bash
 npm install
 npm run dev
 ```
 
-- Arayüz: http://localhost:5173 (Vite, `/api` isteklerini backend'e yönlendirir)
+- Interface: http://localhost:5173 (Vite, proxies `/api` requests to the backend)
 - API: http://localhost:3000
-- İlk açılışta kurulum anahtarı terminale yazılır ve `apps/server/data/setup-token` dosyasında durur.
-- Geliştirmede yerel sunucu HTTPS kapalı başlar ve uygulama adresleri `*.127-0-0-1.sslip.io` olur; Caddy Mac'te 80 portunu dinler.
+- On first start the setup key is printed to the terminal and kept in `apps/server/data/setup-token`.
+- In development the local server starts with HTTPS off and app addresses become `*.127-0-0-1.sslip.io`; Caddy listens on port 80 on the Mac.
 
-## Mimari
+## Architecture
 
 ```
 apps/server   Hono API (Node.js, node:sqlite, dockerode, ssh2)
-apps/web      React arayüzü (Vite, Tailwind, TanStack Query)
-install.sh    Tek komutla sunucu kurulumu
+apps/web      React interface (Vite, Tailwind, TanStack Query)
+install.sh    One-command server install
 ```
 
-- Panel her sunucuya Docker API üzerinden bağlanır: kendi sunucusunda soketle, uzak sunucularda SSH tüneliyle (`docker system dial-stdio`).
-- Her sunucuda bir `xudbin-caddy` konteyneri bulunur. Panel Caddy yapılandırmasını JSON olarak üretip konteynere yazar ve `caddy reload` ile uygular.
-- Her projenin kendi Docker ağı vardır (`xb-p<id>`); tek konteynerli uygulamalar başka projenin uygulamalarına ve veritabanlarına, panelin kendisine de ulaşamaz (Compose uygulamalarında bu yalıtım şu an aşılabilir, bkz. [SECURITY.md](SECURITY.md)). Caddy tüm proje ağlarına bağlıdır.
-- Çok sunuculu uygulamalarda ana sunucunun Caddy'si ek sunucuların Caddy'sine 443 üzerinden bağlanır; her sunucunun Caddy iç sertifika otoritesi (CA) panel tarafından okunur ve yalnız ona güvenilir. Ek sunucu, uygulamaya özel gizli başlığı taşımayan istekleri reddeder.
-- Caddy erişim logları 20 saniyede bir okunur; WAF (403), hız sınırı (429), banlı IP ve hatalı şifre (401) olayları saldırı ekranına düşer.
-- Git uygulamaları panelin sunucusunda klonlanır, derleme bağlamı hedef sunucunun Docker'ına gönderilip orada derlenir.
+- The panel connects to each server through the Docker API: via the socket on its own server, via an SSH tunnel on remote servers (`docker system dial-stdio`).
+- Each server runs an `xudbin-caddy` container. The panel generates the Caddy configuration as JSON, writes it into the container and applies it with `caddy reload`.
+- Each project has its own Docker network (`xb-p<id>`); single-container apps cannot reach other projects' apps and databases, or the panel itself (for Compose apps this isolation can currently be bypassed, see [SECURITY.md](SECURITY.md)). Caddy is attached to all project networks.
+- In multi-server apps, the main server's Caddy connects to the additional servers' Caddy over 443; each server's internal Caddy certificate authority (CA) is read by the panel and only that one is trusted. An additional server rejects requests that don't carry the app-specific secret header.
+- Caddy access logs are read every 20 seconds; WAF (403), rate limit (429), banned IP and wrong password (401) events show up on the attack screen.
+- Git apps are cloned on the panel's server; the build context is sent to the target server's Docker and built there.
 
-## Sınırlar
+## Limitations
 
-- Büyük hacimli (L3/L4) DDoS saldırıları sunucu seviyesinde durdurulamaz; bunun için hosting firmasının koruması veya Cloudflare gibi bir katman gerekir.
-- Compose uygulamalarında göreli dosya bağlamaları (`./data:/data`) desteklenmez; adlandırılmış volume kullan.
-- Çok sunuculu dağıtım durumsuz (stateless) uygulamalar içindir: kalıcı klasörlü uygulamalar ve Compose dağıtılamaz, ek sunuculardaki kopyalar ana sunucunun iç ağındaki veritabanlarına ulaşamaz (veritabanını dış erişime açıp adresini ona göre ver). Ziyaretçiler her zaman ana sunucuya gelir; ana sunucu çökerse site de erişilemez olur (DNS düzeyinde yedeklilik kapsam dışında).
-- GitHub App için panelin internetten https ile erişilebilir olması gerekir (GitHub webhook gönderebilsin diye).
+- Large-volume (L3/L4) DDoS attacks cannot be stopped at the server level; that needs your hosting provider's protection or a layer such as Cloudflare.
+- Relative file mounts in Compose apps (`./data:/data`) are not supported; use named volumes.
+- Multi-server deployment is for stateless apps: apps with persistent folders and Compose cannot be distributed, and replicas on additional servers cannot reach databases on the main server's internal network (expose the database and set its address accordingly). Visitors always arrive at the main server; if it goes down, the site becomes unreachable (DNS-level redundancy is out of scope).
+- The GitHub App requires the panel to be reachable from the internet over https (so GitHub can send webhooks).
 
-## Lisans
+## License
 
 MIT
