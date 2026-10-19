@@ -22,7 +22,7 @@ xudbin user reset-password ali@example.com
 
 Because admins control Docker, they effectively have root on your servers; give this role only to people you trust and make them turn on 2FA. Compose settings that grant host access (privileged, host path mounts, host network) need admin approval: an admin enables them per app with **Host access** on the app's **Settings** tab.
 
-> **Warning:** The member role is not yet a strong security boundary. An independent code review on 2026-10-17 found gaps that could let a member reach other projects or the panel; they are being worked on. Until they are fixed, give the member role only to people you trust. Details: [SECURITY.md](../../SECURITY.md).
+> **Warning:** The member role is not yet a strong security boundary. An AI-assisted (static) code review on 2026-10-17 found gaps that could let a member reach other projects or the panel; they are being worked on. Until they are fixed, give the member role only to people you trust. Details: [SECURITY.md](../../SECURITY.md).
 
 ## Project roles
 
