@@ -197,6 +197,8 @@ function makeApp(s: AppSeed): App {
     currentImage: `xb-${s.slug}:${sha(r)}`,
     internalHost: `xb-${s.slug}`,
     webhookPath: `/api/webhooks/${token}`,
+    webhookBase: "",
+    lastWebhook: { at: Date.now() - 12 * 60_000, event: "push", ok: true, result: "Deploy #12 başlatıldı" },
     domains,
     security: { waf: true, rateLimit: 600, headers: true, allowIps: [], denyIps: [], basicAuth: null },
     createdAt: NOW - 30 * DAY,

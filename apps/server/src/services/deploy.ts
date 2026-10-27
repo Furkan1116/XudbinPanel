@@ -70,6 +70,7 @@ export type AppRow = {
   replica_containers: string;
   previews_enabled: number;
   preview_env: string | null;
+  last_webhook: string | null;
   parent_app_id: number | null;
   preview_pr: number | null;
   volume_backup_interval_h: number;

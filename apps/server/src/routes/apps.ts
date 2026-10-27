@@ -26,6 +26,7 @@ import {
 import { dockerFor, removeContainer, type ServerRow } from "../services/docker.js";
 import { detectFrameworks, getFramework, publicCatalog } from "../services/frameworks/index.js";
 import { config } from "../config.js";
+import { getSettings } from "../lib/settings.js";
 import fs from "node:fs";
 import path from "node:path";
 import { beginUpload, extractZip, newTempUpload, saveUpload, storeAppUpload, tempUploadFile, UploadLimitError } from "../services/uploads.js";
@@ -101,6 +102,8 @@ function publicApp(a: AppRow, secrets = true) {
     currentImage: a.current_image,
     internalHost: `xb-${a.slug}`,
     webhookPath: secrets ? `/api/webhooks/deploy/${a.webhook_token}` : "",
+    webhookBase: webhookBase(),
+    lastWebhook: a.last_webhook ? (JSON.parse(a.last_webhook) as LastWebhook) : null,
     webhookSecret: a.webhook_secret ? (secrets ? a.webhook_secret : SECRET_MASK) : null,
     secretsHidden: !secrets,
     webhookSigned: Boolean(a.webhook_signed),
@@ -914,27 +917,55 @@ export function verifyWebhook(app: Pick<AppRow, "webhook_secret" | "webhook_sign
 }
 
 /** Git sağlayıcısının (GitHub, GitLab, Gitea...) push olayında çağırdığı adres. */
+export type LastWebhook = { at: number; event: string; ok: boolean; result: string };
+
+/** Webhook adresinin kökü: panelin alan adı varsa o (Let's Encrypt'li); yoksa boş, arayüz tarayıcıdaki adresi kullanır. */
+export function webhookBase(): string {
+  const s = getSettings();
+  return s.panelDomain ? `${s.panelHttps ? "https" : "http"}://${s.panelDomain}` : "";
+}
+
+/** Uygulamaya gelen son webhook'u kaydeder; teslim ulaştı mı, ne oldu uygulama sayfasında görünür. */
+export function recordWebhook(appId: number, event: string, ok: boolean, result: string) {
+  const row: LastWebhook = { at: Date.now(), event: event.slice(0, 40), ok, result: result.slice(0, 200) };
+  db.prepare("UPDATE apps SET last_webhook = ? WHERE id = ?").run(JSON.stringify(row), appId);
+}
+
+function webhookEvent(header: (name: string) => string | undefined): string {
+  return header("x-github-event") ?? header("x-gitea-event") ?? header("x-gitlab-event") ?? "istek";
+}
+
 export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
   const app = db.prepare("SELECT * FROM apps WHERE webhook_token = ?").get(c.req.param("token")) as AppRow | undefined;
   if (!app) return c.json({ error: "Geçersiz webhook" }, 404);
+  const header = (h: string) => c.req.header(h);
+  const event = webhookEvent(header);
   const raw = await c.req.text();
-  if (!verifyWebhook(app, raw, (h) => c.req.header(h))) {
+  if (!verifyWebhook(app, raw, header)) {
+    recordWebhook(app.id, event, false, "İmza doğrulanamadı");
     return c.json({ error: "Webhook imzası doğrulanamadı. Git sağlayıcısındaki Secret alanına uygulamanın webhook gizli anahtarını gir." }, 401);
   }
   let payload: { ref?: string; head_commit?: { message?: string } } & Record<string, unknown> = {};
   try {
     payload = JSON.parse(raw);
   } catch {}
+  const skipped = (reason: string) => {
+    recordWebhook(app.id, event, true, reason);
+    return c.json({ ok: false, reason });
+  };
   // Pull request olayları: önizleme ortamı aç / güncelle / kapat.
-  const pr = parsePrEvent((h) => c.req.header(h), payload);
+  const pr = parsePrEvent(header, payload);
   if (pr) {
-    if (!app.previews_enabled || app.source_type !== "git") return c.json({ ok: false, reason: "PR önizlemeleri bu uygulamada kapalı" });
-    return c.json(await handlePrEvent(app, pr), 202);
+    if (!app.previews_enabled || app.source_type !== "git") return skipped("PR önizlemeleri bu uygulamada kapalı");
+    const res = await handlePrEvent(app, pr);
+    recordWebhook(app.id, event, true, `PR #${pr.number} işlendi`);
+    return c.json(res, 202);
   }
-  if (!app.auto_deploy) return c.json({ ok: false, reason: "Otomatik deploy kapalı" });
-  const skip = pushSkipReason((h) => c.req.header(h), payload, app.git_branch);
-  if (skip) return c.json({ ok: false, reason: skip });
+  if (!app.auto_deploy) return skipped("Otomatik deploy kapalı");
+  const skip = pushSkipReason(header, payload, app.git_branch);
+  if (skip) return skipped(skip);
   const id = enqueueDeploy(app.id, "webhook", { title: payload.head_commit?.message?.split("\n")[0] ?? "" });
+  recordWebhook(app.id, event, true, `Deploy #${id} başlatıldı`);
   return c.json({ ok: true, deploymentId: id }, 202);
 })
   // GitHub App: tek adres, olay repo'ya bağlı tüm uygulamalara dağıtılır. App'in gizli anahtarıyla imzalı olmalı.

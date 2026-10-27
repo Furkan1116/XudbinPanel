@@ -147,6 +147,9 @@ export type App = {
   currentImage: string | null;
   internalHost: string;
   webhookPath: string;
+  /** Panelin alan adı (https://...); boşsa tarayıcıdaki adres kullanılır. */
+  webhookBase: string;
+  lastWebhook: { at: number; event: string; ok: boolean; result: string } | null;
   domains: Domain[];
   security: AppSecurity;
   createdAt: number;

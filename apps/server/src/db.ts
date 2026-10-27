@@ -452,6 +452,10 @@ const migrations: string[] = [
   `
   ALTER TABLE apps ADD COLUMN preview_env TEXT;
   `,
+  // Son gelen webhook (zaman, olay, sonuç): teslimin ulaşıp ulaşmadığı uygulama sayfasında görünsün.
+  `
+  ALTER TABLE apps ADD COLUMN last_webhook TEXT;
+  `,
 ];
 
 function migrate() {
