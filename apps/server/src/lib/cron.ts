@@ -50,17 +50,25 @@ export function parseCron(expr: string): Cron {
   return { minutes: m!, hours: h!, days: d!, months: mo!, weekdays: w!, anyDay: parts[2] === "*", anyWeekday: parts[4] === "*" };
 }
 
+// Intl.DateTimeFormat oluşturmak pahalı; saat dilimi başına bir kez kurulur.
+const formatters = new Map<string, Intl.DateTimeFormat>();
+function formatter(tz: string) {
+  let f = formatters.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-US", { timeZone: tz, minute: "numeric", hour: "numeric", day: "numeric", month: "numeric", weekday: "short", hourCycle: "h23" });
+    formatters.set(tz, f);
+  }
+  return f;
+}
+
 function parts(ms: number, tz: string) {
-  const f = new Intl.DateTimeFormat("en-US", { timeZone: tz, minute: "numeric", hour: "numeric", day: "numeric", month: "numeric", weekday: "short", hourCycle: "h23" });
+  const f = formatter(tz);
   const p = Object.fromEntries(f.formatToParts(ms).map((x) => [x.type, x.value]));
   const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday!);
   return { minute: Number(p.minute), hour: Number(p.hour), day: Number(p.day), month: Number(p.month), weekday: wd };
 }
 
-/** Verilen dakika bu ifadeye uyuyor mu (standart cron: gün ve haftanın günü ikisi de kısıtlıysa biri yeter). */
-export function cronMatches(c: Cron, ms: number, tz: string) {
-  const t = parts(ms, tz);
-  if (!c.minutes.has(t.minute) || !c.hours.has(t.hour) || !c.months.has(t.month)) return false;
+function dayMatches(c: Cron, t: { day: number; weekday: number }) {
   const dayOk = c.days.has(t.day);
   const wdOk = c.weekdays.has(t.weekday);
   if (c.anyDay && c.anyWeekday) return true;
@@ -69,10 +77,34 @@ export function cronMatches(c: Cron, ms: number, tz: string) {
   return dayOk || wdOk;
 }
 
-/** Sonraki çalışma zamanı (en fazla 1 yıl ileri bakar). */
+/** Verilen dakika bu ifadeye uyuyor mu (standart cron: gün ve haftanın günü ikisi de kısıtlıysa biri yeter). */
+export function cronMatches(c: Cron, ms: number, tz: string) {
+  const t = parts(ms, tz);
+  return c.minutes.has(t.minute) && c.hours.has(t.hour) && c.months.has(t.month) && dayMatches(c, t);
+}
+
+const LOOKAHEAD_MS = 5 * 366 * 24 * 60 * 60_000;
+
+/**
+ * Sonraki çalışma zamanı (en fazla 5 yıl ileri bakar; 29 Şubat gibi ifadeler için 1 yıl yetmez).
+ * Dakika dakika aramak seyrek ifadelerde (yılda/ayda bir) olay döngüsünü saniyelerce kilitliyordu; uymayan gün ve
+ * saatler atlanır. Atlamalar yerel saatin dakika/saatinden hesaplanır: yaz saati geçişinde de bir eşleşme atlanmaz
+ * (gün atlaması yerel 23:00'e kadar gider, kalan saatleri saat saat bakar).
+ */
 export function nextRun(expr: string, from: number, tz: string): number | null {
   const c = parseCron(expr);
+  const end = from + LOOKAHEAD_MS;
   let t = Math.floor(from / 60_000) * 60_000 + 60_000;
-  for (let i = 0; i < 366 * 24 * 60; i++, t += 60_000) if (cronMatches(c, t, tz)) return t;
+  while (t <= end) {
+    const p = parts(t, tz);
+    if (!c.months.has(p.month) || !dayMatches(c, p)) {
+      // Günün kalanı uymaz: yerel 23:00'e (zaten 23'teyse sonraki saate) atla.
+      t += (p.hour < 23 ? (22 - p.hour) * 60 + 60 - p.minute : 60 - p.minute) * 60_000;
+    } else if (!c.hours.has(p.hour)) {
+      t += (60 - p.minute) * 60_000; // sonraki yerel saat başı
+    } else if (!c.minutes.has(p.minute)) {
+      t += 60_000;
+    } else return t;
+  }
   return null;
 }
