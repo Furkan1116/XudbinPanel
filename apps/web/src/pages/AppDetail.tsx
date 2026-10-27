@@ -779,6 +779,8 @@ function Settings({ app }: { app: App }) {
         </div>
       </form>
 
+      {app.sourceType !== "compose" && !app.parentAppId && <SourceChange app={app} />}
+
       <Section title={t("Uygulamayı sil")} description={t("Konteynerler, imajlar ve alan adı bağlantıları silinir. Kalıcı depolama klasörleri sunucuda kalır.")}>
         <Button variant="danger" onClick={() => setConfirm(true)}>{t("Uygulamayı sil")}</Button>
       </Section>
@@ -793,6 +795,92 @@ function Settings({ app }: { app: App }) {
         onConfirm={() => del.mutate()}
       />
     </>
+  );
+}
+
+/** Kaynak türünü değiştirir (ör. yüklenen dosyalar → git). Ortam değişkenleri, alan adları ve volume'ler kalır. */
+function SourceChange({ app }: { app: App }) {
+  const [, setParams] = useSearchParams();
+  const kinds = (["git", "upload", "image"] as const).filter((k) => k !== app.sourceType);
+  const [kind, setKind] = useState<"git" | "upload" | "image">(kinds[0]!);
+  const [form, setForm] = useState({ gitUrl: "", gitBranch: "main", gitToken: "", image: "" });
+  const [uploadId, setUploadId] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState(false);
+  const upload = useAction((blob: Blob) => uploadZip<{ uploadId: string }>("/uploads", blob), { onSuccess: (r) => setUploadId(r.uploadId) });
+  const change = useAction(
+    async () => {
+      await api.put(`/apps/${app.id}/source`, {
+        sourceType: kind,
+        ...(kind === "git" ? { gitUrl: form.gitUrl, gitBranch: form.gitBranch || "main", ...(form.gitToken ? { gitToken: form.gitToken } : {}) } : {}),
+        ...(kind === "image" ? { image: form.image } : {}),
+        ...(kind === "upload" && uploadId ? { uploadId } : {}),
+      });
+      return api.post<{ deploymentId: number }>(`/apps/${app.id}/deploy`, {});
+    },
+    {
+      success: t("Kaynak değişti, deploy başladı"),
+      invalidate: [["app", app.id]],
+      onSuccess: (r) => {
+        setConfirm(false);
+        setParams({ tab: "deployments", d: String(r.deploymentId) }, { replace: true });
+      },
+    },
+  );
+  const label = { git: t("Git deposu"), upload: t("Yüklenen dosyalar"), image: t("Docker imajı") };
+  const ready = kind === "git" ? /^https:\/\/\S+$/.test(form.gitUrl.trim()) : kind === "image" ? Boolean(form.image.trim()) : Boolean(uploadId);
+  return (
+    <Section
+      title={t("Kaynağı değiştir")}
+      description={t("Şu an: {kind}. Ortam değişkenleri, alan adları, kalıcı klasörler ve güvenlik ayarları aynen kalır; site, yeni kaynaktan deploy başarılı olana kadar eski hâliyle çalışmaya devam eder.", { kind: label[app.sourceType as keyof typeof label] })}
+    >
+      <div className="panel space-y-4 p-5">
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t("Yeni kaynak")}>
+          {kinds.map((k) => (
+            <Button key={k} type="button" size="sm" variant={kind === k ? "primary" : "ghost"} aria-pressed={kind === k} onClick={() => setKind(k)}>
+              {label[k]}
+            </Button>
+          ))}
+        </div>
+        {kind === "git" && (
+          <>
+            <div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
+              <Field label={t("Repo adresi")}>
+                <input className="input" placeholder="https://github.com/kullanici/repo" value={form.gitUrl} onChange={(e) => setForm({ ...form, gitUrl: e.target.value })} />
+              </Field>
+              <Field label={t("Dal")}>
+                <input className="input" value={form.gitBranch} onChange={(e) => setForm({ ...form, gitBranch: e.target.value })} />
+              </Field>
+            </div>
+            <Field label={t("Erişim token'ı")} hint={t("Yalnız özel repolar için.")}>
+              <input className="input" type="password" autoComplete="off" value={form.gitToken} onChange={(e) => setForm({ ...form, gitToken: e.target.value })} />
+            </Field>
+          </>
+        )}
+        {kind === "image" && (
+          <Field label={t("İmaj")}>
+            <input className="input font-mono" placeholder="nginx:1.27" value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} />
+          </Field>
+        )}
+        {kind === "upload" &&
+          (uploadId ? (
+            <Notice tone="info" title={t("Dosyalar hazır. Kaynağı değiştirince bunlardan deploy edilir.")} />
+          ) : (
+            <DropZone busy={upload.isPending} onReady={(p) => upload.mutate(p.blob)} />
+          ))}
+        <div className="flex justify-end">
+          <Button type="button" variant="primary" disabled={!ready} onClick={() => setConfirm(true)}>{t("Kaynağı değiştir ve deploy et")}</Button>
+        </div>
+      </div>
+      <ConfirmDialog
+        open={confirm}
+        onClose={() => setConfirm(false)}
+        title={t("Kaynak değiştirilsin mi?")}
+        description={t("{from} → {to}. Hemen yeni bir deploy başlar; başarısız olursa site eski hâliyle çalışmaya devam eder.", { from: label[app.sourceType as keyof typeof label], to: label[kind] })}
+        confirmLabel={t("Değiştir")}
+        loading={change.isPending}
+        onConfirm={() => change.mutate()}
+      />
+    </Section>
   );
 }
 
