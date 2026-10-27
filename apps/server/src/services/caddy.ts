@@ -249,9 +249,21 @@ type DomainRow = {
   replica_containers: string;
 };
 
+/**
+ * Next.js server action istisnası. Action'lar POST + Next-Action başlığıyla gelir; argümanlı action gövdesi
+ * text/plain (CRS 920420 izinli türlerde değil) ya da `1_$ACTION_ID_...` alan adlı multipart (922130) olur.
+ * Yalnız bu iki kural, yalnız Next-Action başlığı hex bir action kimliği taşıyan POST isteklerinde kaldırılır;
+ * gövdenin geri kalan denetimi (SQLi, XSS...) sürer. CRS kurallarından önce yüklenmeli.
+ */
+const NEXT_ACTION_EXCEPTION = [
+  'SecRule REQUEST_METHOD "@streq POST" "id:1000100,phase:1,pass,nolog,chain"',
+  '  SecRule REQUEST_HEADERS:Next-Action "@rx ^[0-9a-fA-F]{8,64}$" "ctl:ruleRemoveById=920420,ctl:ruleRemoveById=922130"',
+].join("\n");
+
 const WAF_DIRECTIVES = [
   "Include @coraza.conf-recommended",
   "Include @crs-setup.conf.example",
+  NEXT_ACTION_EXCEPTION,
   "Include @owasp_crs/*.conf",
   "SecRuleEngine On",
   "SecRequestBodyAccess On",

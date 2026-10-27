@@ -109,3 +109,16 @@ test("XUDBIN_IP_PORT: varsayılan 8443, 0/geçersiz/80/443 kapatır", () => {
   assert.equal(parseIpPort("9443"), 9443);
   for (const bad of ["0", "443", "80", "70000", "abc", "84 43"]) assert.equal(parseIpPort(bad), 0, bad);
 });
+
+test("WAF: Next.js server action istisnası CRS'den önce, yalnız 920420 ve 922130 için", () => {
+  seedApp(987001, { waf: true });
+  const text = JSON.stringify(buildCaddyConfig(fakeServer()));
+  const m = /"handler":"waf","load_owasp_crs":true,"directives":"((?:[^"\\]|\\.)*)"/.exec(text);
+  assert.ok(m, "uygulama WAF'ı bulunmalı");
+  const directives = JSON.parse(`"${m[1]}"`) as string;
+  const exception = directives.indexOf("REQUEST_HEADERS:Next-Action");
+  assert.ok(exception > 0 && exception < directives.indexOf("Include @owasp_crs/*.conf"), "istisna CRS kurallarından önce yüklenmeli");
+  assert.ok(directives.includes("ctl:ruleRemoveById=920420,ctl:ruleRemoveById=922130"));
+  assert.ok(directives.includes('"@streq POST"'), "yalnız POST istekleri");
+  assert.ok(!/ruleEngine=Off|ruleRemoveById=9(?!20420|22130)/.test(directives), "başka kural kapatılmamalı");
+});
