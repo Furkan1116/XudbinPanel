@@ -362,6 +362,49 @@ export const appRoutes = new Hono<AppEnv>()
     return c.json({ app: publicApp(loadApp(app.id)) });
   })
 
+  // Kaynak türünü değiştirir (ör. yüklenen dosyalar → git). Ortam değişkenleri, alan adları, volume'ler ve güvenlik
+  // ayarları aynen kalır; çalışan konteyner de durmaz, yeni kaynak bir sonraki deploy'da kullanılır.
+  .put("/:id/source", async (c) => {
+    const app = loadApp(idParam(c));
+    const input = await body(
+      c,
+      z.object({
+        sourceType: z.enum(["git", "image", "upload"]),
+        gitUrl: z.string().trim().max(500).optional(),
+        gitBranch: z.string().trim().max(200).optional(),
+        gitToken: z.string().max(500).optional(),
+        image: z.string().trim().max(300).optional(),
+        uploadId: z.string().max(40).optional(),
+      }),
+    );
+    if (app.source_type === "compose") throw new HttpError(400, "Compose uygulamalarının kaynağı değiştirilemez; yeni bir uygulama aç");
+    if (app.parent_app_id) throw new HttpError(400, "PR önizlemesinin kaynağı değiştirilemez");
+    if (app.status === "deploying") throw new HttpError(409, "Deploy sürerken kaynak değiştirilemez; bitmesini bekle");
+    if (input.sourceType !== "git" && (db.prepare("SELECT 1 FROM apps WHERE parent_app_id = ? LIMIT 1").get(app.id)))
+      throw new HttpError(400, "Açık PR önizlemeleri var; önce önizlemeleri kapat");
+    if (input.sourceType === "upload" && !input.uploadId && !(app.source_type === "upload"))
+      throw new HttpError(400, "Yüklenecek dosyayı seç");
+    validateSource({ sourceType: input.sourceType, gitUrl: input.gitUrl, image: input.image, uploadId: input.uploadId });
+
+    const map: Record<string, unknown> = { source_type: input.sourceType };
+    if (input.sourceType === "git") {
+      Object.assign(map, {
+        git_url: input.gitUrl,
+        git_branch: input.gitBranch || "main",
+        git_app_url: input.gitUrl === app.git_url ? app.git_app_url : approvedAppUrl(c.get("user"), app.project_id, input.gitUrl, app.id),
+      });
+      if (input.gitToken !== undefined) map.git_token = input.gitToken ? encrypt(input.gitToken) : null;
+    } else {
+      // Git'ten ayrılınca önizlemeler anlamsız; imajda da git bilgisi tutulmaz (token sızmasın).
+      Object.assign(map, { previews_enabled: 0, git_url: null, git_app_url: null, git_token: null });
+      if (input.sourceType === "image") map.image = input.image;
+    }
+    const entries = Object.entries(map);
+    db.prepare(`UPDATE apps SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...entries.map(([, v]) => v as string | number | null), app.id);
+    if (input.sourceType === "upload" && input.uploadId) storeAppUpload(app.slug, tempUploadFile(input.uploadId)!);
+    return c.json({ app: publicApp(loadApp(app.id)) });
+  })
+
   .put("/:id/env", async (c) => {
     const app = loadApp(idParam(c));
     const { env, previewEnv } = await body(c, z.object({ env: z.string().max(200_000), previewEnv: z.string().max(200_000).optional() }));
