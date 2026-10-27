@@ -126,7 +126,9 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
     enabled: app.status === "running" && app.sourceType !== "compose",
   });
   const last = deployments[0];
-  const webhook = `${location.origin}${app.webhookPath}`;
+  const webhook = `${app.webhookBase || location.origin}${app.webhookPath}`;
+  // Panel IP adresiyle (kendinden imzalı sertifika) açıldıysa ve alan adı yoksa git sağlayıcısı bu adrese teslim edemez.
+  const webhookUnreachable = !app.webhookBase && /^https:\/\/(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(location.origin);
   const source =
     app.sourceType === "git"
       ? `${app.gitUrl} (${app.gitBranch})`
@@ -218,6 +220,20 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
                 <CopyField value={webhook} secret />
               </Field>
             )}
+            {!app.secretsHidden && webhookUnreachable && (
+              <Notice tone="warn" title={t("Panel IP adresiyle açık ve kendinden imzalı sertifika kullanıyor; GitHub bu adrese webhook gönderemez. Ayarlar → Panel'den bir alan adı bağla, webhook adresi o alan adıyla gösterilir.")} />
+            )}
+            <Field label={t("Son webhook")}>
+              <div className="text-[13px]">
+                {app.lastWebhook ? (
+                  <span className={app.lastWebhook.ok ? "" : "text-warn"}>
+                    {timeAgo(app.lastWebhook.at)} · {app.lastWebhook.event} · {t(app.lastWebhook.result)}
+                  </span>
+                ) : (
+                  <span className="text-muted">{t("Henüz webhook gelmedi. Git sağlayıcısındaki teslim kayıtlarına (Recent Deliveries) bak.")}</span>
+                )}
+              </div>
+            </Field>
             {app.webhookSecret && !app.secretsHidden && (
               <Field label={t("Gizli anahtar (Secret)")} hint={t("GitHub, Gitea ve GitLab'de webhook'un Secret / Secret token alanına yaz. İstek bu anahtarla imzalanmadıysa deploy başlamaz.")}>
                 <CopyField value={app.webhookSecret} secret />
