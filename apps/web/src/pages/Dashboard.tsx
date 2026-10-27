@@ -102,9 +102,10 @@ export function DashboardPage() {
           <Link to="/security" className="panel block px-5 py-4 hover:border-line-strong">
             <div className="text-[32px] leading-none font-medium tracking-[-0.02em] tabular-nums">{attacks}</div>
             <div className="mt-1.5 text-[14px] text-muted">{t("engellenen istek")}</div>
-            <div className="mt-4 border-t border-line pt-3 text-[13px] text-muted">
-              {t("{n} IP şu an banlı", { n: security.data?.blockedCount ?? 0 })}
-            </div>
+          </Link>
+          <Link to="/security?tab=blocked" className="mt-2 flex items-center justify-between rounded-md px-1 py-1 text-[13px] text-muted hover:text-fg">
+            <span>{t("{n} IP şu an banlı", { n: security.data?.blockedCount ?? 0 })}</span>
+            <span>{t("Banlı IP'leri gör")} →</span>
           </Link>
         </Section>
       </div>

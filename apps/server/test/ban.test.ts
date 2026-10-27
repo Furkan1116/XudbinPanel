@@ -37,8 +37,8 @@ test("O13: yalnız WAF işaretli 403 'waf' sayılır; uygulamanın 401/403/429'u
 
 test("O13: autoBan yalnız waf/panel_login sayar ve izin listesindeki IP'yi banlamaz", async () => {
   const now = Date.now();
-  const ins = db.prepare("INSERT INTO security_events (ip, kind, method, path, status, created_at) VALUES (?, ?, 'GET', '/', 403, ?)");
-  const flood = (ip: string, kind: string, n = 40) => { for (let i = 0; i < n; i++) ins.run(ip, kind, now); };
+  const ins = db.prepare("INSERT INTO security_events (ip, kind, method, path, status, created_at) VALUES (?, ?, 'GET', ?, 403, ?)");
+  const flood = (ip: string, kind: string, n = 40) => { for (let i = 0; i < n; i++) ins.run(ip, kind, `/tarama-${i}`, now); };
   flood("192.0.2.10", "auth");       // uygulamanın 401'leri
   flood("192.0.2.11", "ratelimit");
   flood("192.0.2.12", "waf");        // gerçek saldırgan
@@ -61,4 +61,18 @@ test("O13: Caddy hata rotası WAF 403'ünü işaretler", () => {
   const text = JSON.stringify(buildCaddyConfig(s));
   assert.ok(text.includes('"errors":{"routes":[{"match":[{"expression":"{http.error.status_code} == 403"}]'));
   assert.ok(text.includes('"X-Xudbin-Block":["waf"]'));
+});
+
+test("autoBan: aynı adrese takılan gerçek kullanıcı (WAF yanlış pozitifi) banlanmaz, farklı adresleri tarayan banlanır", async () => {
+  const now = Date.now();
+  const ins = db.prepare("INSERT INTO security_events (ip, kind, host, method, path, status, created_at) VALUES (?, 'waf', 'stok.test', 'POST', ?, 403, ?)");
+  for (let i = 0; i < 60; i++) ins.run("192.0.2.50", i % 2 ? "/urunler" : "/giris", now); // dükkân: iki form, 60 engel
+  for (let i = 0; i < 40; i++) ins.run("192.0.2.51", `/wp-admin/x${i % 6}.php`, now); // tarayıcı: 6 farklı adres
+  const banned = await autoBan();
+  assert.ok(!banned.includes("192.0.2.50"), "aynı adreslere takılan kullanıcı banlanmamalı");
+  assert.ok(banned.includes("192.0.2.51"), "farklı adresleri tarayan banlanmalı");
+  const reason = (db.prepare("SELECT reason FROM blocked_ips WHERE ip = '192.0.2.51'").get() as { reason: string }).reason;
+  assert.match(reason, /6 farklı adres/);
+  db.prepare("DELETE FROM blocked_ips WHERE auto = 1").run();
+  db.prepare("DELETE FROM security_events WHERE ip LIKE '192.0.2.%'").run();
 });

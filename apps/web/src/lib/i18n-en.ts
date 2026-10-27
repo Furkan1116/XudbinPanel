@@ -187,6 +187,7 @@ export const en: Record<string, string> = {
   "Sunucu erişimi": "Host access",
   "privileged, cap_add, sunucu klasörü bağlama, network_mode: host gibi ayarlara izin verir. Bu ayarlar konteynere sunucuda root yetkisi verebilir; yalnız yönetici açabilir.": "Allows settings like privileged, cap_add, host path mounts and network_mode: host. These can give the container root on the server; only an admin can turn this on.",
   "Webhook adresi": "Webhook URL",
+  "Banlı IP'leri gör": "View banned IPs",
   "Gizli anahtar (Secret)": "Secret",
   "GitHub, Gitea ve GitLab'de webhook'un Secret / Secret token alanına yaz. İstek bu anahtarla imzalanmadıysa deploy başlamaz.": "Paste this into the webhook's Secret / Secret token field on GitHub, Gitea or GitLab. Requests not signed with it won't start a deploy.",
   "Bu uygulamada imzasız webhook istekleri de kabul ediliyor. Secret'ı git sağlayıcına ekledikten sonra ayarlardan imzayı zorunlu yap.": "Unsigned webhook requests are still accepted for this app. Add the secret to your git provider, then make signatures required in settings.",
