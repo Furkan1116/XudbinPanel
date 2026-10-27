@@ -192,6 +192,7 @@ export const en: Record<string, string> = {
   "Panel IP adresiyle açık ve kendinden imzalı sertifika kullanıyor; GitHub bu adrese webhook gönderemez. Ayarlar → Panel'den bir alan adı bağla, webhook adresi o alan adıyla gösterilir.": "The panel is open via its IP address with a self-signed certificate; GitHub can't deliver webhooks there. Connect a domain in Settings → Panel and the webhook URL will use it.",
   "İmza doğrulanamadı": "Signature could not be verified",
   "PR önizlemeleri bu uygulamada kapalı": "PR previews are off for this app",
+  "Banlı IP'leri gör": "View banned IPs",
   "Gizli anahtar (Secret)": "Secret",
   "GitHub, Gitea ve GitLab'de webhook'un Secret / Secret token alanına yaz. İstek bu anahtarla imzalanmadıysa deploy başlamaz.": "Paste this into the webhook's Secret / Secret token field on GitHub, Gitea or GitLab. Requests not signed with it won't start a deploy.",
   "Bu uygulamada imzasız webhook istekleri de kabul ediliyor. Secret'ı git sağlayıcına ekledikten sonra ayarlardan imzayı zorunlu yap.": "Unsigned webhook requests are still accepted for this app. Add the secret to your git provider, then make signatures required in settings.",

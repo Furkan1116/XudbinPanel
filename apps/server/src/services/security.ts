@@ -97,6 +97,13 @@ function processLines(serverId: number, lines: string[]) {
 /** Otomatik banı yalnız Coraza'nın engellediği istekler ve panel girişindeki başarısız denemeler tetikler; uygulamanın kendi 401/403/429 yanıtları saldırı sayılmaz. */
 export const BAN_KINDS = ["waf", "panel_login"] as const;
 
+/**
+ * WAF engelleri ancak bu kadar farklı adrese dağılmışsa banı tetikler. Tarayıcı botlar onlarca farklı yolu dener;
+ * gerçek bir kullanıcı ise WAF'ın yanlış pozitif verdiği aynı form/action adresine tekrar tekrar takılır
+ * (idas-stok'ta dükkân IP'si böyle banlandı). Engelleme yine istek başına sürer, yalnız ban atılmaz.
+ */
+export const WAF_BAN_MIN_PATHS = 5;
+
 /** Panelin kendi giriş ekranına yapılan başarısız denemeler de güvenlik olayıdır. */
 export function recordPanelEvent(ip: string, kind: string, path: string, userAgent?: string) {
   db.prepare(
@@ -112,11 +119,14 @@ export async function autoBan() {
   const since = Date.now() - s.autoBanWindowMin * 60_000;
   const offenders = db
     .prepare(
-      `SELECT ip, COUNT(*) AS n FROM security_events
+      `SELECT ip, COUNT(*) AS n,
+              SUM(kind = 'panel_login') AS login,
+              COUNT(DISTINCT CASE WHEN kind = 'waf' THEN COALESCE(host, '') || ' ' || COALESCE(path, '') END) AS paths
+       FROM security_events
        WHERE created_at > ? AND kind IN (${BAN_KINDS.map((k) => `'${k}'`).join(", ")}) AND ip NOT IN (SELECT ip FROM blocked_ips)
-       GROUP BY ip HAVING n >= ?`,
+       GROUP BY ip HAVING n >= ? AND (login >= ? OR paths >= ?)`,
     )
-    .all(since, s.autoBanThreshold) as { ip: string; n: number }[];
+    .all(since, s.autoBanThreshold, s.autoBanThreshold, WAF_BAN_MIN_PATHS) as { ip: string; n: number; paths: number }[];
   const banned: string[] = [];
   const allow = allAllowIps();
   for (const o of offenders) {
@@ -124,12 +134,12 @@ export async function autoBan() {
     if (ipInList(o.ip, allow)) continue; // izin listesindeki IP asla otomatik banlanmaz
     db.prepare("INSERT OR IGNORE INTO blocked_ips (ip, reason, auto, expires_at, created_at) VALUES (?, ?, 1, ?, ?)").run(
       o.ip,
-      `${s.autoBanWindowMin} dakikada ${o.n} engellenen istek`,
+      `${s.autoBanWindowMin} dakikada ${o.n} engellenen istek${o.paths ? `, ${o.paths} farklı adres` : ""}`,
       Date.now() + s.autoBanDurationH * 3_600_000,
       Date.now(),
     );
     banned.push(o.ip);
-    notify("ip_banned", `${o.ip} banlandı`, `${s.autoBanWindowMin} dakikada ${o.n} engellenen istek. Ban ${s.autoBanDurationH} saat sürecek.`);
+    notify("ip_banned", `${o.ip} banlandı`, `${s.autoBanWindowMin} dakikada ${o.n} engellenen istek. Ban ${s.autoBanDurationH} saat sürecek. Yanlışsa panelde Güvenlik → Banlı IP'ler'den kaldır.`);
   }
   if (banned.length) await applyToAllServers();
   return banned;

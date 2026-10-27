@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
+import { useSearchParams } from "react-router";
 import { SecurityScore } from "@/components/SecurityScore";
 import { Button, Dialog, Field, Notice, PageHeader, PageLoading, Section, Tabs, Toggle, useAction } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -30,7 +31,12 @@ const KIND: Record<string, string> = {
 
 export function SecurityPage() {
   const [hours, setHours] = useState(24);
-  const [tab, setTab] = useState<"score" | "overview" | "events" | "blocked">("score");
+  // Sekme adreste tutulur (/security?tab=blocked): ana sayfadan ve bildirimlerden doğrudan açılabilsin.
+  const [params, setParams] = useSearchParams();
+  const tabs = ["score", "overview", "events", "blocked"] as const;
+  type Tab = (typeof tabs)[number];
+  const tab: Tab = tabs.includes(params.get("tab") as Tab) ? (params.get("tab") as Tab) : "score";
+  const setTab = (next: Tab) => setParams(next === "score" ? {} : { tab: next }, { replace: true });
   const summary = useQuery({ queryKey: ["security", "summary", hours], queryFn: () => api.get<Summary>(`/security/summary?hours=${hours}`), refetchInterval: 20_000 });
   if (!summary.data) return <PageLoading />;
   const s = summary.data;
@@ -66,7 +72,9 @@ export function SecurityPage() {
               <Stat label={t("Engellenen istek")} value={total} big />
               <Stat label={t("WAF")} value={s.byKind.find((k) => k.kind === "waf")?.n ?? 0} />
               <Stat label={t("Hız sınırı")} value={s.byKind.find((k) => k.kind === "ratelimit")?.n ?? 0} />
-              <Stat label={t("Banlı IP")} value={s.blockedCount} />
+              <button type="button" className="text-left hover:bg-surface-2" onClick={() => setTab("blocked")} title={t("Banlı IP'leri gör")}>
+                <Stat label={t("Banlı IP")} value={s.blockedCount} />
+              </button>
             </dl>
             <div className="px-5 pt-4 pb-5">
               <Timeline data={s.timeline} hours={hours} bucketMs={s.bucketMs} />
