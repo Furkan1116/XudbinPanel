@@ -89,8 +89,9 @@ export async function handlePrEvent(parent: AppRow, ev: PrEvent) {
         parent.id, ev.number, Date.now(),
       );
     const id = Number(res.lastInsertRowid);
-    if (server.public_ip) {
-      const host = `${slug}.${server.public_ip.replace(/\./g, "-")}.sslip.io`;
+    // Sunucunun kendi wildcard alan adı varsa önizleme de onun altında açılır (ana uygulamalarla aynı kural).
+    const host = server.apps_domain ? `${slug}.${server.apps_domain}` : server.public_ip ? `${slug}.${server.public_ip.replace(/\./g, "-")}.sslip.io` : null;
+    if (host) {
       db.prepare("INSERT INTO domains (app_id, host, https, generated, created_at) VALUES (?, ?, ?, 1, ?)").run(id, host, server.https_mode === "off" ? 0 : 1, Date.now());
     }
     app = getApp(id)!;

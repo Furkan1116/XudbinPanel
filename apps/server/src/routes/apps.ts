@@ -275,7 +275,8 @@ export const appRoutes = new Hono<AppEnv>()
         buildContext: z.string().trim().min(1).max(300).optional(),
         image: z.string().trim().max(300).nullable().optional(),
         composeFile: z.string().max(100_000).nullable().optional(),
-        composeService: z.string().trim().max(100).nullable().optional(),
+        // Caddy'de hedef adresin parçası olur ("xb-<ad>-<servis>-1:port"); geçersiz karakter sunucudaki tüm yapılandırmayı bozar.
+        composeService: z.string().trim().max(100).regex(/^$|^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/, "Servis adı yalnız harf, rakam, nokta, - ve _ içerebilir").nullable().optional(),
         port: z.number().int().min(1).max(65535).optional(),
         command: z.string().max(2000).nullable().optional(),
         autoDeploy: z.boolean().optional(),
@@ -302,6 +303,14 @@ export const appRoutes = new Hono<AppEnv>()
     if (input.hostAccess !== undefined && input.hostAccess !== Boolean(app.host_access) && c.get("user").role !== "admin") {
       throw new HttpError(403, "Sunucu erişimi iznini yalnız yönetici değiştirebilir");
     }
+    // "Sunucu erişimi" onayı, yöneticinin gördüğü Compose içeriği içindir. Yönetici olmayan biri içeriği
+    // (dosya, repo, dal, dosya yolu) değiştirirse onay düşer; yoksa onaydan sonra dosyaya privileged eklenebilirdi.
+    const sourceChanged =
+      (input.composeFile !== undefined && input.composeFile !== app.compose_file) ||
+      (input.gitUrl !== undefined && input.gitUrl !== app.git_url) ||
+      (input.gitBranch !== undefined && input.gitBranch !== app.git_branch) ||
+      (input.dockerfilePath !== undefined && input.dockerfilePath !== app.dockerfile_path);
+    const revokeHostAccess = Boolean(app.host_access) && sourceChanged && c.get("user").role !== "admin";
     const next = {
       sourceType: app.source_type,
       gitUrl: input.gitUrl === undefined ? app.git_url : input.gitUrl,
@@ -335,7 +344,7 @@ export const appRoutes = new Hono<AppEnv>()
       port: input.port,
       command: input.command,
       auto_deploy: input.autoDeploy === undefined ? undefined : input.autoDeploy ? 1 : 0,
-      host_access: input.hostAccess === undefined ? undefined : input.hostAccess ? 1 : 0,
+      host_access: revokeHostAccess ? 0 : input.hostAccess === undefined ? undefined : input.hostAccess ? 1 : 0,
       webhook_signed: input.webhookSigned === undefined ? undefined : input.webhookSigned ? 1 : 0,
       cpu_limit: input.cpuLimit,
       http_check: input.httpCheck === undefined ? undefined : input.httpCheck ? 1 : 0,

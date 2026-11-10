@@ -112,14 +112,23 @@ export function githubRepoOf(url: string | null | undefined) {
   return m ? `${m[1]}/${m[2]}`.toLowerCase() : null;
 }
 
-const tokenCache = new Map<number, { token: string; exp: number }>();
+const tokenCache = new Map<string, { token: string; exp: number }>();
 const installCache = new Map<string, { id: number | null; at: number }>();
 
-async function installationToken(cfg: GithubAppConfig, installationId: number) {
-  const c = tokenCache.get(installationId);
+/**
+ * Kurulum token'ı. `repo` verilirse token yalnız o repoyu, yalnız okuma yetkisiyle kapsar: klonlama token'ı
+ * derleme sırasında sızsa bile App'in kurulu olduğu diğer repolara erişemez.
+ */
+async function installationToken(cfg: GithubAppConfig, installationId: number, repo?: string) {
+  const key = `${installationId}:${repo ?? "*"}`;
+  const c = tokenCache.get(key);
   if (c && c.exp - Date.now() > 5 * 60_000) return c.token;
-  const b = await gh<{ token: string; expires_at: string }>(`/app/installations/${installationId}/access_tokens`, appJwt(cfg), { method: "POST" });
-  tokenCache.set(installationId, { token: b.token, exp: Date.parse(b.expires_at) });
+  const scope = repo ? { repositories: [repo.split("/")[1]], permissions: { contents: "read", metadata: "read" } } : undefined;
+  const b = await gh<{ token: string; expires_at: string }>(`/app/installations/${installationId}/access_tokens`, appJwt(cfg), {
+    method: "POST",
+    ...(scope ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(scope) } : {}),
+  });
+  tokenCache.set(key, { token: b.token, exp: Date.parse(b.expires_at) });
   return b.token;
 }
 
@@ -166,7 +175,7 @@ export async function gitTokenFor(gitUrl: string | null | undefined, ownToken: s
   if (!allowApp || !cfg || !repo || ownToken) return ownToken;
   try {
     const inst = await installationFor(cfg, repo);
-    return inst ? await installationToken(cfg, inst) : ownToken;
+    return inst ? await installationToken(cfg, inst, repo) : ownToken;
   } catch {
     return ownToken;
   }

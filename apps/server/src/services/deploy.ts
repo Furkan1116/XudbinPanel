@@ -197,6 +197,14 @@ export function cancelDeployment(id: number) {
     return true;
   }
   const r = db.prepare("UPDATE deployments SET status = 'cancelled', finished_at = ? WHERE id = ? AND status = 'queued'").run(Date.now(), id);
+  if (r.changes > 0) {
+    // Sıradaki deploy iptal edildiyse ve başka bekleyen/çalışan yoksa uygulama "deploy ediliyor" durumunda takılı kalmasın.
+    db.prepare(
+      `UPDATE apps SET status = CASE WHEN container IS NULL THEN 'idle' ELSE 'running' END
+       WHERE status = 'deploying' AND id = (SELECT app_id FROM deployments WHERE id = ?)
+         AND NOT EXISTS (SELECT 1 FROM deployments d WHERE d.app_id = apps.id AND d.status IN ('queued', 'running'))`,
+    ).run(id);
+  }
   return r.changes > 0;
 }
 
@@ -556,6 +564,10 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     throw new Error(`${message} Eski sürüm yayında kalmaya devam ediyor.`);
   };
 
+  // Trafik yeni sürüme geçmeden bir şey ters giderse (imaj yok, başlatma hatası, ek sunucu hatası...) yeni konteynerler
+  // geride kalmasın: çalışır halde kalan bir kopya, uygulamanın iç adına (xb-<ad>) gelen istekleri almaya devam ederdi.
+  let switched = false;
+  try {
   for (const name of names) {
     log(`Konteyner başlatılıyor: ${name}`);
     const container = await docker.createContainer({
@@ -682,6 +694,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   const previousRemote = remoteReplicasOf(fresh);
   const remote = await startRemoteReplicas({ app: fresh, primary: server, image, deploymentId, env, hosts, log, signal }, extras);
 
+  switched = true;
   const previous = [fresh.container, ...(JSON.parse(fresh.replica_containers || "[]") as string[])].filter((n): n is string => Boolean(n) && !names.includes(n!));
   db.prepare("UPDATE apps SET container = ?, replica_containers = ?, remote_replicas = ?, current_image = ? WHERE id = ?").run(
     names[0]!,
@@ -716,6 +729,10 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   }
   await removeRemoteReplicas(previousRemote.filter((r) => !remote.some((x) => x.container === r.container)), log);
   if (!worker) await waitForCertificates(server, app.id, log);
+  } catch (err) {
+    if (!switched) for (const n of created) await removeContainer(docker, n).catch(() => {});
+    throw err;
+  }
 }
 
 /** HTTPS'li alan adlarının sertifikası alınana kadar (en fazla 90 sn) bekler; alınamazsa sebebini söyler. */

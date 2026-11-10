@@ -111,6 +111,8 @@ export function recordPanelEvent(ip: string, kind: string, path: string, userAge
   ).run(ip, kind, path, userAgent ?? null, Date.now());
 }
 
+const PRIVATE_RANGES = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "100.64.0.0/10", "fc00::/7", "fe80::/10"];
+
 /** Eşiği aşan IP'leri geçici olarak banlar ve tüm sunuculardaki Caddy yapılandırmasını günceller. */
 export async function autoBan() {
   const s = getSettings();
@@ -129,8 +131,14 @@ export async function autoBan() {
     .all(since, s.autoBanThreshold, s.autoBanThreshold, WAF_BAN_MIN_PATHS) as { ip: string; n: number; paths: number }[];
   const banned: string[] = [];
   const allow = allAllowIps();
+  // Açık oturumu olan bir yöneticinin adresi otomatik banlanmaz: panel sahibi kendini kilitlemesin.
+  const adminIps = new Set(
+    (db.prepare("SELECT DISTINCT s.ip FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.role = 'admin' AND s.expires_at > ? AND s.ip IS NOT NULL").all(Date.now()) as { ip: string }[]).map((r) => r.ip),
+  );
   for (const o of offenders) {
     if (o.ip === "?" || o.ip === "127.0.0.1" || o.ip === "::1") continue;
+    // Özel ağ adresleri ziyaretçi değildir (ör. tunnel/proxy konteyneri); banlanırsa o yoldan gelen herkes engellenir.
+    if (ipInList(o.ip.replace(/^::ffff:/, ""), PRIVATE_RANGES) || adminIps.has(o.ip)) continue;
     if (ipInList(o.ip, allow)) continue; // izin listesindeki IP asla otomatik banlanmaz
     db.prepare("INSERT OR IGNORE INTO blocked_ips (ip, reason, auto, expires_at, created_at) VALUES (?, ?, 1, ?, ?)").run(
       o.ip,

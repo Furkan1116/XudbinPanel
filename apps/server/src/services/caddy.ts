@@ -382,7 +382,7 @@ const WAF_ERROR_ROUTES: Route[] = [
 
 function upstreamsFor(d: DomainRow): string[] {
   if (d.kind === "worker") return [];
-  if (d.source_type === "compose") return d.compose_service ? [`xb-${d.app_slug}-${d.compose_service}-1:${d.port}`] : [];
+  if (d.source_type === "compose") return d.compose_service && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(d.compose_service) ? [`xb-${d.app_slug}-${d.compose_service}-1:${d.port}`] : [];
   if (!d.container) return [];
   const replicas = (() => {
     try {

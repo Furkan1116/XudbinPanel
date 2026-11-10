@@ -64,6 +64,13 @@ function publicDb(d: DatabaseRow, secrets = true) {
 
 const load = (id: number) => must(getDatabase(id), "Veritabanı bulunamadı");
 
+/** Dışarı açılan port sunucuda boşta olmalı: çakışırsa konteyner başlamaz ve veritabanı kapalı kalır. */
+function assertPortFree(serverId: number, port: number | null | undefined, exceptId = 0) {
+  if (!port) return;
+  const taken = db.prepare("SELECT name FROM databases WHERE server_id = ? AND external_port = ? AND id != ?").get(serverId, port, exceptId) as { name: string } | undefined;
+  if (taken) throw new HttpError(409, `${port} portu bu sunucuda "${taken.name}" veritabanı tarafından kullanılıyor`);
+}
+
 export const databaseRoutes = new Hono<AppEnv>()
   .get("/engines", (c) =>
     c.json({ engines: Object.entries(ENGINES).map(([id, e]) => ({ id, label: e.label, versions: e.versions, port: e.port })) }),
@@ -85,6 +92,7 @@ export const databaseRoutes = new Hono<AppEnv>()
     must(db.prepare("SELECT id FROM projects WHERE id = ?").get(input.projectId), "Proje bulunamadı");
     const server = getServer(input.serverId);
     if (server.status !== "ready") throw new HttpError(422, "Sunucu hazır değil");
+    assertPortFree(server.id, input.externalPort);
     const engine = ENGINES[input.engine as Engine];
     const version = input.version && engine.versions.includes(input.version) ? input.version : engine.versions[0]!;
     const slug = makeSlug(input.name);
@@ -123,6 +131,7 @@ export const databaseRoutes = new Hono<AppEnv>()
         backupKeep: z.number().int().min(1).max(100).optional(),
       }),
     );
+    if (input.externalPort !== undefined && input.externalPort !== d.external_port) assertPortFree(d.server_id, input.externalPort, d.id);
     db.prepare(
       `UPDATE databases SET name = COALESCE(?, name), backup_interval_h = COALESCE(?, backup_interval_h),
        backup_keep = COALESCE(?, backup_keep) WHERE id = ?`,
