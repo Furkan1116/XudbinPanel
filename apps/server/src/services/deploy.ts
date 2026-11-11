@@ -125,6 +125,16 @@ export function mergeEnvText(raw: string, set: Record<string, string>): string {
   return [...lines, ...Object.entries(left).map(([k, v]) => `${k}=${v}`)].join("\n") + "\n";
 }
 
+/**
+ * Uygulamanın çalışırken aldığı ortam değişkenleri: projenin ortak değişkenleri + uygulamanın kendi değişkenleri
+ * (aynı ad varsa uygulamanınki geçerlidir). PR önizlemeleri ortak değişkenleri ALMAZ: onlar üretim sırlarıdır,
+ * önizleme yalnız kendi "önizleme ortam değişkenleri" alanını kullanır.
+ */
+export function effectiveEnv(app: Pick<AppRow, "env" | "project_id" | "parent_app_id">): Record<string, string> {
+  const shared = app.parent_app_id ? null : (db.prepare("SELECT env FROM projects WHERE id = ?").get(app.project_id) as { env: string | null } | undefined)?.env;
+  return { ...parseEnv(decrypt(shared)), ...parseEnv(decrypt(app.env)) };
+}
+
 export function parseEnv(raw: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const line of raw.split(/\r?\n/)) {
@@ -302,7 +312,7 @@ async function runDeployment(deploymentId: number) {
     if (app && !signal.aborted) {
       flush();
       const row = db.prepare("SELECT log, diagnosis FROM deployments WHERE id = ?").get(deploymentId) as { log: string; diagnosis: string | null };
-      if (!row.diagnosis) recordDiagnosis(deploymentId, diagnose(row.log.split("\n"), { framework: app.framework, env: parseEnv(decrypt(app.env)), hosts: [] }), log);
+      if (!row.diagnosis) recordDiagnosis(deploymentId, diagnose(row.log.split("\n"), { framework: app.framework, env: effectiveEnv(app), hosts: [] }), log);
     }
     db.prepare("UPDATE deployments SET status = ?, finished_at = ? WHERE id = ?").run(signal.aborted && String(signal.reason).includes("iptal") ? "cancelled" : "failed", Date.now(), deploymentId);
     if (app) {
@@ -445,7 +455,7 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
     if (!fw) throw new Error(`Bilinmeyen framework: ${frameworkId}`);
     const repoForConfig = openRepo(contextDir);
     addDefaultEnv(app, fw, log, fw.envAliases?.(repoForConfig, opts) ?? {}, fw.autoConfig?.(repoForConfig, opts) ?? {});
-    const env = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off").env;
+    const env = fillPlaceholders(effectiveEnv(app), app.id, server.https_mode !== "off").env;
     const result = fw.build(openRepo(contextDir), opts, env);
     dockerfile = "Dockerfile.xudbin";
     for (const [name, content] of Object.entries(result.files ?? {})) writeInside(contextDir, name, content);
@@ -530,7 +540,8 @@ function addDefaultEnv(
   }
   auto.notes?.forEach((n) => log(n));
   const raw = decrypt(app.env);
-  const current = parseEnv(raw);
+  // Projenin ortak değişkenlerinde zaten olan bir değer uygulamaya ayrıca eklenmez.
+  const current = effectiveEnv(app);
   const add = [
     ...missingDefaultEnv(fw, current, randomAlnum, aliases),
     ...Object.entries(auto.env ?? {}).filter(([k]) => !(k in current)).map(([key, value]) => ({ key, value })),
@@ -547,7 +558,7 @@ type Volume = { name: string; path: string };
 async function runContainer(app: AppRow, server: ServerRow, image: string, deploymentId: number, log: (l: string) => void, signal: AbortSignal) {
   const docker = dockerFor(server);
   const fresh = getApp(app.id)!;
-  const filled = fillPlaceholders(parseEnv(decrypt(fresh.env)), app.id, server.https_mode !== "off");
+  const filled = fillPlaceholders(effectiveEnv(fresh), app.id, server.https_mode !== "off");
   const env = { PORT: String(fresh.port), XUDBIN_URL: filled.values.XUDBIN_URL!, XUDBIN_DOMAINS: filled.values.XUDBIN_DOMAINS!, ...filled.env };
   const volumes = JSON.parse(fresh.volumes || "[]") as Volume[];
   const worker = fresh.kind === "worker";
@@ -887,7 +898,7 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
   };
   const overridePath = writeInside(dir, "docker-compose.xudbin.yml", YAML.stringify(override));
   // Compose, .env dosyasındaki değişkenleri ${AD} biçimindeki yerlere koyar; yer tutucular önce doldurulur.
-  const composeVars = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off").env;
+  const composeVars = fillPlaceholders(effectiveEnv(app), app.id, server.https_mode !== "off").env;
   // Tek tırnak: Compose içini olduğu gibi okur ($ işareti değişken sanılmaz). Tek tırnak içeren değerler çift tırnakla.
   const quote = (v: string) => (v.includes("'") || v.includes("\n") ? JSON.stringify(v) : `'${v}'`);
   // Anahtar adı yalnız harf, rakam ve alt çizgi: aksi halde satır sonu ya da = ile .env'e satır eklenebilirdi.

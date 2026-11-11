@@ -473,6 +473,10 @@ const migrations: string[] = [
   `
   ALTER TABLE domains ADD COLUMN redirect_to INTEGER REFERENCES domains(id) ON DELETE SET NULL;
   `,
+  // Proje düzeyinde ortak ortam değişkenleri (şifreli); projedeki her uygulamaya verilir, uygulamanın kendi değeri önceliklidir.
+  `
+  ALTER TABLE projects ADD COLUMN env TEXT;
+  `,
 ];
 
 function migrate() {

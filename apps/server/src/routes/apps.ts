@@ -18,6 +18,7 @@ import {
   demuxLogs,
   enqueueDeploy,
   getApp,
+  effectiveEnv,
   mergeEnvText,
   parseEnv,
   shallowClone,
@@ -579,7 +580,7 @@ export const appRoutes = new Hono<AppEnv>()
     const hosts = servingDomains(app.id).map((d) => d.host);
     const probe = await probeHttp(docker, app.container, app.port, hosts[0] ?? `xb-${app.slug}`, app.health_path || "/");
     const logs = await docker.getContainer(app.container).logs({ stdout: true, stderr: true, tail: 400 }).catch(() => Buffer.from(""));
-    const findings = diagnose(demuxLogs(logs as Buffer), { framework: app.framework, env: parseEnv(decrypt(app.env)), hosts, status: probe.status });
+    const findings = diagnose(demuxLogs(logs as Buffer), { framework: app.framework, env: effectiveEnv(app), hosts, status: probe.status });
     return c.json({ probe, healthy: probe.status !== null && isHealthy(probe.status, Boolean(app.health_path)), findings });
   })
 
@@ -941,7 +942,18 @@ export const projectRoutes = new Hono<AppEnv>()
          FROM databases d JOIN servers s ON s.id = d.server_id WHERE d.project_id = ? ORDER BY d.id`,
       )
       .all(id);
-    return c.json({ project, apps, databases });
+    // Ortak ortam değişkenleri sırdır: yalnız yönetici ve geliştiriciye gösterilir.
+    const secrets = secretsVisible(c, id);
+    const sharedEnv = secrets ? decrypt((db.prepare("SELECT env FROM projects WHERE id = ?").get(id) as { env: string | null }).env) : "";
+    return c.json({ project, apps, databases, sharedEnv, secretsHidden: !secrets });
+  })
+  // Projedeki tüm uygulamalara verilen ortak ortam değişkenleri (uygulamanın kendi değeri önceliklidir).
+  .put("/:id/env", async (c) => {
+    const id = idParam(c);
+    must(db.prepare("SELECT id FROM projects WHERE id = ?").get(id), "Proje bulunamadı");
+    const { env } = await body(c, z.object({ env: z.string().max(200_000) }));
+    db.prepare("UPDATE projects SET env = ? WHERE id = ?").run(env.trim() ? encrypt(env) : null, id);
+    return c.json({ ok: true, note: "Değişikliklerin geçerli olması için projedeki uygulamaları yeniden deploy et." });
   })
   // Proje üyeleri (yalnız yönetici yönetir).
   .get("/:id/members", (c) => {

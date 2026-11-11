@@ -209,8 +209,10 @@ on("GET", "/projects/:id", ({ params }) => {
     project: { id: p.id, name: p.name, description: p.description },
     apps: D.apps.filter((a) => a.projectId === p.id).map(({ id, name, sourceType, status, server, domains, gitUrl, image, framework }) => ({ id, name, sourceType, status, server, domains, gitUrl, image, framework })),
     databases: D.databases.filter((d) => d.projectId === p.id).map((d) => ({ id: d.id, name: d.name, engine: d.engine, version: d.version, status: d.status, serverName: d.server.name })),
+    sharedEnv: "SENTRY_DSN=https://ornek@sentry.io/42\nSMTP_HOST=smtp.ornekfirma.com.tr\n",
   };
 });
+on("PUT", "/projects/:id/env", () => ({ ok: true }));
 on("GET", "/projects/:id/members", ({ params }) => ({
   members:
     num(params.id) === 2

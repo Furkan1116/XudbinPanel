@@ -133,3 +133,40 @@ test("panel yeniden başlayınca: süren kesinti geri yüklenir, yarım kalan ye
   assert.equal((db.prepare("SELECT status FROM backups WHERE id = ?").get(backup) as { status: string }).status, "failed");
   db.prepare("UPDATE uptime_incidents SET ended_at = ? WHERE app_id = ?").run(now(), app);
 });
+
+test("ortak ortam değişkenleri: uygulamanınki önceliklidir, PR önizlemesine verilmez", async () => {
+  const { effectiveEnv } = await import("../src/services/deploy.js");
+  const s = seed();
+  db.prepare("UPDATE projects SET env = ? WHERE id = ?").run(encrypt("ORTAK=proje\nAYNI=proje\n"), s.project);
+  const app = s.app({ env: encrypt("AYNI=uygulama\nKENDI=1\n") });
+  const row = db.prepare("SELECT * FROM apps WHERE id = ?").get(app) as Parameters<typeof effectiveEnv>[0];
+  assert.deepEqual(effectiveEnv(row), { ORTAK: "proje", AYNI: "uygulama", KENDI: "1" });
+  // Önizleme uygulaması (parent_app_id dolu) üretim sırlarını almaz.
+  assert.deepEqual(effectiveEnv({ ...row, parent_app_id: app }), { AYNI: "uygulama", KENDI: "1" });
+
+  // API: geliştirici okur/yazar, izleyici ne görür ne yazar.
+  const dev = s.user("member");
+  const viewer = Number(db.prepare("INSERT INTO users (email, name, password_hash, role, created_at) VALUES (?, 'v', 'x', 'member', ?)").run(`viewer-${tag()}@t`, now()).lastInsertRowid);
+  db.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'developer', ?), (?, ?, 'viewer', ?)").run(s.project, dev, now(), s.project, viewer, now());
+  const { projectRoutes } = await import("../src/routes/apps.js");
+  const { projectAccess } = await import("../src/services/access.js");
+  const h = (userId: number) => {
+    const a = new Hono<AppEnv>();
+    a.use("*", async (c, next) => {
+      c.set("user", { id: userId, email: "t@t", name: "t", role: "member", mustChangePassword: false } as AppEnv["Variables"]["user"]);
+      await next();
+    });
+    a.use("/api/*", projectAccess);
+    a.route("/api/projects", projectRoutes);
+    a.onError((err, c) => c.json({ error: err.message }, err instanceof HttpError ? err.status : 500));
+    return a;
+  };
+  const asDev = (await (await h(dev).request(`/api/projects/${s.project}`)).json()) as { sharedEnv: string };
+  assert.ok(asDev.sharedEnv.includes("ORTAK=proje"));
+  const asViewer = (await (await h(viewer).request(`/api/projects/${s.project}`)).json()) as { sharedEnv: string; secretsHidden: boolean };
+  assert.equal(asViewer.sharedEnv, "");
+  assert.equal(asViewer.secretsHidden, true);
+  assert.equal((await h(viewer).request(`/api/projects/${s.project}/env`, json("PUT", { env: "X=1" }))).status, 403);
+  assert.equal((await h(dev).request(`/api/projects/${s.project}/env`, json("PUT", { env: "X=1\n" }))).status, 200);
+  assert.deepEqual(effectiveEnv(row), { X: "1", AYNI: "uygulama", KENDI: "1" });
+});

@@ -30,6 +30,7 @@ const LABELS: [RegExp, string, string?][] = [
   [/^POST \/api\/databases\/\d+\/backups$/, "Veritabanı yedeği aldı"],
   [/^PATCH \/api\/databases\/\d+$/, "Veritabanı ayarlarını değiştirdi"],
   [/^POST \/api\/projects$/, "Proje oluşturdu"],
+  [/^PUT \/api\/projects\/\d+\/env$/, "Projenin ortak ortam değişkenlerini değiştirdi"],
   [/^DELETE \/api\/projects\/\d+$/, "Projeyi sildi"],
   [/^(PUT|DELETE) \/api\/projects\/\d+\/members\/\d+$/, "Proje üyelerini değiştirdi"],
   [/^POST \/api\/servers$/, "Sunucu ekledi"],

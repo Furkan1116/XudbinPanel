@@ -1452,4 +1452,10 @@ export const en: Record<string, string> = {
   "Panelde açık terminal sayısı sınıra ulaştı; biraz sonra tekrar dene": "The panel has reached its limit of open terminals; try again shortly",
   "Konteynerde terminal açtı": "Opened a terminal in the container",
   "Terminali kapattı": "Closed the terminal",
+  // Proje düzeyinde ortak ortam değişkenleri
+  "Ortak ortam değişkenleri": "Shared environment variables",
+  "Bu projedeki tüm uygulamalara verilir. Bir uygulama aynı adla kendi değerini tanımlarsa onunki geçerli olur. PR önizlemelerine verilmez.": "Given to every app in this project. If an app defines its own value under the same name, the app's value wins. Not given to PR previews.",
+  "Kaydedildi. Geçerli olması için uygulamaları yeniden deploy et.": "Saved. Redeploy the apps for it to take effect.",
+  "Her satıra bir değişken: ANAHTAR=değer. Değerler şifrelenerek saklanır.": "One variable per line: KEY=value. Values are stored encrypted.",
+  "Projenin ortak ortam değişkenlerini değiştirdi": "Changed the project's shared environment variables",
 };
