@@ -23,6 +23,7 @@ import { extractZip, latestAppUpload } from "./uploads.js";
 import { appTokenAllowed, gitTokenFor } from "./github-app.js";
 import { resourceLimits } from "../lib/limits.js";
 import { assertSafeGitUrl } from "../lib/ssrf.js";
+import { buildRegistryConfig, prepareComposeDockerConfig, pullAuthFor, registryHostOf } from "./registries.js";
 import { ensureRelayCa, extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas, startRemoteReplicas } from "./remote-replicas.js";
 
 export type AppRow = {
@@ -270,7 +271,9 @@ async function runDeployment(deploymentId: number) {
       } else if (app.source_type === "image") {
         image = app.image!;
         log(`İmaj çekiliyor: ${image}`);
-        await pullImage(dockerFor(server), image, log);
+        const auth = pullAuthFor(image);
+        if (auth) log(`${registryHostOf(image)} için kayıtlı giriş kullanılıyor.`);
+        await pullImage(dockerFor(server), image, log, auth);
       } else {
         image = await buildFromSource(app, server, deploymentId, workdir, log, signal);
       }
@@ -457,16 +460,18 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
   const tag = `xudbin/${app.slug}:${deploymentId}`;
   const pack = () => tarFs.pack(contextDir, { ignore: (name) => name.split(path.sep).includes(".git") });
   // Temel imaj günde bir tazelenir (güvenlik yamaları aynı etikette gelir); kayıt deposuna ulaşılamazsa önbellektekiyle derlenir.
+  // Kayıtlı kayıt deposu girişleri (temel imaj özel bir depodaysa); Docker Engine'e başlıkla gider, loglara ve derleme adımlarına girmez.
+  const registryconfig = buildRegistryConfig();
   const build = async (target: ServerRow) => {
     const pull = shouldPullBase(`${target.id}:${app.slug}`);
     if (pull) log("Temel imajın güncel sürümü kontrol ediliyor (günde bir).");
     try {
-      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal, pull }, log);
+      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal, pull, registryconfig }, log);
     } catch (err) {
       if (!pull || !/pull access denied|toomanyrequests|rate limit|manifest unknown|i\/o timeout|TLS handshake|no such host|connection refused/i.test((err as Error).message)) throw err;
       basePulledAt.delete(`${target.id}:${app.slug}`);
       log("Temel imaj tazelenemedi; sunucudaki kopyayla yeniden derleniyor.");
-      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal }, log);
+      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal, registryconfig }, log);
     }
   };
   // Ayrı derleme sunucusu: ağır derlemeler canlı uygulamaların sunucusunu yormasın; imaj sonra aktarılır.
@@ -888,8 +893,15 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
 
   const env = composeEnv(server, workdir);
   const args = ["compose", "-p", `xb-${app.slug}`, "-f", composePath, "-f", overridePath];
+  // Kayıt deposu girişleri: deploy klasörünün dışında, yalnız bu komut süresince var olan bir DOCKER_CONFIG.
+  const auth = prepareComposeDockerConfig();
+  if (auth) env.DOCKER_CONFIG = auth.dir;
   log("docker compose up çalıştırılıyor...");
-  await run(dockerBin(), [...args, "up", "-d", "--build", "--remove-orphans", "--wait", "--wait-timeout", "120"], { cwd: dir, env, log, signal });
+  try {
+    await run(dockerBin(), [...args, "up", "-d", "--build", "--remove-orphans", "--wait", "--wait-timeout", "120"], { cwd: dir, env, log, signal, redact: auth?.secrets });
+  } finally {
+    auth?.cleanup();
+  }
   db.prepare("UPDATE apps SET container = ? WHERE id = ?").run(`xb-${app.slug}`, app.id);
   await applyCaddyConfig(server);
 }

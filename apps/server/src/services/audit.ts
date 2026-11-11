@@ -42,6 +42,11 @@ const LABELS: [RegExp, string, string?][] = [
   [/^(POST|DELETE) \/api\/settings\/account\/tokens/, "API anahtarlarını değiştirdi"],
   [/^PUT \/api\/settings\/(panel|backup|sso)$/, "Panel ayarlarını değiştirdi"],
   [/^(POST|DELETE) \/api\/settings\/notifications/, "Bildirim kanallarını değiştirdi"],
+  [/^POST \/api\/settings\/registries\/test$/, "Kayıt deposu girişini denedi"],
+  [/^POST \/api\/settings\/registries\/\d+\/test$/, "Kayıt deposu girişini denedi"],
+  [/^POST \/api\/settings\/registries$/, "Kayıt deposu girişi ekledi"],
+  [/^PATCH \/api\/settings\/registries\/\d+$/, "Kayıt deposu girişini değiştirdi"],
+  [/^DELETE \/api\/settings\/registries\/\d+$/, "Kayıt deposu girişini sildi"],
   [/^POST \/api\/security\/score\/fix$/, "Güvenlik düzeltmesi uyguladı"],
   [/^(POST|DELETE|PUT) \/api\/security/, "Güvenlik ayarlarını değiştirdi"],
 ];

@@ -343,6 +343,12 @@ on("GET", "/settings/backup", () => ({
 on("GET", "/settings/sso", () => ({ sso: null, redirectUri: `${location.origin}/api/auth/oidc/callback` }));
 on("GET", "/settings/github", () => ({ app: null, installations: [] }));
 on("GET", "/settings/github/repos", () => ({ connected: false, repos: [] }));
+on("GET", "/settings/registries", () => ({
+  registries: [
+    { id: 1, name: "GitHub Container Registry", host: "ghcr.io", username: "ornekfirma-ci", createdAt: Date.now() - 41 * 86_400_000, verifiedAt: Date.now() - 2 * 3_600_000 },
+    { id: 2, name: "Docker Hub", host: "docker.io", username: "ornekfirma", createdAt: Date.now() - 12 * 86_400_000, verifiedAt: null },
+  ],
+}));
 on("GET", "/settings/audit", ({ query }) => {
   const q = (query.get("q") ?? "").toLowerCase();
   const before = Number(query.get("before") ?? 0);

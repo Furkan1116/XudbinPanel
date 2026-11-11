@@ -36,6 +36,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Tek tıkla önceki sürüme dönüş, canlı deploy ve uygulama logları
 - Git push webhook'u ile otomatik deploy (GitHub, GitLab, Gitea...), HMAC imza doğrulamalı
 - **GitHub App:** panelden tek tıkla oluşturulur; özel repolar token girmeden deploy edilir, repolar listeden seçilir, push ve PR olayları webhook kurmadan gelir
+- **Özel imaj kayıt depoları:** GHCR, Docker Hub, GitLab ya da kendi registry'n için yöneticinin eklediği, şifreli saklanan girişler; imaj çekerken, özel temel imajlı derlemelerde ve Compose deploy'larında kendiliğinden kullanılır
 - **Pull request önizlemeleri:** her PR ayrı bir adreste açılır, yeni commit'lerde güncellenir, PR kapanınca silinir; adres PR'a yorum olarak yazılır. Fork'tan gelen PR'lar deploy edilmez
 - **Hazır şablonlar:** WordPress, Ghost, n8n, Uptime Kuma, Vaultwarden, Gitea, Nextcloud, Metabase, Grafana, Directus, Matomo ve daha fazlası tek tıkla
 - Arka plan işçileri (portu olmayan servisler) ve web uygulamaları için birden çok kopya (replica); Caddy kopyalar arasında yük dağıtır, çöken kopyayı devre dışı bırakır

@@ -456,6 +456,18 @@ const migrations: string[] = [
   `
   ALTER TABLE apps ADD COLUMN last_webhook TEXT;
   `,
+  // Özel imaj kayıt depoları için yönetici girişleri (şifre/token şifreli; API'den dönmez).
+  `
+  CREATE TABLE registry_credentials (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    host        TEXT NOT NULL UNIQUE,      -- normalize edilmiş: docker.io, ghcr.io, registry.gitlab.com, ornek.com:5000
+    username    TEXT NOT NULL,
+    secret      TEXT NOT NULL,             -- şifreli
+    created_at  INTEGER NOT NULL,
+    verified_at INTEGER
+  );
+  `,
 ];
 
 function migrate() {

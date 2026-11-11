@@ -33,7 +33,7 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
  */
 // Sunucu listesi (`/api/servers`) üyeye yalnız asgari alanlarla açık; altındaki her şey (kurulum günlüğü, konteynerler,
 // güvenlik taraması, durum) yalnız yönetici.
-const ADMIN_ANY = [/^\/api\/ssh-keys/, /^\/api\/servers\/.+/, /^\/api\/users/, /^\/api\/settings\/(panel|notifications|backup|audit|sso|github(?!\/repos))/, /^\/api\/security/];
+const ADMIN_ANY = [/^\/api\/ssh-keys/, /^\/api\/servers\/.+/, /^\/api\/users/, /^\/api\/settings\/(panel|notifications|backup|audit|sso|github(?!\/repos))/, /^\/api\/security/, /^\/api\/settings\/registries/];
 const ADMIN_WRITE = [/^\/api\/servers/, /^\/api\/security/];
 
 export const enforceRoles = createMiddleware<AppEnv>(async (c, next) => {
