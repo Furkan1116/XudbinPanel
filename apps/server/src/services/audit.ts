@@ -36,6 +36,8 @@ const LABELS: [RegExp, string, string?][] = [
   [/^(PUT|DELETE) \/api\/projects\/\d+\/members\/\d+$/, "Proje üyelerini değiştirdi"],
   [/^POST \/api\/servers$/, "Sunucu ekledi"],
   [/^DELETE \/api\/servers\/\d+$/, "Sunucuyu sildi"],
+  [/^POST \/api\/servers\/\d+\/containers\/[\w.-]+\/(start|stop|restart)$/, "Konteyneri başlattı/durdurdu"],
+  [/^POST \/api\/servers\/\d+\/prune$/, "Docker önbelleğini temizledi"],
   [/^POST \/api\/servers\/\d+\/(setup|harden)$/, "Sunucu kurulumu/sıkılaştırma başlattı"],
   [/^POST \/api\/users$/, "Kullanıcı ekledi"],
   [/^DELETE \/api\/users\/\d+$/, "Kullanıcıyı sildi"],

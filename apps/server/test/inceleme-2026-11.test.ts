@@ -198,3 +198,19 @@ test("veritabanı içe aktarma: gzip algılanır; Redis ve durmuş veritabanı r
   assert.equal((await upload(mk("redis", "running"))).status, 422);
   assert.equal((await upload(mk("postgres", "stopped"))).status, 422);
 });
+
+test("sunucu konteyner uçları: geçersiz konteyner adı Docker'a gitmeden reddedilir", async () => {
+  const { serverRoutes } = await import("../src/routes/servers.js");
+  const s = seed();
+  const h = new Hono<AppEnv>();
+  h.use("*", async (c, next) => {
+    c.set("user", { id: 1, email: "a@t", name: "a", role: "admin", mustChangePassword: false } as AppEnv["Variables"]["user"]);
+    await next();
+  });
+  h.route("/servers", serverRoutes);
+  h.onError((err, c) => c.json({ error: err.message }, err instanceof HttpError ? err.status : 500));
+  for (const bad of ["..%2F..%2Fetc", "a%20b", "-x", "a;b"]) {
+    assert.equal((await h.request(`/servers/${s.server}/containers/${bad}/logs`)).status, 400, bad);
+    assert.equal((await h.request(`/servers/${s.server}/containers/${bad}/stop`, json("POST", {}))).status, 400, bad);
+  }
+});

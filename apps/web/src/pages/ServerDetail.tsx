@@ -4,9 +4,9 @@ import { useNavigate, useParams, useSearchParams } from "react-router";
 import { LogViewer } from "@/components/LogViewer";
 import { ResourceChart } from "@/components/ResourceChart";
 import { ServerMeters } from "@/components/ServerMeters";
-import { Button, ConfirmDialog, CopyField, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, useAction } from "@/components/ui";
+import { Button, ConfirmDialog, CopyField, Dialog, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, useAction } from "@/components/ui";
 import { api, type Container, type DockerInfo, type Server, type ServerStats } from "@/lib/api";
-import { formatUptime } from "@/lib/format";
+import { formatBytes, formatUptime } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
 type Tab = "overview" | "setup" | "containers" | "settings";
@@ -224,33 +224,135 @@ function HostKey({ server }: { server: Server }) {
 
 function Containers({ server }: { server: Server }) {
   const { data, error } = useQuery({ queryKey: ["server", server.id, "containers"], queryFn: () => api.get<{ containers: Container[] }>(`/servers/${server.id}/containers`), refetchInterval: 8000 });
+  const [logsOf, setLogsOf] = useState<Container | null>(null);
+  const act = useAction((v: { name: string; action: "start" | "stop" | "restart" }) => api.post(`/servers/${server.id}/containers/${encodeURIComponent(v.name)}/${v.action}`), {
+    success: t("İşlem tamamlandı"),
+    invalidate: [["server", server.id, "containers"]],
+  });
   if (error) return <Notice tone="danger" title={t("Konteynerler alınamadı")}>{error.message}</Notice>;
   if (!data) return <div className="panel h-40 animate-pulse" />;
+  // Panelin kendisi ve Xudbin'in yönettiği konteynerler buradan başlatılıp durdurulmaz (kendi sayfaları var).
+  const controllable = (c: Container) => !c.managed && !(server.kind === "local" && c.name === "xudbin");
   return (
-    <div className="panel overflow-x-auto">
-      <table className="w-full text-left text-[14px]">
-        <thead className="border-b border-line text-[13px] text-muted">
-          <tr>
-            <th className="px-5 py-2.5 font-normal">{t("Ad")}</th>
-            <th className="hidden px-5 py-2.5 font-normal md:table-cell">{t("İmaj")}</th>
-            <th className="px-5 py-2.5 text-right font-normal">{t("Durum")}</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-line">
-          {data.containers.map((c) => (
-            <tr key={c.id}>
-              <td className="px-5 py-3">
-                <div className="font-medium">{c.name}</div>
-                <div className="text-[12px] text-faint">{c.managed ? t("Xudbin tarafından yönetiliyor") : t("Xudbin dışında oluşturulmuş")}</div>
-              </td>
-              <td className="hidden max-w-[16rem] truncate px-5 py-3 font-mono text-[13px] text-muted md:table-cell">{c.image}</td>
-              <td className="px-5 py-3 text-right">
-                <StatusBadge status={c.state} label={c.status} />
-              </td>
+    <>
+      <DiskUsage server={server} />
+      <div className="panel mt-6 overflow-x-auto">
+        <table className="w-full text-left text-[14px]">
+          <thead className="border-b border-line text-[13px] text-muted">
+            <tr>
+              <th className="px-5 py-2.5 font-normal">{t("Ad")}</th>
+              <th className="hidden px-5 py-2.5 font-normal md:table-cell">{t("İmaj")}</th>
+              <th className="px-5 py-2.5 font-normal">{t("Durum")}</th>
+              <th className="px-5 py-2.5 text-right font-normal">{t("İşlemler")}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {data.containers.map((c) => (
+              <tr key={c.id}>
+                <td className="px-5 py-3">
+                  <div className="font-medium">{c.name}</div>
+                  <div className="text-[12px] text-faint">{c.managed ? t("Xudbin tarafından yönetiliyor") : t("Xudbin dışında oluşturulmuş")}</div>
+                </td>
+                <td className="hidden max-w-[16rem] truncate px-5 py-3 font-mono text-[13px] text-muted md:table-cell">{c.image}</td>
+                <td className="px-5 py-3">
+                  <StatusBadge status={c.state} label={c.status} />
+                </td>
+                <td className="px-5 py-3">
+                  <div className="flex justify-end gap-1.5">
+                    <Button size="sm" variant="ghost" onClick={() => setLogsOf(c)}>{t("Loglar")}</Button>
+                    {controllable(c) &&
+                      (c.state === "running" ? (
+                        <>
+                          <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ name: c.name, action: "restart" })}>{t("Yeniden başlat")}</Button>
+                          <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ name: c.name, action: "stop" })}>{t("Durdur")}</Button>
+                        </>
+                      ) : (
+                        <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => act.mutate({ name: c.name, action: "start" })}>{t("Başlat")}</Button>
+                      ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Dialog open={logsOf !== null} onClose={() => setLogsOf(null)} title={logsOf?.name ?? ""} description={t("Son 300 satır")} wide>
+        {logsOf && <ContainerLogs serverId={server.id} name={logsOf.name} />}
+      </Dialog>
+    </>
+  );
+}
+
+function ContainerLogs({ serverId, name }: { serverId: number; name: string }) {
+  const { data, error, isFetching, refetch } = useQuery({
+    queryKey: ["server", serverId, "container-logs", name],
+    queryFn: () => api.get<{ lines: string[] }>(`/servers/${serverId}/containers/${encodeURIComponent(name)}/logs?tail=300`),
+  });
+  if (error) return <Notice tone="danger" title={t("Loglar okunamadı")}>{error.message}</Notice>;
+  return (
+    <div>
+      <div className="h-[24rem] overflow-auto rounded-[10px] border border-line bg-[#141315] px-4 py-3 font-mono text-[12.5px] leading-[1.6] text-[#d9d6d8]">
+        {!data ? (
+          <div className="text-[#8f8a8e]">{t("Yükleniyor...")}</div>
+        ) : data.lines.length === 0 ? (
+          <div className="text-[#8f8a8e]">{t("Henüz çıktı yok.")}</div>
+        ) : (
+          data.lines.map((l, i) => (
+            <div key={i} className="break-all whitespace-pre-wrap">{l}</div>
+          ))
+        )}
+      </div>
+      <div className="mt-3 flex justify-end">
+        <Button size="sm" onClick={() => refetch()} loading={isFetching}>{t("Yenile")}</Button>
+      </div>
+    </div>
+  );
+}
+
+type Disk = {
+  images: { count: number; bytes: number; danglingBytes: number };
+  buildCache: { bytes: number; reclaimableBytes: number };
+  volumes: { count: number; bytes: number };
+  containers: { count: number; bytes: number };
+};
+
+/** Docker'ın diskte kapladığı yer ve elle temizlik (derleme önbelleği + sahipsiz imajlar). */
+function DiskUsage({ server }: { server: Server }) {
+  const { data, error } = useQuery({ queryKey: ["server", server.id, "disk"], queryFn: () => api.get<{ disk: Disk }>(`/servers/${server.id}/disk`), staleTime: 60_000 });
+  const prune = useAction(() => api.post<{ reclaimed: number }>(`/servers/${server.id}/prune`, { buildCache: true, danglingImages: true }), {
+    success: (r) => t("{size} yer açıldı", { size: formatBytes(r.reclaimed) }),
+    invalidate: [["server", server.id, "disk"]],
+  });
+  if (error) return <Notice tone="warn" title={t("Disk kullanımı okunamadı")}>{error.message}</Notice>;
+  if (!data) return <div className="panel h-24 animate-pulse" />;
+  const d = data.disk;
+  const reclaimable = d.buildCache.reclaimableBytes + d.images.danglingBytes;
+  const rows: [string, string, string][] = [
+    [t("İmajlar"), formatBytes(d.images.bytes), t("{n} imaj", { n: d.images.count })],
+    [t("Derleme önbelleği"), formatBytes(d.buildCache.bytes), t("{size} temizlenebilir", { size: formatBytes(d.buildCache.reclaimableBytes) })],
+    [t("Kalıcı klasörler"), formatBytes(d.volumes.bytes), t("{n} volume", { n: d.volumes.count })],
+    [t("Konteynerler"), formatBytes(d.containers.bytes), t("{n} konteyner", { n: d.containers.count })],
+  ];
+  return (
+    <div className="panel px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-[15px] font-medium">{t("Docker disk kullanımı")}</div>
+          <div className="mt-0.5 text-[13px] text-muted">{t("Temizlik yalnız derleme önbelleğini ve sahipsiz imajları siler; uygulamalara, geri dönüş imajlarına ve kalıcı klasörlere dokunmaz.")}</div>
+        </div>
+        <Button onClick={() => prune.mutate()} loading={prune.isPending} disabled={reclaimable === 0}>
+          {reclaimable > 0 ? t("{size} temizle", { size: formatBytes(reclaimable) }) : t("Temizlenecek bir şey yok")}
+        </Button>
+      </div>
+      <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-4">
+        {rows.map(([label, value, note]) => (
+          <div key={label}>
+            <dt className="text-[13px] text-muted">{label}</dt>
+            <dd className="text-[16px] font-medium">{value}</dd>
+            <dd className="text-[12px] text-faint">{note}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
