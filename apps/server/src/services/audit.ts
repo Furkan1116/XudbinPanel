@@ -9,6 +9,7 @@ import type { AppEnv } from "../lib/types.js";
  */
 const LABELS: [RegExp, string, string?][] = [
   [/^POST \/api\/apps$/, "Uygulama oluşturdu"],
+  [/^POST \/api\/apps\/\d+\/clone$/, "Uygulamayı kopyaladı"],
   [/^PATCH \/api\/apps\/\d+$/, "Uygulama ayarlarını değiştirdi"],
   [/^DELETE \/api\/apps\/\d+$/, "Uygulamayı sildi"],
   [/^PUT \/api\/apps\/\d+\/env$/, "Ortam değişkenlerini değiştirdi"],

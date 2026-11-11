@@ -864,6 +864,7 @@ function Settings({ app }: { app: App }) {
 
       {app.sourceType !== "compose" && !app.parentAppId && <SourceChange app={app} />}
 
+      {!app.secretsHidden && app.parentAppId === null && <CloneApp app={app} />}
       <Section title={t("Uygulamayı sil")} description={t("Konteynerler, imajlar ve alan adı bağlantıları silinir. Kalıcı depolama klasörleri sunucuda kalır.")}>
         <Button variant="danger" onClick={() => setConfirm(true)}>{t("Uygulamayı sil")}</Button>
       </Section>
@@ -1037,5 +1038,34 @@ function FrameworkSection(props: {
         </Field>
       )}
     </div>
+  );
+}
+
+/** Uygulamanın ayarlarını yeni bir uygulamaya kopyalar (ör. canlının yanına deneme ortamı). */
+function CloneApp({ app }: { app: App }) {
+  const navigate = useNavigate();
+  const [name, setName] = useState(`${app.name} kopya`);
+  const clone = useAction(() => api.post<{ app: App }>(`/apps/${app.id}/clone`, { name }), {
+    success: t("Kopya oluşturuldu. Yayına almak için deploy et."),
+    onSuccess: (r) => navigate(`/apps/${r.app.id}`),
+  });
+  return (
+    <Section
+      title={t("Uygulamayı kopyala")}
+      description={t("Kaynak, derleme ayarları, ortam değişkenleri, güvenlik ayarları ve zamanlanmış görevler yeni bir uygulamaya kopyalanır. Alan adları, kalıcı klasörlerin içeriği ve webhook anahtarları kopyalanmaz; kopya sen deploy edene kadar çalışmaz.")}
+    >
+      <form
+        className="flex flex-wrap items-end gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          clone.mutate();
+        }}
+      >
+        <Field label={t("Kopyanın adı")}>
+          <input className="input w-64" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} required />
+        </Field>
+        <Button type="submit" loading={clone.isPending} disabled={!name.trim()}>{t("Kopyala")}</Button>
+      </form>
+    </Section>
   );
 }

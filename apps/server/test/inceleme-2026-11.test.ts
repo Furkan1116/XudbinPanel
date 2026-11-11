@@ -214,3 +214,32 @@ test("sunucu konteyner uçları: geçersiz konteyner adı Docker'a gitmeden redd
     assert.equal((await h.request(`/servers/${s.server}/containers/${bad}/stop`, json("POST", {}))).status, 400, bad);
   }
 });
+
+test("uygulama kopyalama: ayarlar ve görevler kopyalanır; alan adı, webhook anahtarı ve sunucu erişimi kopyalanmaz", async () => {
+  const s = seed();
+  const src = s.app({ source_type: "image", image: "nginx:1", env: encrypt("A=1\n"), host_access: 1, auto_deploy: 1, port: 8080, webhook_secret: "eski-sir" });
+  db.prepare("INSERT INTO domains (app_id, host, https, generated, created_at) VALUES (?, ?, 1, 0, ?)").run(src, `ozel-${s.t}.example.com`, now());
+  db.prepare("INSERT INTO cron_jobs (app_id, name, schedule, command, enabled, timeout_min, created_at) VALUES (?, 'temizlik', '0 3 * * *', 'true', 1, 10, ?)").run(src, now());
+  const h = api(s.user("admin"), "admin");
+  const res = await h.request(`/apps/${src}/clone`, json("POST", { name: "Deneme kopya" }));
+  assert.equal(res.status, 201, await res.clone().text());
+  const { app } = (await res.json()) as { app: { id: number; name: string } };
+  const row = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as Record<string, unknown>;
+  const orig = db.prepare("SELECT * FROM apps WHERE id = ?").get(src) as Record<string, unknown>;
+  assert.equal(row.name, "Deneme kopya");
+  assert.equal(row.image, "nginx:1");
+  assert.equal(row.port, 8080);
+  assert.equal(row.env, orig.env);
+  assert.equal(row.host_access, 0);
+  assert.equal(row.auto_deploy, 0);
+  assert.equal(row.container, null);
+  assert.notEqual(row.slug, orig.slug);
+  assert.notEqual(row.webhook_token, orig.webhook_token);
+  assert.notEqual(row.webhook_secret, "eski-sir");
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM cron_jobs WHERE app_id = ?").get(app.id) as { n: number }).n, 1);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM domains WHERE app_id = ? AND generated = 0").get(app.id) as { n: number }).n, 0);
+  // İzleyici (sırları göremeyen) kopyalayamaz.
+  const viewer = s.user("member");
+  db.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'viewer', ?)").run(s.project, viewer, now());
+  assert.equal((await api(viewer, "member").request(`/apps/${src}/clone`, json("POST", { name: "x" }))).status, 403);
+});

@@ -1495,4 +1495,12 @@ export const en: Record<string, string> = {
   "Bu sunucuda şu an deploy sürüyor; bitince tekrar dene": "A deploy is running on this server; try again when it finishes",
   "Konteyneri başlattı/durdurdu": "Started/stopped a container",
   "Docker önbelleğini temizledi": "Cleaned up the Docker cache",
+  // Uygulama kopyalama
+  "Uygulamayı kopyala": "Copy the app",
+  "Kaynak, derleme ayarları, ortam değişkenleri, güvenlik ayarları ve zamanlanmış görevler yeni bir uygulamaya kopyalanır. Alan adları, kalıcı klasörlerin içeriği ve webhook anahtarları kopyalanmaz; kopya sen deploy edene kadar çalışmaz.": "The source, build settings, environment variables, security settings and scheduled jobs are copied to a new app. Domains, the contents of persistent volumes and webhook keys are not copied; the copy does not run until you deploy it.",
+  "Kopyanın adı": "Name of the copy",
+  "Kopya oluşturuldu. Yayına almak için deploy et.": "Copy created. Deploy it to bring it online.",
+  "PR önizlemeleri kopyalanamaz": "PR previews can't be copied",
+  "Uygulamayı kopyalamak için yazma yetkisi gerekiyor": "You need write access to copy the app",
+  "Uygulamayı kopyaladı": "Copied the app",
 };
