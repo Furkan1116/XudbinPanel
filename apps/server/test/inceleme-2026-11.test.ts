@@ -21,7 +21,7 @@ function seed() {
   const t = tag();
   const server =
     (db.prepare("SELECT id FROM servers LIMIT 1").get() as { id: number } | undefined)?.id ??
-    Number(db.prepare("INSERT INTO servers (name, kind, status, created_at) VALUES ('local', 'local', 'ready', ?)").run(now()).lastInsertRowid);
+    Number(db.prepare("INSERT INTO servers (name, kind, status, created_at) VALUES ('local', 'local', 'pending', ?)").run(now()).lastInsertRowid);
   const project = Number(db.prepare("INSERT INTO projects (name, description, created_at) VALUES (?, '', ?)").run(`p-${t}`, now()).lastInsertRowid);
   const app = (extra: Record<string, string | number> = {}) => {
     const cols = { project_id: project, server_id: server, name: `a-${tag()}`, slug: `a-${tag()}`, source_type: "image", webhook_token: `w-${tag()}`, created_at: now(), ...extra };
