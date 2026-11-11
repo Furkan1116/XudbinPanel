@@ -17,6 +17,7 @@ import {
   deleteDatabase,
   ENGINES,
   getDatabase,
+  importDump,
   restoreBackup,
   startDatabase,
   verifyBackup,
@@ -30,6 +31,7 @@ import type { AppEnv } from "../lib/types.js";
 import { s3Delete } from "../lib/s3.js";
 import { dockerFor } from "../services/docker.js";
 import { getServer } from "../services/servers.js";
+import { beginUpload, newTempUpload, saveUpload, UploadLimitError } from "../services/uploads.js";
 
 /** `secrets` false ise parola ve bağlantı adreslerindeki parola maskelenir (adresin geri kalanı görünür). */
 function publicDb(d: DatabaseRow, secrets = true) {
@@ -187,6 +189,47 @@ export const databaseRoutes = new Hono<AppEnv>()
       throw new HttpError(500, `Geri yüklenemedi: ${(err as Error).message}`);
     }
     return c.json({ ok: true });
+  })
+
+  // Döküm içe aktarma: gövde ham dosyadır (.sql, .sql.gz, mongodump arşivi). Önce mevcut verinin yedeği alınır;
+  // yedek alınamazsa içe aktarma başlamaz (yanlış dosya veriyi bozarsa geri dönülebilsin).
+  .post("/:id/import/upload", async (c) => {
+    const d = load(idParam(c));
+    if (d.engine === "redis") throw new HttpError(422, "Redis'e panelden döküm aktarılamaz; .rdb dosyasını elle yükle");
+    if (d.status !== "running") throw new HttpError(422, "İçe aktarmak için veritabanı çalışıyor olmalı");
+    if (!c.req.raw.body) throw new HttpError(400, "Dosya yok");
+    let slot: ReturnType<typeof beginUpload>;
+    try {
+      slot = beginUpload(c.get("user").id);
+    } catch (err) {
+      if (err instanceof UploadLimitError) throw new HttpError(err.status, err.message);
+      throw err;
+    }
+    const tmp = newTempUpload();
+    const progress = { bytes: 0 };
+    try {
+      try {
+        await saveUpload(c.req.raw.body, tmp.file, { maxBytes: slot.maxBytes, progress });
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      if (c.req.query("backup") !== "0") {
+        try {
+          await createBackup(d);
+        } catch (err) {
+          throw new HttpError(500, `İçe aktarmadan önce yedek alınamadı, işlem başlatılmadı: ${(err as Error).message}`);
+        }
+      }
+      try {
+        await importDump(d, tmp.file);
+      } catch (err) {
+        throw new HttpError(500, `İçe aktarılamadı: ${(err as Error).message}`);
+      }
+      return c.json({ ok: true, size: progress.bytes });
+    } finally {
+      slot.finish(progress.bytes);
+      fs.rmSync(tmp.file, { force: true });
+    }
   })
 
   // Yedeği geçici bir konteynere geri yükleyip dener; arka planda çalışır, sonuç yedek listesinde görünür.

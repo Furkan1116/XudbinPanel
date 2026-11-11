@@ -209,8 +209,16 @@ on("GET", "/projects/:id", ({ params }) => {
     project: { id: p.id, name: p.name, description: p.description },
     apps: D.apps.filter((a) => a.projectId === p.id).map(({ id, name, sourceType, status, server, domains, gitUrl, image, framework }) => ({ id, name, sourceType, status, server, domains, gitUrl, image, framework })),
     databases: D.databases.filter((d) => d.projectId === p.id).map((d) => ({ id: d.id, name: d.name, engine: d.engine, version: d.version, status: d.status, serverName: d.server.name })),
+    sharedEnv: "SENTRY_DSN=https://ornek@sentry.io/42\nSMTP_HOST=smtp.ornekfirma.com.tr\n",
   };
 });
+on("PUT", "/projects/:id/env", () => ({ ok: true }));
+on("POST", "/apps/:id/clone", ({ params }) => ({ app: D.apps.find((x) => x.id === num(params.id)) }));
+on("GET", "/servers/:id/disk", () => ({ disk: { images: { count: 23, bytes: 8.4e9, danglingBytes: 6.1e8 }, buildCache: { bytes: 3.2e9, reclaimableBytes: 2.7e9 }, volumes: { count: 9, bytes: 1.9e9 }, containers: { count: 14, bytes: 1.4e8 } } }));
+on("POST", "/servers/:id/prune", () => ({ reclaimed: 3.3e9 }));
+on("GET", "/servers/:id/containers/:ref/logs", () => ({ lines: ["2026-11-11T09:00:01Z listening on :8080", "2026-11-11T09:00:02Z ready"] }));
+on("POST", "/servers/:id/containers/:ref/:action", () => ({ ok: true }));
+on("POST", "/databases/:id/import/upload", () => ({ ok: true, size: 0 }));
 on("GET", "/projects/:id/members", ({ params }) => ({
   members:
     num(params.id) === 2

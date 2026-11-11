@@ -62,3 +62,19 @@ The **Terminal** tab on the app page opens a command line in the app's running c
 - Opening a terminal is written to the audit log; what you type and the output are not recorded.
 - The terminal closes, and the shell in the container is killed, after 15 minutes without input or when you close the tab. Each user can have at most 3 terminals open at once.
 - Changes you make inside the container are lost on the next deploy; anything that must persist belongs in a persistent volume.
+
+## Shared environment variables
+
+Variables you put in **Shared environment variables** on the project page are given to every app in that project (a shared API key, SMTP settings and so on). If an app defines its own value under the same name, the app's value wins. They are not given to PR previews, which only use their own "preview environment variables". Changes take effect when the apps are redeployed.
+
+## Copying an app
+
+**Copy the app** on the app's **Settings** tab creates a new app with the same settings: the source, build settings, environment variables, security settings and scheduled jobs are copied. Domains, the contents of persistent volumes, webhook keys and the "host access" approval are not copied. The copy does not run until you deploy it, and auto-deploy starts switched off.
+
+## Server maintenance
+
+On the server page's **Containers** tab:
+
+- You can read the latest logs of every container.
+- Containers created outside Xudbin can be started and stopped. Containers managed by Xudbin (apps, databases, Caddy) are managed from their own pages.
+- **Docker disk usage** shows the space taken by images, the build cache and persistent volumes. **Clean up** only removes the build cache and dangling images; it does not touch apps, rollback images or persistent volumes. It does not run while a deploy is in progress.

@@ -2,7 +2,7 @@ import { db } from "../db.js";
 import { cronMatches, parseCron } from "../lib/cron.js";
 import { decrypt } from "../lib/crypto.js";
 import { timeZone } from "./analytics.js";
-import { demuxLogs, fillPlaceholders, getApp, parseEnv } from "./deploy.js";
+import { demuxLogs, effectiveEnv, fillPlaceholders, getApp } from "./deploy.js";
 import { dockerFor, removeContainer, withTimeout } from "./docker.js";
 import { resourceLimits } from "../lib/limits.js";
 import { ensureProjectNetwork } from "./networks.js";
@@ -34,7 +34,7 @@ export async function runCronJob(jobId: number, trigger: "schedule" | "manual" =
   let exitCode: number | null = null;
   let output = "";
   try {
-    const filled = fillPlaceholders(parseEnv(decrypt(app.env)), app.id, server.https_mode !== "off");
+    const filled = fillPlaceholders(effectiveEnv(app), app.id, server.https_mode !== "off");
     const env = { PORT: String(app.port), XUDBIN_URL: filled.values.XUDBIN_URL!, XUDBIN_CRON: job.name, ...filled.env };
     const volumes = JSON.parse(app.volumes || "[]") as { name: string; path: string }[];
     const container = await docker.createContainer({

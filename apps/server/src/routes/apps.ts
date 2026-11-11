@@ -18,6 +18,7 @@ import {
   demuxLogs,
   enqueueDeploy,
   getApp,
+  effectiveEnv,
   mergeEnvText,
   parseEnv,
   shallowClone,
@@ -29,7 +30,7 @@ import { config } from "../config.js";
 import { getSettings } from "../lib/settings.js";
 import fs from "node:fs";
 import path from "node:path";
-import { beginUpload, extractZip, newTempUpload, saveUpload, storeAppUpload, tempUploadFile, UploadLimitError } from "../services/uploads.js";
+import { beginUpload, extractZip, latestAppUpload, newTempUpload, saveUpload, storeAppUpload, tempUploadFile, UploadLimitError } from "../services/uploads.js";
 import { getServer } from "../services/servers.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "../services/doctor.js";
 import { scanApp } from "../services/scan.js";
@@ -579,7 +580,7 @@ export const appRoutes = new Hono<AppEnv>()
     const hosts = servingDomains(app.id).map((d) => d.host);
     const probe = await probeHttp(docker, app.container, app.port, hosts[0] ?? `xb-${app.slug}`, app.health_path || "/");
     const logs = await docker.getContainer(app.container).logs({ stdout: true, stderr: true, tail: 400 }).catch(() => Buffer.from(""));
-    const findings = diagnose(demuxLogs(logs as Buffer), { framework: app.framework, env: parseEnv(decrypt(app.env)), hosts, status: probe.status });
+    const findings = diagnose(demuxLogs(logs as Buffer), { framework: app.framework, env: effectiveEnv(app), hosts, status: probe.status });
     return c.json({ probe, healthy: probe.status !== null && isHealthy(probe.status, Boolean(app.health_path)), findings });
   })
 
@@ -784,6 +785,76 @@ export const appRoutes = new Hono<AppEnv>()
     return c.json({ deploymentId }, 202);
   })
 
+  // Uygulamayı kopyalar: kaynak, derleme ayarları, ortam değişkenleri, güvenlik ayarları ve zamanlanmış görevler
+  // yeni bir uygulamaya aktarılır (ör. canlının yanına bir "staging"). Kopya deploy edilmeden oluşur; alan adları,
+  // kalıcı klasörlerin içeriği, webhook anahtarları ve "sunucu erişimi" onayı kopyalanmaz.
+  .post("/:id/clone", async (c) => {
+    const src = loadApp(idParam(c));
+    if (src.parent_app_id) throw new HttpError(422, "PR önizlemeleri kopyalanamaz");
+    // Kopya ortam değişkenlerini de taşır: sırları görebilen kopyalayabilir.
+    if (!secretsVisible(c, src.project_id)) throw new HttpError(403, "Uygulamayı kopyalamak için yazma yetkisi gerekiyor");
+    const input = await body(c, z.object({ name: z.string().trim().min(1, "İsim gerekli").max(60), serverId: z.number().int().optional() }));
+    const server = getServer(input.serverId ?? src.server_id);
+    const slug = makeSlug(input.name);
+    const copy: Record<string, string | number | null> = {
+      project_id: src.project_id,
+      server_id: server.id,
+      name: input.name,
+      slug,
+      source_type: src.source_type,
+      git_url: src.git_url,
+      git_branch: src.git_branch,
+      git_token: src.git_token,
+      git_app_url: src.git_app_url ?? null,
+      build_type: src.build_type,
+      dockerfile_path: src.dockerfile_path,
+      build_context: src.build_context,
+      image: src.image,
+      compose_file: src.compose_file,
+      compose_service: src.compose_service,
+      port: src.port,
+      command: src.command,
+      env: src.env,
+      preview_env: src.preview_env,
+      volumes: src.volumes,
+      security: src.security,
+      framework: src.framework,
+      build_options: src.build_options,
+      cpu_limit: src.cpu_limit,
+      memory_limit: src.memory_limit,
+      http_check: src.http_check,
+      health_path: src.health_path,
+      uptime_enabled: src.uptime_enabled,
+      kind: src.kind,
+      replicas: src.replicas,
+      // Kopya kendiliğinden deploy olmasın: otomatik deploy ve önizlemeler kapalı başlar.
+      auto_deploy: 0,
+      previews_enabled: 0,
+      host_access: 0,
+      webhook_token: randomToken(24),
+      webhook_secret: randomToken(24),
+      webhook_signed: 1,
+      created_at: Date.now(),
+    };
+    const keys = Object.keys(copy);
+    const id = Number(db.prepare(`INSERT INTO apps (${keys.join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`).run(...Object.values(copy)).lastInsertRowid);
+    for (const j of db.prepare("SELECT name, schedule, command, enabled, timeout_min FROM cron_jobs WHERE app_id = ?").all(src.id) as { name: string; schedule: string; command: string; enabled: number; timeout_min: number }[]) {
+      db.prepare("INSERT INTO cron_jobs (app_id, name, schedule, command, enabled, timeout_min, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, j.name, j.schedule, j.command, j.enabled, j.timeout_min, Date.now());
+    }
+    if (src.source_type === "upload") {
+      const zip = latestAppUpload(src.slug);
+      if (zip) {
+        const tmp = newTempUpload();
+        fs.mkdirSync(path.dirname(tmp.file), { recursive: true });
+        fs.copyFileSync(zip, tmp.file);
+        storeAppUpload(slug, tmp.file);
+      }
+    }
+    const host = generatedHost(slug, server);
+    if (host) db.prepare("INSERT INTO domains (app_id, host, https, generated, created_at) VALUES (?, ?, ?, 1, ?)").run(id, host, server.https_mode === "off" ? 0 : 1, Date.now());
+    return c.json({ app: publicApp(loadApp(id)) }, 201);
+  })
+
   .post("/:id/webhook/regenerate", (c) => {
     const app = loadApp(idParam(c));
     db.prepare("UPDATE apps SET webhook_token = ?, webhook_secret = ? WHERE id = ?").run(randomToken(24), randomToken(24), app.id);
@@ -941,7 +1012,18 @@ export const projectRoutes = new Hono<AppEnv>()
          FROM databases d JOIN servers s ON s.id = d.server_id WHERE d.project_id = ? ORDER BY d.id`,
       )
       .all(id);
-    return c.json({ project, apps, databases });
+    // Ortak ortam değişkenleri sırdır: yalnız yönetici ve geliştiriciye gösterilir.
+    const secrets = secretsVisible(c, id);
+    const sharedEnv = secrets ? decrypt((db.prepare("SELECT env FROM projects WHERE id = ?").get(id) as { env: string | null }).env) : "";
+    return c.json({ project, apps, databases, sharedEnv, secretsHidden: !secrets });
+  })
+  // Projedeki tüm uygulamalara verilen ortak ortam değişkenleri (uygulamanın kendi değeri önceliklidir).
+  .put("/:id/env", async (c) => {
+    const id = idParam(c);
+    must(db.prepare("SELECT id FROM projects WHERE id = ?").get(id), "Proje bulunamadı");
+    const { env } = await body(c, z.object({ env: z.string().max(200_000) }));
+    db.prepare("UPDATE projects SET env = ? WHERE id = ?").run(env.trim() ? encrypt(env) : null, id);
+    return c.json({ ok: true, note: "Değişikliklerin geçerli olması için projedeki uygulamaları yeniden deploy et." });
   })
   // Proje üyeleri (yalnız yönetici yönetir).
   .get("/:id/members", (c) => {

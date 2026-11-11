@@ -127,6 +127,8 @@ function Backups({ d, backups }: { d: Database; backups: Backup[] }) {
         </div>
       </div>
 
+      {!d.secretsHidden && d.engine !== "redis" && <ImportDump d={d} />}
+
       <Section title={t("Yedekler")} description={t("Yedekler panelin sunucusunda, uzak depolama tanımlıysa orada da saklanır. \"Doğrula\" yedeği geçici bir veritabanına geri yükleyip dener.")} actions={<Button variant="primary" onClick={() => create.mutate()} loading={create.isPending} disabled={d.status !== "running"}>{t("Şimdi yedekle")}</Button>}>
         {backups.length === 0 ? (
           <div className="panel px-5 py-6 text-[14px] text-muted">{t("Henüz yedek yok.")}</div>
@@ -210,5 +212,51 @@ function Settings({ d }: { d: Database }) {
         </div>
       </ConfirmDialog>
     </>
+  );
+}
+
+/** Başka bir yerden alınmış dökümü (pg_dump, mysqldump, mongodump --archive; düz ya da .gz) veritabanına aktarır. */
+function ImportDump({ d }: { d: Database }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [confirm, setConfirm] = useState(false);
+  const run = useAction(
+    async () => {
+      const res = await fetch(`/api/databases/${d.id}/import/upload`, { method: "POST", body: file, headers: { "content-type": "application/octet-stream" }, credentials: "same-origin" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? t("Yükleme başarısız ({status})", { status: res.status }));
+    },
+    { success: t("Döküm içe aktarıldı."), invalidate: [["database", d.id]], onSuccess: () => setFile(null) },
+  );
+  const hint = d.engine === "mongo" ? t("mongodump --archive çıktısı (.archive ya da .gz)") : t("pg_dump / mysqldump çıktısı (.sql ya da .sql.gz)");
+  return (
+    <Section
+      title={t("Döküm içe aktar")}
+      description={t("Başka bir sunucudan aldığın dökümü bu veritabanına yükler. Önce mevcut verinin yedeği otomatik alınır; yedek alınamazsa içe aktarma başlamaz.")}
+    >
+      <div className="panel flex flex-wrap items-center gap-3 px-5 py-4">
+        <input
+          type="file"
+          className="min-w-0 flex-1 text-[14px] file:mr-3 file:rounded-md file:border file:border-line-strong file:bg-surface file:px-3 file:py-1.5 file:text-[13px] file:text-fg"
+          accept=".sql,.gz,.archive,.dump"
+          aria-label={t("Döküm dosyası")}
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
+        <span className="text-[13px] text-faint">{hint}</span>
+        <Button onClick={() => setConfirm(true)} disabled={!file || d.status !== "running"} loading={run.isPending}>
+          {run.isPending ? t("Aktarılıyor...") : t("İçe aktar")}
+        </Button>
+      </div>
+      <ConfirmDialog
+        open={confirm}
+        onClose={() => setConfirm(false)}
+        onConfirm={() => {
+          setConfirm(false);
+          run.mutate();
+        }}
+        title={t("Döküm içe aktarılsın mı?")}
+        description={t("Dökümdeki tablolar bu veritabanındaki aynı adlı tabloların üzerine yazılabilir. Önce otomatik bir yedek alınır.")}
+        confirmLabel={t("İçe aktar")}
+      />
+    </Section>
   );
 }

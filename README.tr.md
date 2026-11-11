@@ -46,6 +46,10 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Kalıcı klasör (volume) yedekleri: zamanlanmış, S3'e de yüklenebilen, tek tıkla geri yükleme
 - Canlı loglarda anlık filtre; geçmiş loglarda (son 1 saat – 14 gün) tüm kopyalar ve Compose servislerinde arama
 - **Web terminali:** uygulamanın çalışan konteynerinde tarayıcıdan komut satırı (Compose servisleri ve kopyalar dahil); yalnız yönetici ve proje geliştiricilerine açık, açılışı işlem kaydına geçer
+- **Ortak ortam değişkenleri:** proje düzeyinde tanımlanır, projedeki tüm uygulamalara verilir (uygulamanın kendi değeri önceliklidir; PR önizlemelerine verilmez)
+- **Uygulamayı kopyalama:** ayarlar, ortam değişkenleri ve zamanlanmış görevlerle yeni bir uygulama (ör. deneme ortamı)
+- **Veritabanı içe aktarma:** `.sql` / `.sql.gz` ya da mongodump arşivi panelden yüklenir; önce otomatik yedek alınır
+- **Sunucu bakımı:** her konteynerin logları, Xudbin dışındaki konteynerleri başlat/durdur, Docker disk dökümü ve tek tıkla temizlik
 - Şifreli ortam değişkenleri, kalıcı depolama klasörleri, CPU/bellek izleme
 
 **Veritabanları**

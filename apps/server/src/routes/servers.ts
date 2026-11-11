@@ -23,6 +23,15 @@ import { generateSshKey, hostKeyFingerprint, sshExec } from "../services/ssh.js"
 import { forgetDockerClient } from "../services/docker.js";
 import { checkDomain } from "../services/dns-check.js";
 import { ensureTunnel, tunnelStatus } from "../services/tunnel.js";
+import { demuxLogs } from "../services/deploy.js";
+import { dockerDiskUsage, pruneNow } from "../services/maintenance.js";
+import { withTimeout } from "../services/docker.js";
+
+/** Konteyner adı ya da kimliği; Docker API yoluna yazıldığı için yalnız güvenli karakterler. */
+const containerRef = (v: string | undefined) => {
+  if (!v || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(v)) throw new HttpError(400, "Geçersiz konteyner");
+  return v;
+};
 
 // Alan adı veya IP; boşluk ve satır sonu içeremez (SSH ayar dosyasına yazılıyor).
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$|^\[?[0-9a-f:.]+\]?$/i;
@@ -262,6 +271,63 @@ export const serverRoutes = new Hono<AppEnv>()
       return c.json({ containers: await listContainers(dockerFor(s)) });
     } catch (err) {
       throw new HttpError(503, `Docker'a bağlanılamadı: ${(err as Error).message}`);
+    }
+  })
+
+  // Konteynerin son logları (Xudbin dışında oluşturulmuş konteynerler dahil).
+  .get("/:id/containers/:ref/logs", async (c) => {
+    const s = getServer(idParam(c));
+    const tail = Math.min(Math.max(Number(c.req.query("tail")) || 300, 10), 2000);
+    try {
+      const raw = (await withTimeout(dockerFor(s).getContainer(containerRef(c.req.param("ref"))).logs({ stdout: true, stderr: true, tail, timestamps: true }), 15_000)) as Buffer;
+      return c.json({ lines: demuxLogs(raw) });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError((err as { statusCode?: number }).statusCode === 404 ? 404 : 503, `Loglar okunamadı: ${(err as Error).message}`);
+    }
+  })
+
+  // Xudbin dışında oluşturulmuş konteyneri başlat/durdur/yeniden başlat. Xudbin'in yönettikleri (uygulamalar,
+  // veritabanları, Caddy) kendi sayfalarından yönetilir; buradan dokunmak panelin bildiği durumu bozardı.
+  .post("/:id/containers/:ref/:action{start|stop|restart}", async (c) => {
+    const s = getServer(idParam(c));
+    const action = c.req.param("action") as "start" | "stop" | "restart";
+    const container = dockerFor(s).getContainer(containerRef(c.req.param("ref")));
+    let info;
+    try {
+      info = await withTimeout(container.inspect(), 10_000);
+    } catch {
+      throw new HttpError(404, "Konteyner bulunamadı");
+    }
+    const name = info.Name.replace(/^\//, "");
+    if (info.Config.Labels?.["xudbin.managed"] === "true") throw new HttpError(422, "Bu konteyneri Xudbin yönetiyor; uygulamanın ya da veritabanının kendi sayfasını kullan");
+    if (s.kind === "local" && name === "xudbin") throw new HttpError(422, "Panelin kendi konteyneri buradan durdurulamaz");
+    try {
+      if (action === "start") await container.start();
+      if (action === "stop") await container.stop({ t: 10 });
+      if (action === "restart") await container.restart({ t: 10 });
+    } catch (err) {
+      if ((err as { statusCode?: number }).statusCode !== 304) throw new HttpError(500, (err as Error).message);
+    }
+    return c.json({ ok: true });
+  })
+
+  // Docker'ın disk kullanımı ve elle temizlik.
+  .get("/:id/disk", async (c) => {
+    const s = getServer(idParam(c));
+    try {
+      return c.json({ disk: await withTimeout(dockerDiskUsage(s.id), 30_000) });
+    } catch (err) {
+      throw new HttpError(503, `Disk kullanımı okunamadı: ${(err as Error).message}`);
+    }
+  })
+  .post("/:id/prune", async (c) => {
+    const s = getServer(idParam(c));
+    const input = await body(c, z.object({ buildCache: z.boolean().default(true), danglingImages: z.boolean().default(true) }));
+    try {
+      return c.json(await pruneNow(s.id, input));
+    } catch (err) {
+      throw new HttpError(409, (err as Error).message);
     }
   });
 

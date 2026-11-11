@@ -12,7 +12,7 @@ import { t } from "@/lib/i18n";
 
 type ProjectApp = Pick<App, "id" | "name" | "sourceType" | "status" | "server" | "domains" | "gitUrl" | "image" | "framework">;
 type ProjectDb = { id: number; name: string; engine: string; version: string; status: string; serverName: string };
-type ProjectData = { project: { id: number; name: string; description: string }; apps: ProjectApp[]; databases: ProjectDb[] };
+type ProjectData = { project: { id: number; name: string; description: string }; apps: ProjectApp[]; databases: ProjectDb[]; sharedEnv: string; secretsHidden?: boolean };
 
 const SOURCE_ICON = { git: GitBranch, image: Package, compose: Layers, upload: FolderUp };
 
@@ -91,6 +91,8 @@ export function ProjectDetailPage() {
           </div>
         )}
       </Section>
+
+      {!data.secretsHidden && <SharedEnv projectId={project.id} initial={data.sharedEnv} />}
 
       <Members projectId={id} />
 
@@ -303,6 +305,44 @@ function Members({ projectId }: { projectId: number }) {
           </form>
         )}
       </div>
+    </Section>
+  );
+}
+
+/** Projedeki tüm uygulamalara verilen ortak ortam değişkenleri (ör. ortak API anahtarı, veritabanı adresi). */
+function SharedEnv({ projectId, initial }: { projectId: number; initial: string }) {
+  // Proje verisi birkaç saniyede bir yenilenir; yazılan metin o yenilemelerle silinmesin diye yerel durumda tutulur.
+  const [env, setEnv] = useState(initial);
+  const [saved, setSaved] = useState(initial);
+  const save = useAction(() => api.put(`/projects/${projectId}/env`, { env }), {
+    success: t("Kaydedildi. Geçerli olması için uygulamaları yeniden deploy et."),
+    invalidate: [["project", projectId]],
+    onSuccess: () => setSaved(env),
+  });
+  return (
+    <Section
+      title={t("Ortak ortam değişkenleri")}
+      description={t("Bu projedeki tüm uygulamalara verilir. Bir uygulama aynı adla kendi değerini tanımlarsa onunki geçerli olur. PR önizlemelerine verilmez.")}
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        <textarea
+          className="input h-40 w-full font-mono text-[13px] leading-relaxed"
+          spellCheck={false}
+          value={env}
+          onChange={(e) => setEnv(e.target.value)}
+          placeholder={"SENTRY_DSN=https://...\nSMTP_HOST=smtp.ornek.com"}
+          aria-label={t("Ortak ortam değişkenleri")}
+        />
+        <div className="mt-3 flex items-center gap-3">
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={env === saved}>{t("Kaydet")}</Button>
+          <span className="text-[13px] text-faint">{t("Her satıra bir değişken: ANAHTAR=değer. Değerler şifrelenerek saklanır.")}</span>
+        </div>
+      </form>
     </Section>
   );
 }

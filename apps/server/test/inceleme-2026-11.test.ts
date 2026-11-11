@@ -133,3 +133,113 @@ test("panel yeniden başlayınca: süren kesinti geri yüklenir, yarım kalan ye
   assert.equal((db.prepare("SELECT status FROM backups WHERE id = ?").get(backup) as { status: string }).status, "failed");
   db.prepare("UPDATE uptime_incidents SET ended_at = ? WHERE app_id = ?").run(now(), app);
 });
+
+test("ortak ortam değişkenleri: uygulamanınki önceliklidir, PR önizlemesine verilmez", async () => {
+  const { effectiveEnv } = await import("../src/services/deploy.js");
+  const s = seed();
+  db.prepare("UPDATE projects SET env = ? WHERE id = ?").run(encrypt("ORTAK=proje\nAYNI=proje\n"), s.project);
+  const app = s.app({ env: encrypt("AYNI=uygulama\nKENDI=1\n") });
+  const row = db.prepare("SELECT * FROM apps WHERE id = ?").get(app) as Parameters<typeof effectiveEnv>[0];
+  assert.deepEqual(effectiveEnv(row), { ORTAK: "proje", AYNI: "uygulama", KENDI: "1" });
+  // Önizleme uygulaması (parent_app_id dolu) üretim sırlarını almaz.
+  assert.deepEqual(effectiveEnv({ ...row, parent_app_id: app }), { AYNI: "uygulama", KENDI: "1" });
+
+  // API: geliştirici okur/yazar, izleyici ne görür ne yazar.
+  const dev = s.user("member");
+  const viewer = Number(db.prepare("INSERT INTO users (email, name, password_hash, role, created_at) VALUES (?, 'v', 'x', 'member', ?)").run(`viewer-${tag()}@t`, now()).lastInsertRowid);
+  db.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'developer', ?), (?, ?, 'viewer', ?)").run(s.project, dev, now(), s.project, viewer, now());
+  const { projectRoutes } = await import("../src/routes/apps.js");
+  const { projectAccess } = await import("../src/services/access.js");
+  const h = (userId: number) => {
+    const a = new Hono<AppEnv>();
+    a.use("*", async (c, next) => {
+      c.set("user", { id: userId, email: "t@t", name: "t", role: "member", mustChangePassword: false } as AppEnv["Variables"]["user"]);
+      await next();
+    });
+    a.use("/api/*", projectAccess);
+    a.route("/api/projects", projectRoutes);
+    a.onError((err, c) => c.json({ error: err.message }, err instanceof HttpError ? err.status : 500));
+    return a;
+  };
+  const asDev = (await (await h(dev).request(`/api/projects/${s.project}`)).json()) as { sharedEnv: string };
+  assert.ok(asDev.sharedEnv.includes("ORTAK=proje"));
+  const asViewer = (await (await h(viewer).request(`/api/projects/${s.project}`)).json()) as { sharedEnv: string; secretsHidden: boolean };
+  assert.equal(asViewer.sharedEnv, "");
+  assert.equal(asViewer.secretsHidden, true);
+  assert.equal((await h(viewer).request(`/api/projects/${s.project}/env`, json("PUT", { env: "X=1" }))).status, 403);
+  assert.equal((await h(dev).request(`/api/projects/${s.project}/env`, json("PUT", { env: "X=1\n" }))).status, 200);
+  assert.deepEqual(effectiveEnv(row), { X: "1", AYNI: "uygulama", KENDI: "1" });
+});
+
+test("veritabanı içe aktarma: gzip algılanır; Redis ve durmuş veritabanı reddedilir", async () => {
+  const { isGzipFile } = await import("../src/services/databases.js");
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { gzipSync } = await import("node:zlib");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xb-imp-"));
+  fs.writeFileSync(path.join(dir, "a.sql"), "select 1;");
+  fs.writeFileSync(path.join(dir, "a.sql.gz"), gzipSync("select 1;"));
+  fs.writeFileSync(path.join(dir, "bos"), "");
+  assert.equal(isGzipFile(path.join(dir, "a.sql")), false);
+  assert.equal(isGzipFile(path.join(dir, "a.sql.gz")), true);
+  assert.equal(isGzipFile(path.join(dir, "bos")), false);
+  fs.rmSync(dir, { recursive: true, force: true });
+
+  const s = seed();
+  const mk = (engine: string, status: string) =>
+    Number(
+      db
+        .prepare("INSERT INTO databases (project_id, server_id, name, slug, engine, version, db_name, db_user, db_password, status, created_at) VALUES (?, ?, 'd', ?, ?, '1', 'd', 'xudbin', ?, ?, ?)")
+        .run(s.project, s.server, `db-${tag()}`, engine, encrypt("x"), status, now()).lastInsertRowid,
+    );
+  const h = api(s.user("admin"), "admin");
+  const upload = (id: number) => h.request(`/databases/${id}/import/upload`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: "select 1;" });
+  assert.equal((await upload(mk("redis", "running"))).status, 422);
+  assert.equal((await upload(mk("postgres", "stopped"))).status, 422);
+});
+
+test("sunucu konteyner uçları: geçersiz konteyner adı Docker'a gitmeden reddedilir", async () => {
+  const { serverRoutes } = await import("../src/routes/servers.js");
+  const s = seed();
+  const h = new Hono<AppEnv>();
+  h.use("*", async (c, next) => {
+    c.set("user", { id: 1, email: "a@t", name: "a", role: "admin", mustChangePassword: false } as AppEnv["Variables"]["user"]);
+    await next();
+  });
+  h.route("/servers", serverRoutes);
+  h.onError((err, c) => c.json({ error: err.message }, err instanceof HttpError ? err.status : 500));
+  for (const bad of ["..%2F..%2Fetc", "a%20b", "-x", "a;b"]) {
+    assert.equal((await h.request(`/servers/${s.server}/containers/${bad}/logs`)).status, 400, bad);
+    assert.equal((await h.request(`/servers/${s.server}/containers/${bad}/stop`, json("POST", {}))).status, 400, bad);
+  }
+});
+
+test("uygulama kopyalama: ayarlar ve görevler kopyalanır; alan adı, webhook anahtarı ve sunucu erişimi kopyalanmaz", async () => {
+  const s = seed();
+  const src = s.app({ source_type: "image", image: "nginx:1", env: encrypt("A=1\n"), host_access: 1, auto_deploy: 1, port: 8080, webhook_secret: "eski-sir" });
+  db.prepare("INSERT INTO domains (app_id, host, https, generated, created_at) VALUES (?, ?, 1, 0, ?)").run(src, `ozel-${s.t}.example.com`, now());
+  db.prepare("INSERT INTO cron_jobs (app_id, name, schedule, command, enabled, timeout_min, created_at) VALUES (?, 'temizlik', '0 3 * * *', 'true', 1, 10, ?)").run(src, now());
+  const h = api(s.user("admin"), "admin");
+  const res = await h.request(`/apps/${src}/clone`, json("POST", { name: "Deneme kopya" }));
+  assert.equal(res.status, 201, await res.clone().text());
+  const { app } = (await res.json()) as { app: { id: number; name: string } };
+  const row = db.prepare("SELECT * FROM apps WHERE id = ?").get(app.id) as Record<string, unknown>;
+  const orig = db.prepare("SELECT * FROM apps WHERE id = ?").get(src) as Record<string, unknown>;
+  assert.equal(row.name, "Deneme kopya");
+  assert.equal(row.image, "nginx:1");
+  assert.equal(row.port, 8080);
+  assert.equal(row.env, orig.env);
+  assert.equal(row.host_access, 0);
+  assert.equal(row.auto_deploy, 0);
+  assert.equal(row.container, null);
+  assert.notEqual(row.slug, orig.slug);
+  assert.notEqual(row.webhook_token, orig.webhook_token);
+  assert.notEqual(row.webhook_secret, "eski-sir");
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM cron_jobs WHERE app_id = ?").get(app.id) as { n: number }).n, 1);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM domains WHERE app_id = ? AND generated = 0").get(app.id) as { n: number }).n, 0);
+  // İzleyici (sırları göremeyen) kopyalayamaz.
+  const viewer = s.user("member");
+  db.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'viewer', ?)").run(s.project, viewer, now());
+  assert.equal((await api(viewer, "member").request(`/apps/${src}/clone`, json("POST", { name: "x" }))).status, 403);
+});

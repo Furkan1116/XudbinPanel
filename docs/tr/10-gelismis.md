@@ -62,3 +62,19 @@ Uygulama sayfasındaki **Terminal** sekmesi, uygulamanın çalışan konteynerin
 - Terminal açmak işlem kaydına yazılır; yazdıkların ve çıktılar kaydedilmez.
 - 15 dakika girdi gelmezse ya da sekmeyi kapatırsan terminal kapanır ve konteynerdeki kabuk sonlandırılır. Kullanıcı başına aynı anda en fazla 3 terminal açılabilir.
 - Konteynerde yaptığın değişiklikler bir sonraki deploy'da kaybolur; kalıcı olması gerekenler kalıcı klasörde (volume) durmalı.
+
+## Ortak ortam değişkenleri
+
+Proje sayfasındaki **Ortak ortam değişkenleri** bölümüne yazdığın değişkenler o projedeki tüm uygulamalara verilir (ortak bir API anahtarı, SMTP ayarı gibi). Bir uygulama aynı adla kendi değerini tanımlarsa onunki geçerli olur. PR önizlemelerine verilmez; onlar yalnız kendi "önizleme ortam değişkenleri" alanını kullanır. Değişiklik, uygulamalar yeniden deploy edilince geçerli olur.
+
+## Uygulamayı kopyalama
+
+Uygulamanın **Ayarlar** sekmesindeki **Uygulamayı kopyala**, aynı ayarlarla yeni bir uygulama oluşturur: kaynak, derleme ayarları, ortam değişkenleri, güvenlik ayarları ve zamanlanmış görevler kopyalanır. Alan adları, kalıcı klasörlerin içeriği, webhook anahtarları ve "sunucu erişimi" onayı kopyalanmaz. Kopya sen deploy edene kadar çalışmaz; otomatik deploy kapalı başlar.
+
+## Sunucu bakımı
+
+Sunucu sayfasının **Konteynerler** sekmesinde:
+
+- Her konteynerin son logları görülebilir.
+- Xudbin dışında oluşturulmuş konteynerler başlatılıp durdurulabilir. Xudbin'in yönettiği konteynerler (uygulamalar, veritabanları, Caddy) kendi sayfalarından yönetilir.
+- **Docker disk kullanımı** imajların, derleme önbelleğinin ve kalıcı klasörlerin kapladığı yeri gösterir. **Temizle** yalnız derleme önbelleğini ve sahipsiz imajları siler; uygulamalara, geri dönüş imajlarına ve kalıcı klasörlere dokunmaz. Deploy sürerken çalışmaz.
