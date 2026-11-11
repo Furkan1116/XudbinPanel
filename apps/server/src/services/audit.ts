@@ -25,6 +25,7 @@ const LABELS: [RegExp, string, string?][] = [
   [/^POST \/api\/apps\/\d+\/terminal$/, "Konteynerde terminal açtı"],
   [/^POST \/api\/apps\/\d+\/terminal\/[\w-]+\/close$/, "Terminali kapattı"],
   [/^POST \/api\/databases$/, "Veritabanı oluşturdu"],
+  [/^POST \/api\/databases\/\d+\/import\/upload$/, "Veritabanına döküm aktardı"],
   [/^DELETE \/api\/databases\/\d+$/, "Veritabanını sildi"],
   [/^POST \/api\/databases\/\d+\/backups\/\d+\/restore$/, "Yedekten geri yükledi"],
   [/^POST \/api\/databases\/\d+\/backups$/, "Veritabanı yedeği aldı"],

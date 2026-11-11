@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { createGzip } from "node:zlib";
+import { createGunzip, createGzip } from "node:zlib";
 import { ENCRYPTED_EXT, encryptStream, openBackupPlain } from "../lib/backup-crypto.js";
 import { config } from "../config.js";
 import { db } from "../db.js";
@@ -273,6 +273,33 @@ export async function restoreBackup(d: DatabaseRow, file: string) {
     timeoutMs: 30 * 60_000,
   });
   if (res.exitCode !== 0) throw new Error(res.stderr.trim().split("\n").pop() || "Geri yükleme başarısız");
+}
+
+/** Dosya gzip mi? (ilk iki bayt 1f 8b) */
+export function isGzipFile(file: string) {
+  const fd = fs.openSync(file, "r");
+  try {
+    const head = Buffer.alloc(2);
+    return fs.readSync(fd, head, 0, 2, 0) === 2 && head[0] === 0x1f && head[1] === 0x8b;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Dışarıdan getirilen bir dökümü (pg_dump/mysqldump çıktısı .sql, mongodump --archive; düz ya da .gz) veritabanına aktarır.
+ * Yedekten geri yüklemeyle aynı komut kullanılır. Dosya veritabanı motorunun kendi aracına verilir, panel içeriğini yorumlamaz.
+ */
+export async function importDump(d: DatabaseRow, file: string) {
+  const c = restoreCommand(d);
+  if (!c) throw new Error("Redis'e panelden döküm aktarılamaz; .rdb dosyasını elle yükle.");
+  const raw = fs.createReadStream(file);
+  const res = await execIn(dockerFor(getServer(d.server_id)), containerName(d), ["sh", "-c", c], {
+    stdin: isGzipFile(file) ? raw.pipe(createGunzip()) : raw,
+    env: [`P=${decrypt(d.db_password)}`],
+    timeoutMs: 30 * 60_000,
+  });
+  if (res.exitCode !== 0) throw new Error(res.stderr.trim().split("\n").pop() || "İçe aktarma başarısız");
 }
 
 // ---------------------------------------------------------------------------

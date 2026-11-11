@@ -1458,4 +1458,18 @@ export const en: Record<string, string> = {
   "Kaydedildi. Geçerli olması için uygulamaları yeniden deploy et.": "Saved. Redeploy the apps for it to take effect.",
   "Her satıra bir değişken: ANAHTAR=değer. Değerler şifrelenerek saklanır.": "One variable per line: KEY=value. Values are stored encrypted.",
   "Projenin ortak ortam değişkenlerini değiştirdi": "Changed the project's shared environment variables",
+  // Veritabanı içe aktarma
+  "Döküm içe aktar": "Import a dump",
+  "Başka bir sunucudan aldığın dökümü bu veritabanına yükler. Önce mevcut verinin yedeği otomatik alınır; yedek alınamazsa içe aktarma başlamaz.": "Loads a dump taken on another server into this database. A backup of the current data is taken first; if the backup fails, the import does not start.",
+  "mongodump --archive çıktısı (.archive ya da .gz)": "mongodump --archive output (.archive or .gz)",
+  "pg_dump / mysqldump çıktısı (.sql ya da .sql.gz)": "pg_dump / mysqldump output (.sql or .sql.gz)",
+  "Döküm dosyası": "Dump file",
+  "Aktarılıyor...": "Importing...",
+  "İçe aktar": "Import",
+  "Döküm içe aktarıldı.": "The dump was imported.",
+  "Döküm içe aktarılsın mı?": "Import this dump?",
+  "Dökümdeki tablolar bu veritabanındaki aynı adlı tabloların üzerine yazılabilir. Önce otomatik bir yedek alınır.": "Tables in the dump may overwrite tables with the same name in this database. An automatic backup is taken first.",
+  "Veritabanına döküm aktardı": "Imported a dump into the database",
+  "Redis'e panelden döküm aktarılamaz; .rdb dosyasını elle yükle": "Dumps can't be imported into Redis from the panel; load the .rdb file manually",
+  "İçe aktarmak için veritabanı çalışıyor olmalı": "The database must be running to import",
 };

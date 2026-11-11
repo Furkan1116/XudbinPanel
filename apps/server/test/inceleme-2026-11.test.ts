@@ -170,3 +170,31 @@ test("ortak ortam değişkenleri: uygulamanınki önceliklidir, PR önizlemesine
   assert.equal((await h(dev).request(`/api/projects/${s.project}/env`, json("PUT", { env: "X=1\n" }))).status, 200);
   assert.deepEqual(effectiveEnv(row), { X: "1", AYNI: "uygulama", KENDI: "1" });
 });
+
+test("veritabanı içe aktarma: gzip algılanır; Redis ve durmuş veritabanı reddedilir", async () => {
+  const { isGzipFile } = await import("../src/services/databases.js");
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { gzipSync } = await import("node:zlib");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "xb-imp-"));
+  fs.writeFileSync(path.join(dir, "a.sql"), "select 1;");
+  fs.writeFileSync(path.join(dir, "a.sql.gz"), gzipSync("select 1;"));
+  fs.writeFileSync(path.join(dir, "bos"), "");
+  assert.equal(isGzipFile(path.join(dir, "a.sql")), false);
+  assert.equal(isGzipFile(path.join(dir, "a.sql.gz")), true);
+  assert.equal(isGzipFile(path.join(dir, "bos")), false);
+  fs.rmSync(dir, { recursive: true, force: true });
+
+  const s = seed();
+  const mk = (engine: string, status: string) =>
+    Number(
+      db
+        .prepare("INSERT INTO databases (project_id, server_id, name, slug, engine, version, db_name, db_user, db_password, status, created_at) VALUES (?, ?, 'd', ?, ?, '1', 'd', 'xudbin', ?, ?, ?)")
+        .run(s.project, s.server, `db-${tag()}`, engine, encrypt("x"), status, now()).lastInsertRowid,
+    );
+  const h = api(s.user("admin"), "admin");
+  const upload = (id: number) => h.request(`/databases/${id}/import/upload`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: "select 1;" });
+  assert.equal((await upload(mk("redis", "running"))).status, 422);
+  assert.equal((await upload(mk("postgres", "stopped"))).status, 422);
+});

@@ -213,6 +213,7 @@ on("GET", "/projects/:id", ({ params }) => {
   };
 });
 on("PUT", "/projects/:id/env", () => ({ ok: true }));
+on("POST", "/databases/:id/import/upload", () => ({ ok: true, size: 0 }));
 on("GET", "/projects/:id/members", ({ params }) => ({
   members:
     num(params.id) === 2
