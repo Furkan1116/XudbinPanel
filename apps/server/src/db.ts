@@ -468,6 +468,11 @@ const migrations: string[] = [
     verified_at INTEGER
   );
   `,
+  // Alan adı yönlendirmesi (www → çıplak alan adı gibi): hedef aynı uygulamanın yönlendirmeyen bir alan adı.
+  // Hedefi olan alan adının silinmesini API engeller; SET NULL yalnız uygulama silinirken devreye girer.
+  `
+  ALTER TABLE domains ADD COLUMN redirect_to INTEGER REFERENCES domains(id) ON DELETE SET NULL;
+  `,
 ];
 
 function migrate() {

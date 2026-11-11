@@ -71,7 +71,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 
 **Bildirimler:** E-posta (SMTP), Discord, Telegram, Slack, genel webhook. Olaylar: site çöktü / düzeldi, deploy sonucu, imajda kritik güvenlik açığı, HTTPS sertifikası bitmek üzere, sunucuda disk veya bellek doluyor, başarısız zamanlanmış görev, banlanan IP, başarısız yedek, erişilemeyen sunucu.
 
-**Alan adları:** Sunucuya kendi wildcard alan adını ver (`*.apps.sirketim.com`), yeni uygulamalar onun altında adres alır. DNS kayıtları panelden denetlenir ("bu kayıt şu IP'yi göstermeli"). Portları açık olmayan sunucular için **Cloudflare Tunnel** desteği.
+**Alan adları:** Sunucuya kendi wildcard alan adını ver (`*.apps.sirketim.com`), yeni uygulamalar onun altında adres alır. DNS kayıtları panelden denetlenir ("bu kayıt şu IP'yi göstermeli"). Portları açık olmayan sunucular için **Cloudflare Tunnel** desteği. **Yönlendirme:** bir alan adı, aynı uygulamanın başka bir alan adına kalıcı olarak yönlendirilebilir (`www.ornek.com → ornek.com`); yol ve sorgu korunur, yönlendirmeyi ve sertifikayı Caddy yapar.
 
 **Kullanıcılar ve ekip:** Yönetici ve üye rolleri; üyeler projelere **geliştirici** veya **izleyici** olarak eklenir ve yalnız o projeleri görmeleri amaçlanır (üye rolü henüz güçlü bir güvenlik sınırı değildir, bkz. [SECURITY.md](SECURITY.md)). **Tek oturum açma (SSO):** Google Workspace, Microsoft Entra, Keycloak, Authentik, GitLab gibi OpenID Connect sağlayıcılarıyla giriş. **İşlem kaydı:** kim, ne zaman, neyi değiştirdi. **API anahtarları:** süreli, istenirse salt okunur; `xb` komut satırı aracı ve CI/CD için. Yeni kullanıcı geçici şifreyle eklenir, ilk girişte kendi şifresini belirler.
 

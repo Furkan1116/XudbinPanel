@@ -19,6 +19,7 @@ const LABELS: [RegExp, string, string?][] = [
   [/^POST \/api\/apps\/\d+\/(start|stop|restart)$/, "Uygulamayı başlattı/durdurdu"],
   [/^POST \/api\/apps\/\d+\/domains/, "Alan adı ekledi"],
   [/^DELETE \/api\/apps\/\d+\/domains\/\d+$/, "Alan adını sildi"],
+  [/^PUT \/api\/apps\/\d+\/domains\/\d+$/, "Alan adı yönlendirmesini değiştirdi"],
   [/^POST \/api\/apps\/\d+\/upload$/, "Yeni sürüm yükledi"],
   [/^POST \/api\/apps\/\d+\/webhook\/regenerate$/, "Webhook adresini yeniledi"],
   [/^POST \/api\/databases$/, "Veritabanı oluşturdu"],

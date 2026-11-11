@@ -82,7 +82,14 @@ export type Container = {
 
 export type Project = { id: number; name: string; description: string; createdAt: number; apps: number; databases: number; running: number };
 
-export type Domain = { id: number; host: string; https: boolean; generated: boolean; url: string };
+/** redirectTo: bu alan adı uygulamayı servis etmez, aynı uygulamanın başka bir alan adına kalıcı yönlendirir. */
+export type Domain = { id: number; host: string; https: boolean; generated: boolean; url: string; redirectTo: number | null; redirectHost: string | null };
+
+/** Uygulamanın asıl adresi: yönlendirmeyen alan adlarından önce kendi alan adları, sonra otomatik adresler (sunucudaki seçimle aynı). */
+export function primaryDomain(domains: Domain[]): Domain | undefined {
+  const serving = domains.filter((d) => d.redirectTo === null);
+  return serving.find((d) => !d.generated) ?? serving[0];
+}
 
 export type AppSecurity = {
   waf: boolean;

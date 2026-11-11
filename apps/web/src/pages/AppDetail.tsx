@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { CronJobs } from "@/components/CronJobs";
@@ -13,7 +13,7 @@ import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frame
 import { LogSearch } from "@/components/LogSearch";
 import { LogViewer } from "@/components/LogViewer";
 import { Button, ConfirmDialog, CopyField, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, Toggle, useAction } from "@/components/ui";
-import { api, type App, type DetectResult, type Deployment, type Server } from "@/lib/api";
+import { api, primaryDomain, type App, type DetectResult, type Deployment, type Domain, type Server } from "@/lib/api";
 import { useAuthStatus } from "@/lib/auth";
 import { dateTime, duration, formatBytes, timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -37,7 +37,7 @@ export function AppDetailPage() {
   });
   if (!data) return <PageLoading />;
   const { app } = data;
-  const primary = app.domains[0];
+  const primary = primaryDomain(app.domains);
 
   return (
     <>
@@ -166,7 +166,10 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
               <span className="truncate">{d.url}</span>
               <ExternalLink className="size-3.5 shrink-0 text-faint" />
             </a>
-            <span className="shrink-0 text-[13px] text-faint">{d.generated ? t("Otomatik adres") : t("Alan adı")}{d.https ? t(", HTTPS") : ""}</span>
+            <span className="shrink-0 text-[13px] text-faint">
+              {d.redirectHost ? t("{host} adresine yönlendirir", { host: d.redirectHost }) : d.generated ? t("Otomatik adres") : t("Alan adı")}
+              {d.https ? t(", HTTPS") : ""}
+            </span>
           </div>
         ))}
         {app.domains.length === 0 && <div className="px-5 py-3 text-[14px] text-muted">{t("Alan adı yok. Domainler sekmesinden ekle.")}</div>}
@@ -343,7 +346,7 @@ function Env({ data }: { data: AppData }) {
       />
       {fw && fw.envHints.length > 0 && (
         <div className="mt-3">
-          <EnvSuggestions hints={fw.envHints} env={env} onChange={setEnv} ctx={{ hosts: data.app.domains.map((d) => d.host), https: data.app.domains[0]?.https ?? true }} />
+          <EnvSuggestions hints={fw.envHints} env={env} onChange={setEnv} ctx={{ hosts: servingHosts(data.app.domains), https: primaryDomain(data.app.domains)?.https ?? true }} />
         </div>
       )}
       <p className="mt-3 text-[13px] text-faint">
@@ -373,47 +376,106 @@ function Env({ data }: { data: AppData }) {
 
 // ---------------------------------------------------------------------------
 
+const HOST_LIKE = /^[a-z0-9.-]+\.[a-z]{2,}$/;
+
 type DnsResult = { host: string; ok: boolean; reason: string; message: string; addresses: string[] };
+
+/** Uygulamayı servis eden alan adları, asıl adres önde (sunucudaki XUDBIN_DOMAINS sırasıyla aynı). */
+function servingHosts(domains: Domain[]) {
+  const serving = domains.filter((d) => d.redirectTo === null);
+  return [...serving.filter((d) => !d.generated), ...serving.filter((d) => d.generated)].map((d) => d.host);
+}
+
+/** www.X eklenirken X varsa (ya da tersi) önerilecek yönlendirme hedefi. */
+function wwwPartner(host: string, domains: Domain[]) {
+  const other = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
+  return domains.find((d) => d.host === other && d.redirectTo === null);
+}
 
 function Domains({ app }: { app: App }) {
   const [host, setHost] = useState("");
   const [https, setHttps] = useState(true);
+  const [redirectTo, setRedirectTo] = useState<number | null>(null);
   const servers = useQuery({ queryKey: ["server", app.server.id], queryFn: () => api.get<{ server: { publicIp: string | null; httpsMode: string } }>(`/servers/${app.server.id}`) });
   const dnsCheck = useQuery({ queryKey: ["app", app.id, "dns"], queryFn: () => api.get<{ results: DnsResult[] }>(`/apps/${app.id}/domains/check`), refetchInterval: 60_000 });
   const [addedDns, setAddedDns] = useState<DnsResult | null>(null);
-  const add = useAction(() => api.post<{ dns: DnsResult | null }>(`/apps/${app.id}/domains`, { host, https }), {
+  const add = useAction(() => api.post<{ dns: DnsResult | null }>(`/apps/${app.id}/domains`, { host, https, redirectTo }), {
     success: t("Alan adı eklendi"),
     invalidate: [["app", app.id], ["app", app.id, "dns"]],
     onSuccess: (r) => {
       setHost("");
+      setRedirectTo(null);
       setAddedDns(r.dns && !r.dns.ok ? r.dns : null);
     },
   });
   const dnsOf = (h: string) => dnsCheck.data?.results.find((r) => r.host === h);
   const gen = useAction(() => api.post(`/apps/${app.id}/domains/generate`), { success: t("Yeni otomatik adres oluşturuldu"), invalidate: [["app", app.id]] });
   const del = useAction((domainId: number) => api.del(`/apps/${app.id}/domains/${domainId}`), { success: t("Alan adı kaldırıldı"), invalidate: [["app", app.id]] });
+  const setRedirect = useAction((v: { domainId: number; redirectTo: number | null }) => api.put(`/apps/${app.id}/domains/${v.domainId}`, { redirectTo: v.redirectTo }), {
+    success: t("Yönlendirme kaydedildi"),
+    invalidate: [["app", app.id]],
+  });
+  const serving = app.domains.filter((d) => d.redirectTo === null);
+  const partner = HOST_LIKE.test(host) ? wwwPartner(host, app.domains) : undefined;
   const ip = servers.data?.server.publicIp;
   const httpsOff = servers.data?.server.httpsMode === "off";
 
   return (
     <div className="space-y-8">
       <div className="panel divide-y divide-line">
-        {app.domains.map((d) => (
-          <div key={d.id} className="flex items-center gap-3 px-5 py-3">
+        {app.domains.map((d) => {
+          // Buraya yönlendiren adres varsa bu alan adı ne yönlendirilebilir ne silinebilir (zincir ve boşa düşen yönlendirme olmasın).
+          const isTarget = app.domains.some((x) => x.redirectTo === d.id);
+          const targets = serving.filter((x) => x.id !== d.id);
+          return (
+          <div key={d.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
             <div className="min-w-0 flex-1">
-              <a href={d.url} target="_blank" rel="noreferrer" className="block truncate font-medium hover:underline">{d.host}</a>
-              <div className="text-[13px] text-faint">{d.generated ? t("Otomatik adres") : t("Kendi alan adın")}, {d.https ? t("HTTPS otomatik") : t("yalnız HTTP")}</div>
+              <a href={d.url} target="_blank" rel="noreferrer" className="flex min-w-0 items-center gap-1.5 font-medium hover:underline">
+                <span className="truncate">{d.host}</span>
+                {d.redirectHost && (
+                  <>
+                    <ArrowRight className="size-3.5 shrink-0 text-faint" aria-label={t("yönlendirir")} />
+                    <span className="truncate text-muted">{d.redirectHost}</span>
+                  </>
+                )}
+              </a>
+              <div className="text-[13px] text-faint">
+                {d.redirectHost ? t("Kalıcı yönlendirme (301), yol ve sorgu korunur") : d.generated ? t("Otomatik adres") : t("Kendi alan adın")}, {d.https ? t("HTTPS otomatik") : t("yalnız HTTP")}
+              </div>
               {dnsOf(d.host) && (
                 <div className={`mt-0.5 text-[12px] ${dnsOf(d.host)!.ok ? "text-ok" : "text-warn"}`}>
                   {dnsOf(d.host)!.ok ? `✓ ${t("DNS bu sunucuyu gösteriyor")}` : `⚠ ${dnsOf(d.host)!.message}`}
                 </div>
               )}
             </div>
-            <Button size="sm" variant="ghost" aria-label={t("Kaldır")} onClick={() => del.mutate(d.id)}>
+            {(targets.length > 0 || d.redirectTo !== null) && (
+              <select
+                className="input w-auto max-w-[16rem] text-[13px]"
+                aria-label={t("Şuraya yönlendir")}
+                title={isTarget ? t("Başka adresler buraya yönlendiriyor; bu alan adı yönlendirilemez.") : undefined}
+                disabled={isTarget || setRedirect.isPending}
+                value={d.redirectTo ?? ""}
+                onChange={(e) => setRedirect.mutate({ domainId: d.id, redirectTo: e.target.value ? Number(e.target.value) : null })}
+              >
+                <option value="">{t("Uygulamayı açar")}</option>
+                {targets.map((x) => (
+                  <option key={x.id} value={x.id}>{t("{host} adresine yönlendir", { host: x.host })}</option>
+                ))}
+              </select>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={t("Kaldır")}
+              title={isTarget ? t("Başka adresler buraya yönlendiriyor; önce onların yönlendirmesini kaldır.") : undefined}
+              disabled={isTarget}
+              onClick={() => del.mutate(d.id)}
+            >
               <Trash2 className="size-4" />
             </Button>
           </div>
-        ))}
+          );
+        })}
         {app.domains.length === 0 && <div className="px-5 py-4 text-[14px] text-muted">{t("Bu uygulamanın adresi yok.")}</div>}
       </div>
 
@@ -428,8 +490,25 @@ function Domains({ app }: { app: App }) {
           className="panel space-y-4 p-5"
         >
           <Field label={t("Alan adı")}>
-            <input className="input" required value={host} onChange={(e) => setHost(e.target.value.trim().toLowerCase())} placeholder="blog.ornek.com" />
+            <input
+              className="input"
+              required
+              value={host}
+              onChange={(e) => {
+                setHost(e.target.value.trim().toLowerCase());
+                setRedirectTo(null);
+              }}
+              placeholder="blog.ornek.com"
+            />
           </Field>
+          {partner && (
+            <Toggle
+              checked={redirectTo === partner.id}
+              onChange={(v) => setRedirectTo(v ? partner.id : null)}
+              label={t("{host} adresine yönlendir", { host: partner.host })}
+              description={t("Bu alan adı uygulamayı açmak yerine ziyaretçiyi kalıcı olarak {host} adresine gönderir; yol ve sorgu korunur.", { host: partner.host })}
+            />
+          )}
           <Toggle checked={https && !httpsOff} disabled={httpsOff} onChange={setHttps} label={t("HTTPS")} description={httpsOff ? t("Bu sunucuda HTTPS kapalı.") : t("Let's Encrypt sertifikası otomatik alınır ve yenilenir, ücretsiz.")} />
           <div className="flex flex-wrap justify-between gap-2">
             <Button type="button" variant="ghost" onClick={() => gen.mutate()} loading={gen.isPending} disabled={!ip}>
