@@ -1,4 +1,5 @@
 /** Demo modu: API isteklerini (yöntem + yol) örnek verilerle yanıtlar. */
+import { primaryDomain } from "@/lib/api";
 import { getLang } from "@/lib/i18n";
 import frameworks from "./frameworks.json";
 import templates from "./templates.json";
@@ -105,7 +106,7 @@ on("GET", "/overview/monitoring", () => {
     .filter((a) => a.kind === "web")
     .map((a) => {
       const monitored = a.uptimeEnabled && a.domains.length > 0;
-      if (!monitored) return { id: a.id, name: a.name, status: a.status, projectName: projectName(a.projectId), url: a.domains[0]?.url ?? null, monitored, down: false, downSince: null, up24h: null, up7d: null, lastMs: null, avgMs: null, bars: Array(24).fill(null) };
+      if (!monitored) return { id: a.id, name: a.name, status: a.status, projectName: projectName(a.projectId), url: primaryDomain(a.domains)?.url ?? null, monitored, down: false, downSince: null, up24h: null, up7d: null, lastMs: null, avgMs: null, bars: Array(24).fill(null) };
       const u = D.uptimeOf(a.id);
       const end = Date.now();
       const bars = Array.from({ length: 24 }, (_, i) => {
@@ -120,7 +121,7 @@ on("GET", "/overview/monitoring", () => {
         name: a.name,
         status: a.status,
         projectName: projectName(a.projectId),
-        url: a.domains[0]?.url ?? null,
+        url: primaryDomain(a.domains)?.url ?? null,
         monitored,
         down: u.down,
         downSince: inc?.startedAt ?? null,

@@ -38,7 +38,7 @@ import { deletePreview, handlePrEvent, parsePrEvent, pushSkipReason } from "../s
 import { appVolumes, backupAppVolumes, restoreVolumeBackup, volumeBackupFile } from "../services/volume-backups.js";
 import { Readable } from "node:stream";
 import { checkDomain } from "../services/dns-check.js";
-import { domainProblem } from "../services/domain-policy.js";
+import { domainProblem, primaryDomain, REDIRECT_DELETE_ERROR, REDIRECT_TARGET_ERROR, redirectProblem, redirectSources, servingDomains, SERVING_DOMAIN } from "../services/domain-policy.js";
 import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
@@ -66,11 +66,12 @@ export function generatedHost(slug: string, server: ServerRow) {
 /** `secrets` false ise webhook adresi/sırrı maskelenir (deploy tetikleme yetkisi sızmasın). Yazma uçları yazma yetkisi olana döner, varsayılan açık. */
 function publicApp(a: AppRow, secrets = true) {
   const server = getServer(a.server_id);
-  const domains = db.prepare("SELECT id, host, https, generated, created_at AS createdAt FROM domains WHERE app_id = ? ORDER BY generated DESC, id").all(a.id) as {
+  const domains = db.prepare("SELECT id, host, https, generated, redirect_to AS redirectTo, created_at AS createdAt FROM domains WHERE app_id = ? ORDER BY generated DESC, id").all(a.id) as {
     id: number;
     host: string;
     https: number;
     generated: number;
+    redirectTo: number | null;
   }[];
   const sec = parseSecurity(a.security);
   const httpsActive = server.https_mode !== "off";
@@ -120,12 +121,18 @@ function publicApp(a: AppRow, secrets = true) {
     previewPr: a.preview_pr,
     previews: (db.prepare("SELECT id, name, preview_pr AS pr, git_branch AS branch, status FROM apps WHERE parent_app_id = ? ORDER BY preview_pr").all(a.id) as { id: number }[]).map((p) => ({
       ...p,
-      url: ((d) => (d ? `${d.https && httpsActive ? "https" : "http"}://${d.host}` : null))(db.prepare("SELECT host, https FROM domains WHERE app_id = ? LIMIT 1").get(p.id) as { host: string; https: number } | undefined),
+      url: ((d) => (d ? `${d.https && httpsActive ? "https" : "http"}://${d.host}` : null))(primaryDomain(p.id)),
     })),
     scan: { status: a.scan_status, at: a.scanned_at, summary: parseJson(a.scan_summary) },
     healthPath: a.health_path,
     memoryLimit: a.memory_limit,
-    domains: domains.map((d) => ({ ...d, https: Boolean(d.https) && httpsActive, generated: Boolean(d.generated), url: `${d.https && httpsActive ? "https" : "http"}://${d.host}` })),
+    domains: domains.map((d) => ({
+      ...d,
+      https: Boolean(d.https) && httpsActive,
+      generated: Boolean(d.generated),
+      url: `${d.https && httpsActive ? "https" : "http"}://${d.host}`,
+      redirectHost: d.redirectTo === null ? null : (domains.find((x) => x.id === d.redirectTo)?.host ?? null),
+    })),
     security: { ...sec, basicAuth: sec.basicAuth ? { username: sec.basicAuth.username } : null },
     createdAt: a.created_at,
   };
@@ -569,7 +576,7 @@ export const appRoutes = new Hono<AppEnv>()
     const server = getServer(app.server_id);
     if (!app.container || app.source_type === "compose") return c.json({ probe: null, findings: [] });
     const docker = dockerFor(server);
-    const hosts = (db.prepare("SELECT host FROM domains WHERE app_id = ? ORDER BY generated, id").all(app.id) as { host: string }[]).map((d) => d.host);
+    const hosts = servingDomains(app.id).map((d) => d.host);
     const probe = await probeHttp(docker, app.container, app.port, hosts[0] ?? `xb-${app.slug}`, app.health_path || "/");
     const logs = await docker.getContainer(app.container).logs({ stdout: true, stderr: true, tail: 400 }).catch(() => Buffer.from(""));
     const findings = diagnose(demuxLogs(logs as Buffer), { framework: app.framework, env: parseEnv(decrypt(app.env)), hosts, status: probe.status });
@@ -611,7 +618,7 @@ export const appRoutes = new Hono<AppEnv>()
 
   .post("/:id/domains", async (c) => {
     const app = loadApp(idParam(c));
-    const input = await body(c, z.object({ host: z.string().trim().toLowerCase(), https: z.boolean().default(true) }));
+    const input = await body(c, z.object({ host: z.string().trim().toLowerCase(), https: z.boolean().default(true), redirectTo: z.number().int().nullable().default(null) }));
     if (!HOST_RE.test(input.host)) throw new HttpError(400, "Geçerli bir alan adı gir (ör. blog.ornek.com)");
     if (db.prepare("SELECT 1 FROM domains WHERE host = ?").get(input.host)) throw new HttpError(409, "Bu alan adı zaten kullanılıyor");
     // Panelin kendi alan adı ve alt alanları ile uygulama başına sayı sınırı (O7).
@@ -621,7 +628,12 @@ export const appRoutes = new Hono<AppEnv>()
     // DNS henüz sunucuyu göstermiyorsa alan adı yine eklenir (DNS sonradan düzeltilebilir), ama uyarı döner.
     const dnsServer = getServer(app.server_id);
     const dns = await checkDomain(input.host, dnsServer.public_ip).catch(() => null);
-    db.prepare("INSERT INTO domains (app_id, host, https, generated, created_at) VALUES (?, ?, ?, 0, ?)").run(app.id, input.host, input.https ? 1 : 0, Date.now());
+    // Yönlendirme hedefi eklemeden önce denetlenir (yeni alan adının kendisine yönlendiren olamaz, kontrol hedef üzerinden yeterli).
+    if (input.redirectTo !== null) {
+      const target = db.prepare(`SELECT 1 FROM domains WHERE id = ? AND app_id = ? AND ${SERVING_DOMAIN}`).get(input.redirectTo, app.id);
+      if (!target) throw new HttpError(422, REDIRECT_TARGET_ERROR);
+    }
+    db.prepare("INSERT INTO domains (app_id, host, https, generated, redirect_to, created_at) VALUES (?, ?, ?, 0, ?, ?)").run(app.id, input.host, input.https ? 1 : 0, input.redirectTo, Date.now());
     const server = getServer(app.server_id);
     if (server.status === "ready") await applyCaddyConfig(server);
     return c.json({ app: publicApp(loadApp(app.id)), dns, note: "Ortam değişkenlerindeki alan adı listeleri bir sonraki deploy'da güncellenir." }, 201);
@@ -648,9 +660,26 @@ export const appRoutes = new Hono<AppEnv>()
     return c.json({ app: publicApp(loadApp(app.id)) }, 201);
   })
 
+  // Alan adının yönlendirmesini ayarlar ya da kaldırır (redirectTo: null → uygulamayı servis eder).
+  .put("/:id/domains/:domainId", async (c) => {
+    const app = loadApp(idParam(c));
+    const domainId = idParam(c, "domainId");
+    const input = await body(c, z.object({ redirectTo: z.number().int().nullable() }));
+    const problem = redirectProblem(app.id, domainId, input.redirectTo);
+    if (problem) throw new HttpError(problem === "Alan adı bulunamadı" ? 404 : 422, problem);
+    db.prepare("UPDATE domains SET redirect_to = ? WHERE id = ? AND app_id = ?").run(input.redirectTo, domainId, app.id);
+    const server = getServer(app.server_id);
+    if (server.status === "ready") await applyCaddyConfig(server);
+    return c.json({ app: publicApp(loadApp(app.id)), note: "Ortam değişkenlerindeki alan adı listeleri bir sonraki deploy'da güncellenir." });
+  })
+
   .delete("/:id/domains/:domainId", async (c) => {
     const app = loadApp(idParam(c));
-    db.prepare("DELETE FROM domains WHERE id = ? AND app_id = ?").run(idParam(c, "domainId"), app.id);
+    // Başka alan adları buraya yönlendiriyorsa silme engellenir: yönlendirmeleri sessizce kaldırmak, o adresleri
+    // habersizce uygulamayı servis eden ikinci adrese çevirirdi.
+    const domainId = idParam(c, "domainId");
+    if (db.prepare("SELECT 1 FROM domains WHERE id = ? AND app_id = ?").get(domainId, app.id) && redirectSources(domainId).length) throw new HttpError(409, REDIRECT_DELETE_ERROR);
+    db.prepare("DELETE FROM domains WHERE id = ? AND app_id = ?").run(domainId, app.id);
     const server = getServer(app.server_id);
     if (server.status === "ready") await applyCaddyConfig(server);
     return c.json({ app: publicApp(loadApp(app.id)) });

@@ -1,5 +1,6 @@
 import tls from "node:tls";
 import { db } from "../db.js";
+import { primaryDomain } from "./domain-policy.js";
 import { getSettings } from "../lib/settings.js";
 import { safeGet } from "../lib/ssrf.js";
 import { dockerFor } from "./docker.js";
@@ -31,7 +32,8 @@ async function checkUrl(url: string): Promise<{ ok: boolean; status: number | nu
 }
 
 function primaryUrl(appId: number) {
-  const d = db.prepare("SELECT host, https FROM domains WHERE app_id = ? ORDER BY generated, id LIMIT 1").get(appId) as { host: string; https: number } | undefined;
+  // Yönlendiren alan adı denenirse yalnız Caddy'nin 301'i ölçülür, uygulama değil.
+  const d = primaryDomain(appId);
   if (!d) return null;
   const server = db.prepare("SELECT s.https_mode FROM apps a JOIN servers s ON s.id = a.server_id WHERE a.id = ?").get(appId) as { https_mode: string };
   return { host: d.host, url: `${d.https && server.https_mode !== "off" ? "https" : "http"}://${d.host}` };

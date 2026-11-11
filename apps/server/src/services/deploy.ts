@@ -6,6 +6,7 @@ import tarFs from "tar-fs";
 import YAML from "yaml";
 import { config } from "../config.js";
 import { db } from "../db.js";
+import { servingDomains } from "./domain-policy.js";
 import { decrypt, encrypt, randomAlnum } from "../lib/crypto.js";
 import { bus } from "../lib/events.js";
 import { removeEscapingSymlinks, resolveInside, writeInside } from "../lib/paths.js";
@@ -89,9 +90,12 @@ export function getApp(id: number) {
 
 const BUILD_ROOT = path.join(config.dataDir, "builds");
 
-/** {{XUDBIN_URL}}, {{XUDBIN_DOMAINS}}, {{XUDBIN_ORIGINS}} yer tutucularını uygulamanın güncel alan adlarıyla doldurur. */
+/**
+ * {{XUDBIN_URL}}, {{XUDBIN_DOMAINS}}, {{XUDBIN_ORIGINS}} yer tutucularını uygulamanın güncel alan adlarıyla doldurur.
+ * Yönlendiren alan adları (www → çıplak alan adı gibi) uygulamaya hiç ulaşmaz; listelere girmez.
+ */
 export function fillPlaceholders(env: Record<string, string>, appId: number, httpsOn: boolean) {
-  const hosts = db.prepare("SELECT host, https FROM domains WHERE app_id = ? ORDER BY generated, id").all(appId) as { host: string; https: number }[];
+  const hosts = servingDomains(appId);
   const url = (h: { host: string; https: number }) => `${h.https && httpsOn ? "https" : "http"}://${h.host}`;
   const values: Record<string, string> = {
     XUDBIN_URL: hosts[0] ? url(hosts[0]) : "",
@@ -548,7 +552,8 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   const base = `xb-${app.slug}-${deploymentId}`;
   const names = Array.from({ length: count }, (_, i) => (i === 0 ? base : `${base}-${i + 1}`));
   const network = await ensureProjectNetwork(server, app.project_id);
-  const hosts = (db.prepare("SELECT host FROM domains WHERE app_id = ? ORDER BY generated, id").all(app.id) as { host: string }[]).map((d) => d.host);
+  // Sağlık kontrolü gerçek Host başlığıyla yapılır; yönlendiren alan adı uygulamanın adresi değildir.
+  const hosts = servingDomains(app.id).map((d) => d.host);
 
   const created: string[] = [];
   const failWithLogs = async (name: string, message: string, extra: { status?: number | null } = {}): Promise<never> => {

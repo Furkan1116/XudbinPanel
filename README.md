@@ -70,7 +70,7 @@ It tackles three things these panels leave out from the start:
 
 **Notifications:** email (SMTP), Discord, Telegram, Slack, generic webhook. Events: site down / recovered, deploy result, critical image vulnerability, HTTPS certificate expiring, server disk or memory filling up, failed scheduled job, banned IP, failed backup, unreachable server.
 
-**Domains:** give a server your own wildcard domain (`*.apps.mycompany.com`) and new apps get addresses under it. DNS records are checked from the panel ("this record should point to this IP"). **Cloudflare Tunnel** support for servers without open ports.
+**Domains:** give a server your own wildcard domain (`*.apps.mycompany.com`) and new apps get addresses under it. DNS records are checked from the panel ("this record should point to this IP"). **Cloudflare Tunnel** support for servers without open ports. **Redirects:** a domain can permanently redirect to another domain of the same app (`www.example.com → example.com`), keeping the path and query; Caddy handles it and issues the certificate.
 
 **Users and teams:** admin and member roles; members are added to projects as **developer** or **viewer** and are meant to see only those projects (the member role is not yet a strong security boundary, see [SECURITY.md](SECURITY.md)). **Single sign-on (SSO):** log in with OpenID Connect providers such as Google Workspace, Microsoft Entra, Keycloak, Authentik and GitLab. **Audit log:** who changed what and when. **API tokens:** with expiry, optionally read-only; for the `xb` command-line tool and CI/CD. New users are added with a temporary password and set their own on first login.
 
