@@ -12,13 +12,14 @@ import { FrameworkLogo } from "@/components/FrameworkLogo";
 import { EnvSuggestions, FrameworkFields, FrameworkPicker, FrameworkSteps, frameworkById, useFrameworks } from "@/components/FrameworkSetup";
 import { LogSearch } from "@/components/LogSearch";
 import { LogViewer } from "@/components/LogViewer";
+import { TerminalTab } from "@/components/TerminalTab";
 import { Button, ConfirmDialog, CopyField, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, Tabs, Toggle, useAction } from "@/components/ui";
 import { api, primaryDomain, type App, type DetectResult, type Deployment, type Domain, type Server } from "@/lib/api";
 import { useAuthStatus } from "@/lib/auth";
 import { dateTime, duration, formatBytes, timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
-type Tab = "overview" | "deployments" | "logs" | "env" | "domains" | "cron" | "security" | "settings";
+type Tab = "overview" | "deployments" | "logs" | "terminal" | "env" | "domains" | "cron" | "security" | "settings";
 type AppData = { app: App; env: string; previewEnv?: string; secretsHidden?: boolean; deployments: Deployment[] };
 
 export function AppDetailPage() {
@@ -77,6 +78,8 @@ export function AppDetailPage() {
           { id: "overview", label: t("Genel") },
           { id: "deployments", label: t("Deploylar") },
           { id: "logs", label: t("Loglar") },
+          // Terminal konteynerdeki tüm sırları okuyabilir; izleyiciye gösterilmez.
+          ...(data.secretsHidden ? [] : [{ id: "terminal" as const, label: t("Terminal") }]),
           { id: "env", label: t("Ortam değişkenleri") },
           { id: "domains", label: t("Domainler") },
           { id: "cron", label: t("Zamanlanmış görevler") },
@@ -92,6 +95,7 @@ export function AppDetailPage() {
           <LogSearch appId={id} />
         </div>
       )}
+      {tab === "terminal" && !data.secretsHidden && <TerminalTab appId={id} />}
       {tab === "env" && <Env data={data} />}
       {tab === "domains" && <Domains app={app} />}
       {tab === "cron" && <CronJobs app={app} />}

@@ -17,6 +17,7 @@ Apache License 2.0 metni: https://www.apache.org/licenses/LICENSE-2.0
 ## Panel imajı (`ghcr.io/furkan1116/xudbin`)
 
 - Node.js bağımlılıkları MIT, ISC, Apache-2.0, BSD-2/3-Clause, 0BSD, CC0-1.0 ve Unlicense lisanslıdır; her paketin lisansı imajdaki `node_modules/<paket>/LICENSE` dosyasındadır.
+- Web terminali **xterm.js** (`@xterm/xterm`, `@xterm/addon-fit`) kullanır; MIT lisanslıdır (Copyright © The xterm.js authors).
 - Arayüz fontları **IBM Plex Sans** ve **IBM Plex Mono**, SIL Open Font License 1.1 ile dağıtılır (Copyright © 2017 IBM Corp.). Lisans: https://openfontlicense.org
 - Framework logoları [Simple Icons](https://simpleicons.org) (CC0-1.0) verisinden alınır. **Logolar ve adlar ilgili markaların sahiplerine aittir**; Xudbin yalnız hangi framework'ün kullanıldığını göstermek için kullanır, bu markalarla bir bağlantısı yoktur.
 - İmajın tabanı Alpine Linux'tur; içindeki `git`, `docker-cli`, `openssh-client`, `unzip` ve `tini` paketleri kendi lisanslarıyla (bazıları GPL) gelir. Kaynak kodları Alpine paket deposundan edinilebilir: https://pkgs.alpinelinux.org

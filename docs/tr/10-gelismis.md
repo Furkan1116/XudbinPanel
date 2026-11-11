@@ -53,3 +53,12 @@ Ağır derlemeler canlı uygulamaları yavaşlatmasın diye uygulamanın **Ayarl
 3. **Kur**'a bas.
 
 Şifreler otomatik üretilir, alan adı ve HTTPS hazır gelir. Üretilen değerler uygulamanın **Ortam değişkenleri** sekmesinde görünür; kurulumdan sonra her şeyi değiştirebilirsin.
+
+## Web terminali
+
+Uygulama sayfasındaki **Terminal** sekmesi, uygulamanın çalışan konteynerinde bir komut satırı açar (`bash` varsa `bash`, yoksa `sh`). Migration çalıştırmak, dosyalara bakmak ya da hata ayıklamak içindir. Compose uygulamalarında ve birden çok kopyada hangi konteynere bağlanacağını seçersin.
+
+- Yalnız **yönetici** ve projenin **geliştiricileri** kullanabilir; izleyiciler ve API anahtarları kullanamaz. Terminal, konteynerdeki tüm ortam değişkenlerini ve dosyaları okuyabilir.
+- Terminal açmak işlem kaydına yazılır; yazdıkların ve çıktılar kaydedilmez.
+- 15 dakika girdi gelmezse ya da sekmeyi kapatırsan terminal kapanır ve konteynerdeki kabuk sonlandırılır. Kullanıcı başına aynı anda en fazla 3 terminal açılabilir.
+- Konteynerde yaptığın değişiklikler bir sonraki deploy'da kaybolur; kalıcı olması gerekenler kalıcı klasörde (volume) durmalı.

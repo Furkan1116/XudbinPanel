@@ -53,3 +53,12 @@ Install ready-made apps in one click from the **Templates** page: WordPress, Gho
 3. Click **Install**.
 
 Passwords are generated, and the domain and HTTPS come ready. Generated values are visible on the app's **Environment variables** tab; you can change everything after installing.
+
+## Web terminal
+
+The **Terminal** tab on the app page opens a command line in the app's running container (`bash` if present, otherwise `sh`). Use it to run a migration, look at files or debug. For Compose apps and apps with several replicas you choose which container to connect to.
+
+- Only **admins** and the project's **developers** can use it; viewers and API keys cannot. A terminal can read every environment variable and file in the container.
+- Opening a terminal is written to the audit log; what you type and the output are not recorded.
+- The terminal closes, and the shell in the container is killed, after 15 minutes without input or when you close the tab. Each user can have at most 3 terminals open at once.
+- Changes you make inside the container are lost on the next deploy; anything that must persist belongs in a persistent volume.

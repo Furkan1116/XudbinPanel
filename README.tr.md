@@ -45,6 +45,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - **Zamanlanmış görevler (cron):** uygulamanın imajında komut çalıştırma, çıktı ve süre geçmişi
 - Kalıcı klasör (volume) yedekleri: zamanlanmış, S3'e de yüklenebilen, tek tıkla geri yükleme
 - Canlı loglarda anlık filtre; geçmiş loglarda (son 1 saat – 14 gün) tüm kopyalar ve Compose servislerinde arama
+- **Web terminali:** uygulamanın çalışan konteynerinde tarayıcıdan komut satırı (Compose servisleri ve kopyalar dahil); yalnız yönetici ve proje geliştiricilerine açık, açılışı işlem kaydına geçer
 - Şifreli ortam değişkenleri, kalıcı depolama klasörleri, CPU/bellek izleme
 
 **Veritabanları**
