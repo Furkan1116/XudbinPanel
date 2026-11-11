@@ -31,6 +31,10 @@ It tackles three things these panels leave out from the start:
 - Zero-downtime deploys: traffic switches only after the new version answers a real HTTP request on its actual domain; if it returns 400/5xx, the old version stays live
 - **Deploy Doctor:** explains known errors in the logs of failed deploys (Django ALLOWED_HOSTS, CSRF, missing secret key, database connection, migrations, missing packages or environment variables, out of memory) and fixes the suitable ones in one click with a redeploy
 - **Web terminal:** a shell in the app's running container from the browser (Compose services and replicas included); admins and project developers only, and opening one is recorded in the audit log
+- **Shared environment variables:** defined per project and given to every app in it (the app's own value wins; not given to PR previews)
+- **Copy an app:** a new app with the same settings, environment variables and scheduled jobs (e.g. a staging environment)
+- **Database import:** upload a `.sql` / `.sql.gz` dump or a mongodump archive from the panel; a backup is taken first
+- **Server maintenance:** logs for every container, start/stop containers created outside Xudbin, Docker disk usage and one-click cleanup
 - Mandatory and domain-dependent environment variables a framework needs are added during deploy if missing; for Django, the variable names `settings.py` actually reads are detected
 - Per-app memory/CPU limits; running deploys can be cancelled, with a 30-minute timeout
 - After every deploy the image is scanned for known vulnerabilities with Trivy

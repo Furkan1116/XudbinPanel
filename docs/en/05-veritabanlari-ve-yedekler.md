@@ -77,3 +77,7 @@ sudo xudbin restore s3://bucket/key --endpoint https://... --access-key ... --se
 ```
 
 You're asked for the backup passphrase and the panel restarts from the backup. Then redeploy your apps and restore your databases from their backups.
+
+## Importing a dump
+
+**Import a dump** on the database page's **Backups** tab loads a dump taken on another server: `pg_dump` / `mysqldump` output (`.sql` or `.sql.gz`) for PostgreSQL and MySQL/MariaDB, `mongodump --archive` output for MongoDB. A backup of the current data is taken first; if the backup fails, the import does not start. The file can be up to 300 MB. Redis is not supported.

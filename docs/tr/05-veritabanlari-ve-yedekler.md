@@ -77,3 +77,7 @@ sudo xudbin restore s3://bucket/anahtar --endpoint https://... --access-key ... 
 ```
 
 Yedek şifresi sorulur, panel yedekten yeniden başlar. Ardından uygulamaları yeniden deploy et ve veritabanlarını yedeklerinden geri yükle.
+
+## Döküm içe aktarma
+
+Veritabanı sayfasının **Yedekler** sekmesindeki **Döküm içe aktar** ile başka bir sunucudan aldığın dökümü yüklersin: PostgreSQL ve MySQL/MariaDB için `pg_dump` / `mysqldump` çıktısı (`.sql` ya da `.sql.gz`), MongoDB için `mongodump --archive` çıktısı. Önce mevcut verinin yedeği otomatik alınır; yedek alınamazsa içe aktarma başlamaz. Dosya en fazla 300 MB olabilir. Redis desteklenmez.
