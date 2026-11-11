@@ -45,6 +45,25 @@ Each PR gets its own address, is updated on new commits, and is deleted along wi
 
 If the GitHub App is connected (or the app has a GitHub access token saved), the preview URL is posted as a comment on the PR. Open previews are listed under **Open PR previews** on the main app's **Overview** tab. For security, PRs from forks aren't deployed. Previews do **not** receive the main app's production environment variables: since anyone with write access to the repo can run code on a branch, the separate **Preview environment variables** list on the **Environment variables** tab is used (if empty, a preview only gets `XUDBIN_PREVIEW=1`). Put test values there. The git token is used only for cloning and is not written to the cloned repo's `.git/config`. Previews created before this version are updated with the new list on the next event for that PR (e.g. a push).
 
+## Private image registries (GHCR, Docker Hub, GitLab...)
+
+If your app comes from a private Docker image (e.g. `ghcr.io/mycompany/api:latest`), or the base image in its Dockerfile is private, the panel needs to log in to that registry. As an admin, open the **Image registries** section on the **Git sources** page, click **Add login** and enter:
+
+- **Registry:** `ghcr.io`, `docker.io`, `registry.gitlab.com` or `registry.example.com:5000`. Docker Hub's other names (`index.docker.io`, `registry-1.docker.io`) are saved as `docker.io`.
+- **Username** and **password or token:** we recommend a token with `read:packages` on GitHub, a read-only access token on Docker Hub, and a deploy token with `read_registry` on GitLab.
+
+Before saving, the login is tried against the registry through Docker on the panel's own server (the same check as `docker login`), so a wrong login isn't saved. If the registry is reachable only from remote servers, you can turn off **Verify before saving**. You can re-check a saved login later with **Test** and rotate its token with **Edit**. There is one login per registry.
+
+The panel picks the login itself based on the image address (an address without a registry means Docker Hub: `nginx`, `user/app`):
+
+- Apps with a **Docker image** source: when the image is pulled on the app's server. This includes remote servers and replicas on extra servers; images are transferred to extra servers from the main server, so no login is needed there.
+- Apps with a **Git or upload** source: during the build, if the Dockerfile's base image is in a private registry (on a separate build server too).
+- **Docker Compose:** `docker compose` runs with a temporary Docker configuration that exists only for that deploy, lives outside the deploy folder, is readable only by the panel, and is deleted when the deploy ends.
+
+The password or token is stored encrypted, is never returned by the API or shown in the UI, and is never written to deploy logs. It isn't passed to build steps (`RUN`, build arguments) or containers, and a Compose file can't read the temporary configuration file (files outside the compose folder are usable only with the "Host access" permission, which only an admin can turn on).
+
+**What you should know:** logins apply panel-wide. Every user who can deploy apps (members included) can deploy **any image the token can access** in a registry listed here to their own app, and thereby see its contents. Nobody can see the token, but they can use its access. So use a token with read-only access, limited to the repositories of images meant to run on the panel; consider a separate account/token for more sensitive images. Only admins can access this page and its API (`/api/settings/registries`); adding, changing, deleting and testing logins are recorded in the audit log.
+
 ## Deploying from CI
 
 To start deploys from your own CI pipeline (e.g. after tests pass), use an API key and the `xb` tool: [CLI and API](11-cli-ve-api.md).

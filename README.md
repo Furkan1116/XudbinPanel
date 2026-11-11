@@ -36,6 +36,7 @@ It tackles three things these panels leave out from the start:
 - One-click rollback to a previous version, live deploy and app logs
 - Automatic deploys from Git push webhooks (GitHub, GitLab, Gitea...) with HMAC signature verification
 - **GitHub App:** created from the panel in one click; private repos deploy without entering a token, repos are picked from a list, push and PR events arrive without setting up webhooks
+- **Private image registries:** admin-managed logins for GHCR, Docker Hub, GitLab or your own registry, stored encrypted and used automatically for image pulls, private base images in builds and Compose deploys
 - **Pull request previews:** each PR gets its own address, updates on new commits and is removed when the PR closes; the address is posted as a PR comment. PRs from forks are not deployed
 - **One-click templates:** WordPress, Ghost, n8n, Uptime Kuma, Vaultwarden, Gitea, Nextcloud, Metabase, Grafana, Directus, Matomo and more
 - Background workers (services without a port) and multiple replicas for web apps; Caddy load-balances between replicas and takes a crashed one out of rotation
