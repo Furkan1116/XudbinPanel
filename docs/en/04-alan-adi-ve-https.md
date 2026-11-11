@@ -25,6 +25,20 @@ The certificate is issued on the first visit and renewed automatically. If the d
 
 Apps like Django, Rails or Vite may reject unknown domains. If you fill their allowed hosts with `{{XUDBIN_DOMAINS}}`, new domains are added on every deploy (see the [FAQ](12-sss.md)).
 
+## Redirects (www → example.com)
+
+If you connected both `www.example.com` and `example.com` to the same app, you can make one the main address and redirect the other to it:
+
+1. Both domains' A records must point to the server; add both on the **Domains** tab. When you add `www.example.com` and `example.com` is already listed (or the other way round), the form offers **Redirect to example.com**.
+2. To change it later, pick **Redirect to ...** in the selector next to the domain in the list; **Serves the app** removes the redirect.
+
+A redirecting domain is shown as `www.example.com → example.com`. Visitors are sent to the target with a permanent redirect (301), keeping the path and query (`www.example.com/blog?s=1` → `example.com/blog?s=1`). Caddy does the redirect, so no request reaches the app; the redirecting domain still gets its own HTTPS certificate.
+
+- The target must be another domain of the same app that doesn't redirect itself; chains, loops and redirects to other sites aren't possible.
+- A domain that other domains redirect to can't be deleted; remove their redirects first.
+- IP deny/allow lists and automatic bans also apply to the redirect. WAF, rate limit and password protection apply at the target.
+- Redirecting domains don't count as the app's address: they're left out of `{{XUDBIN_URL}}`, `{{XUDBIN_DOMAINS}}` and `{{XUDBIN_ORIGINS}}` (updated on the next deploy), and uptime monitoring and health checks use the main address.
+
 ## Wildcard apps domain
 
 To give new apps addresses under your own domain instead of sslip.io:

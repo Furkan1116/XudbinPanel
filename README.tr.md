@@ -36,6 +36,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Tek tıkla önceki sürüme dönüş, canlı deploy ve uygulama logları
 - Git push webhook'u ile otomatik deploy (GitHub, GitLab, Gitea...), HMAC imza doğrulamalı
 - **GitHub App:** panelden tek tıkla oluşturulur; özel repolar token girmeden deploy edilir, repolar listeden seçilir, push ve PR olayları webhook kurmadan gelir
+- **Özel imaj kayıt depoları:** GHCR, Docker Hub, GitLab ya da kendi registry'n için yöneticinin eklediği, şifreli saklanan girişler; imaj çekerken, özel temel imajlı derlemelerde ve Compose deploy'larında kendiliğinden kullanılır
 - **Pull request önizlemeleri:** her PR ayrı bir adreste açılır, yeni commit'lerde güncellenir, PR kapanınca silinir; adres PR'a yorum olarak yazılır. Fork'tan gelen PR'lar deploy edilmez
 - **Hazır şablonlar:** WordPress, Ghost, n8n, Uptime Kuma, Vaultwarden, Gitea, Nextcloud, Metabase, Grafana, Directus, Matomo ve daha fazlası tek tıkla
 - Arka plan işçileri (portu olmayan servisler) ve web uygulamaları için birden çok kopya (replica); Caddy kopyalar arasında yük dağıtır, çöken kopyayı devre dışı bırakır
@@ -44,6 +45,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - **Zamanlanmış görevler (cron):** uygulamanın imajında komut çalıştırma, çıktı ve süre geçmişi
 - Kalıcı klasör (volume) yedekleri: zamanlanmış, S3'e de yüklenebilen, tek tıkla geri yükleme
 - Canlı loglarda anlık filtre; geçmiş loglarda (son 1 saat – 14 gün) tüm kopyalar ve Compose servislerinde arama
+- **Web terminali:** uygulamanın çalışan konteynerinde tarayıcıdan komut satırı (Compose servisleri ve kopyalar dahil); yalnız yönetici ve proje geliştiricilerine açık, açılışı işlem kaydına geçer
 - Şifreli ortam değişkenleri, kalıcı depolama klasörleri, CPU/bellek izleme
 
 **Veritabanları**
@@ -70,7 +72,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 
 **Bildirimler:** E-posta (SMTP), Discord, Telegram, Slack, genel webhook. Olaylar: site çöktü / düzeldi, deploy sonucu, imajda kritik güvenlik açığı, HTTPS sertifikası bitmek üzere, sunucuda disk veya bellek doluyor, başarısız zamanlanmış görev, banlanan IP, başarısız yedek, erişilemeyen sunucu.
 
-**Alan adları:** Sunucuya kendi wildcard alan adını ver (`*.apps.sirketim.com`), yeni uygulamalar onun altında adres alır. DNS kayıtları panelden denetlenir ("bu kayıt şu IP'yi göstermeli"). Portları açık olmayan sunucular için **Cloudflare Tunnel** desteği.
+**Alan adları:** Sunucuya kendi wildcard alan adını ver (`*.apps.sirketim.com`), yeni uygulamalar onun altında adres alır. DNS kayıtları panelden denetlenir ("bu kayıt şu IP'yi göstermeli"). Portları açık olmayan sunucular için **Cloudflare Tunnel** desteği. **Yönlendirme:** bir alan adı, aynı uygulamanın başka bir alan adına kalıcı olarak yönlendirilebilir (`www.ornek.com → ornek.com`); yol ve sorgu korunur, yönlendirmeyi ve sertifikayı Caddy yapar.
 
 **Kullanıcılar ve ekip:** Yönetici ve üye rolleri; üyeler projelere **geliştirici** veya **izleyici** olarak eklenir ve yalnız o projeleri görmeleri amaçlanır (üye rolü henüz güçlü bir güvenlik sınırı değildir, bkz. [SECURITY.md](SECURITY.md)). **Tek oturum açma (SSO):** Google Workspace, Microsoft Entra, Keycloak, Authentik, GitLab gibi OpenID Connect sağlayıcılarıyla giriş. **İşlem kaydı:** kim, ne zaman, neyi değiştirdi. **API anahtarları:** süreli, istenirse salt okunur; `xb` komut satırı aracı ve CI/CD için. Yeni kullanıcı geçici şifreyle eklenir, ilk girişte kendi şifresini belirler.
 

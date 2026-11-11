@@ -1,5 +1,6 @@
 import tls from "node:tls";
 import { db } from "../db.js";
+import { primaryDomain } from "./domain-policy.js";
 import { getSettings } from "../lib/settings.js";
 import { safeGet } from "../lib/ssrf.js";
 import { dockerFor } from "./docker.js";
@@ -31,7 +32,8 @@ async function checkUrl(url: string): Promise<{ ok: boolean; status: number | nu
 }
 
 function primaryUrl(appId: number) {
-  const d = db.prepare("SELECT host, https FROM domains WHERE app_id = ? ORDER BY generated, id LIMIT 1").get(appId) as { host: string; https: number } | undefined;
+  // Yönlendiren alan adı denenirse yalnız Caddy'nin 301'i ölçülür, uygulama değil.
+  const d = primaryDomain(appId);
   if (!d) return null;
   const server = db.prepare("SELECT s.https_mode FROM apps a JOIN servers s ON s.id = a.server_id WHERE a.id = ?").get(appId) as { https_mode: string };
   return { host: d.host, url: `${d.https && server.https_mode !== "off" ? "https" : "http"}://${d.host}` };
@@ -148,6 +150,10 @@ async function checkResources() {
 }
 
 export function startUptimeMonitor() {
+  // Durum bellekte tutulur. Panel yeniden başladığında süren kesintiler geri yüklenir; yoksa site düzeldiğinde
+  // kesinti kapanmaz, "yeniden çalışıyor" bildirimi de gitmezdi.
+  const open = db.prepare("SELECT app_id, started_at, reason FROM uptime_incidents WHERE ended_at IS NULL ORDER BY id").all() as { app_id: number; started_at: number; reason: string | null }[];
+  for (const i of open) state.set(i.app_id, { fails: FAIL_THRESHOLD, down: true, since: i.started_at, firstFail: i.started_at, reason: i.reason ?? "" });
   let running = false;
   const tick = async () => {
     if (running || !getSettings().uptimeEnabled) return;
@@ -160,7 +166,12 @@ export function startUptimeMonitor() {
       for (let i = 0; i < apps.length; i += 8) await Promise.all(apps.slice(i, i + 8).map((a) => checkApp(a).catch(() => {})));
       // Çalışmayan (durdurulmuş, silinmiş) uygulamaların durumunu unut.
       const ids = new Set(apps.map((a) => a.id));
-      for (const id of state.keys()) if (!ids.has(id)) state.delete(id);
+      for (const [id, s] of state) {
+        if (ids.has(id)) continue;
+        // İzleme dışı kalan (durdurulan, izlemesi kapatılan) uygulamanın açık kesintisi sonsuza dek açık kalmasın.
+        if (s.down) db.prepare("UPDATE uptime_incidents SET ended_at = ? WHERE app_id = ? AND ended_at IS NULL").run(Date.now(), id);
+        state.delete(id);
+      }
     } finally {
       running = false;
     }

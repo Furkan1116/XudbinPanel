@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { primaryDomain } from "./domain-policy.js";
 import { decrypt, randomToken } from "../lib/crypto.js";
 import { dockerFor, removeContainer } from "./docker.js";
 import { applyCaddyConfig } from "./caddy.js";
@@ -89,8 +90,9 @@ export async function handlePrEvent(parent: AppRow, ev: PrEvent) {
         parent.id, ev.number, Date.now(),
       );
     const id = Number(res.lastInsertRowid);
-    if (server.public_ip) {
-      const host = `${slug}.${server.public_ip.replace(/\./g, "-")}.sslip.io`;
+    // Sunucunun kendi wildcard alan adı varsa önizleme de onun altında açılır (ana uygulamalarla aynı kural).
+    const host = server.apps_domain ? `${slug}.${server.apps_domain}` : server.public_ip ? `${slug}.${server.public_ip.replace(/\./g, "-")}.sslip.io` : null;
+    if (host) {
       db.prepare("INSERT INTO domains (app_id, host, https, generated, created_at) VALUES (?, ?, ?, 1, ?)").run(id, host, server.https_mode === "off" ? 0 : 1, Date.now());
     }
     app = getApp(id)!;
@@ -107,7 +109,7 @@ export async function handlePrEvent(parent: AppRow, ev: PrEvent) {
 
 /** GitHub'da PR'a önizleme adresini yorum olarak yazar: GitHub App kuruluysa onun adına, değilse uygulamanın git token'ıyla. */
 async function commentOnPr(parent: AppRow, ev: PrEvent, previewId: number) {
-  const d = db.prepare("SELECT host, https FROM domains WHERE app_id = ? LIMIT 1").get(previewId) as { host: string; https: number } | undefined;
+  const d = primaryDomain(previewId);
   if (!d) return;
   const text = `🚀 **Xudbin önizlemesi** hazırlanıyor: ${d.https ? "https" : "http"}://${d.host}\n\nYeni commit'lerde otomatik güncellenir, PR kapanınca silinir.`;
   if (ev.repo && (await commentAsApp(ev.repo, ev.number, text).catch(() => false))) return;

@@ -456,6 +456,23 @@ const migrations: string[] = [
   `
   ALTER TABLE apps ADD COLUMN last_webhook TEXT;
   `,
+  // Özel imaj kayıt depoları için yönetici girişleri (şifre/token şifreli; API'den dönmez).
+  `
+  CREATE TABLE registry_credentials (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    host        TEXT NOT NULL UNIQUE,      -- normalize edilmiş: docker.io, ghcr.io, registry.gitlab.com, ornek.com:5000
+    username    TEXT NOT NULL,
+    secret      TEXT NOT NULL,             -- şifreli
+    created_at  INTEGER NOT NULL,
+    verified_at INTEGER
+  );
+  `,
+  // Alan adı yönlendirmesi (www → çıplak alan adı gibi): hedef aynı uygulamanın yönlendirmeyen bir alan adı.
+  // Hedefi olan alan adının silinmesini API engeller; SET NULL yalnız uygulama silinirken devreye girer.
+  `
+  ALTER TABLE domains ADD COLUMN redirect_to INTEGER REFERENCES domains(id) ON DELETE SET NULL;
+  `,
 ];
 
 function migrate() {

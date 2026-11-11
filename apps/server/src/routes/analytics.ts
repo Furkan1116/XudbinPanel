@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db.js";
+import { SERVING_DOMAIN } from "../services/domain-policy.js";
 import { HttpError } from "../lib/http.js";
 import type { AppEnv } from "../lib/types.js";
 import { accessibleAppIds } from "../services/access.js";
@@ -14,7 +15,7 @@ export const analyticsRoutes = new Hono<AppEnv>()
     const sites = db
       .prepare(
         `SELECT a.id, a.name, p.name AS project,
-                (SELECT host FROM domains d WHERE d.app_id = a.id ORDER BY d.generated, d.id LIMIT 1) AS host
+                (SELECT host FROM domains d WHERE d.app_id = a.id AND d.${SERVING_DOMAIN} ORDER BY d.generated, d.id LIMIT 1) AS host
          FROM apps a JOIN projects p ON p.id = a.project_id WHERE a.id IN (${ids.map(() => "?").join(",")}) ORDER BY p.name, a.name`,
       )
       .all(...ids);

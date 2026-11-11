@@ -154,7 +154,7 @@ async function buildCpus(docker: Docker): Promise<number | null> {
 export async function buildImage(
   docker: Docker,
   context: Readable,
-  opts: { tag: string; dockerfile?: string; buildargs?: Record<string, string>; signal?: AbortSignal; pull?: boolean },
+  opts: { tag: string; dockerfile?: string; buildargs?: Record<string, string>; signal?: AbortSignal; pull?: boolean; registryconfig?: Docker.RegistryConfig },
   log: (line: string) => void,
 ) {
   // Derleme, sunucudaki canlı uygulamalara en az bir çekirdek bırakır.
@@ -167,6 +167,8 @@ export async function buildImage(
     forcerm: true,
     labels: { "xudbin.managed": "true" },
     ...(opts.pull ? { pull: true } : {}),
+    // Özel temel imajlar için kayıt deposu girişleri: yalnız Docker Engine'e başlıkla gider, derleme adımlarına (RUN, build-arg) geçmez.
+    ...(opts.registryconfig ? { registryconfig: opts.registryconfig } : {}),
     ...(cpus ? { cpuperiod: 100_000, cpuquota: cpus * 100_000 } : {}),
   });
   let failure: string | null = null;

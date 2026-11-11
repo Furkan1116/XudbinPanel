@@ -6,7 +6,7 @@ import { CreateAppWizard } from "@/components/CreateAppWizard";
 import { TemplateDialog } from "@/components/TemplateDialog";
 import { FrameworkLogo } from "@/components/FrameworkLogo";
 import { Button, ConfirmDialog, Dialog, Empty, Field, Notice, PageHeader, PageLoading, Section, StatusBadge, useAction } from "@/components/ui";
-import { api, type App, type Server } from "@/lib/api";
+import { api, primaryDomain, type App, type Server } from "@/lib/api";
 import { useAuthStatus } from "@/lib/auth";
 import { t } from "@/lib/i18n";
 
@@ -51,7 +51,7 @@ export function ProjectDetailPage() {
             {apps.map((a) => {
               const Icon = SOURCE_ICON[a.sourceType];
               const logo = a.framework && a.framework !== "auto" && (a.sourceType === "git" || a.sourceType === "upload");
-              const domain = a.domains[0];
+              const domain = primaryDomain(a.domains);
               return (
                 <div key={a.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
                   {logo ? <FrameworkLogo id={a.framework} className="size-4 shrink-0" /> : <Icon className="size-4 shrink-0 text-faint" strokeWidth={1.8} />}

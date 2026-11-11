@@ -6,6 +6,7 @@ import tarFs from "tar-fs";
 import YAML from "yaml";
 import { config } from "../config.js";
 import { db } from "../db.js";
+import { servingDomains } from "./domain-policy.js";
 import { decrypt, encrypt, randomAlnum } from "../lib/crypto.js";
 import { bus } from "../lib/events.js";
 import { removeEscapingSymlinks, resolveInside, writeInside } from "../lib/paths.js";
@@ -23,6 +24,7 @@ import { extractZip, latestAppUpload } from "./uploads.js";
 import { appTokenAllowed, gitTokenFor } from "./github-app.js";
 import { resourceLimits } from "../lib/limits.js";
 import { assertSafeGitUrl } from "../lib/ssrf.js";
+import { buildRegistryConfig, prepareComposeDockerConfig, pullAuthFor, registryHostOf } from "./registries.js";
 import { ensureRelayCa, extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas, startRemoteReplicas } from "./remote-replicas.js";
 
 export type AppRow = {
@@ -89,9 +91,12 @@ export function getApp(id: number) {
 
 const BUILD_ROOT = path.join(config.dataDir, "builds");
 
-/** {{XUDBIN_URL}}, {{XUDBIN_DOMAINS}}, {{XUDBIN_ORIGINS}} yer tutucularını uygulamanın güncel alan adlarıyla doldurur. */
+/**
+ * {{XUDBIN_URL}}, {{XUDBIN_DOMAINS}}, {{XUDBIN_ORIGINS}} yer tutucularını uygulamanın güncel alan adlarıyla doldurur.
+ * Yönlendiren alan adları (www → çıplak alan adı gibi) uygulamaya hiç ulaşmaz; listelere girmez.
+ */
 export function fillPlaceholders(env: Record<string, string>, appId: number, httpsOn: boolean) {
-  const hosts = db.prepare("SELECT host, https FROM domains WHERE app_id = ? ORDER BY generated, id").all(appId) as { host: string; https: number }[];
+  const hosts = servingDomains(appId);
   const url = (h: { host: string; https: number }) => `${h.https && httpsOn ? "https" : "http"}://${h.host}`;
   const values: Record<string, string> = {
     XUDBIN_URL: hosts[0] ? url(hosts[0]) : "",
@@ -197,6 +202,14 @@ export function cancelDeployment(id: number) {
     return true;
   }
   const r = db.prepare("UPDATE deployments SET status = 'cancelled', finished_at = ? WHERE id = ? AND status = 'queued'").run(Date.now(), id);
+  if (r.changes > 0) {
+    // Sıradaki deploy iptal edildiyse ve başka bekleyen/çalışan yoksa uygulama "deploy ediliyor" durumunda takılı kalmasın.
+    db.prepare(
+      `UPDATE apps SET status = CASE WHEN container IS NULL THEN 'idle' ELSE 'running' END
+       WHERE status = 'deploying' AND id = (SELECT app_id FROM deployments WHERE id = ?)
+         AND NOT EXISTS (SELECT 1 FROM deployments d WHERE d.app_id = apps.id AND d.status IN ('queued', 'running'))`,
+    ).run(id);
+  }
   return r.changes > 0;
 }
 
@@ -262,7 +275,9 @@ async function runDeployment(deploymentId: number) {
       } else if (app.source_type === "image") {
         image = app.image!;
         log(`İmaj çekiliyor: ${image}`);
-        await pullImage(dockerFor(server), image, log);
+        const auth = pullAuthFor(image);
+        if (auth) log(`${registryHostOf(image)} için kayıtlı giriş kullanılıyor.`);
+        await pullImage(dockerFor(server), image, log, auth);
       } else {
         image = await buildFromSource(app, server, deploymentId, workdir, log, signal);
       }
@@ -449,16 +464,18 @@ async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: num
   const tag = `xudbin/${app.slug}:${deploymentId}`;
   const pack = () => tarFs.pack(contextDir, { ignore: (name) => name.split(path.sep).includes(".git") });
   // Temel imaj günde bir tazelenir (güvenlik yamaları aynı etikette gelir); kayıt deposuna ulaşılamazsa önbellektekiyle derlenir.
+  // Kayıtlı kayıt deposu girişleri (temel imaj özel bir depodaysa); Docker Engine'e başlıkla gider, loglara ve derleme adımlarına girmez.
+  const registryconfig = buildRegistryConfig();
   const build = async (target: ServerRow) => {
     const pull = shouldPullBase(`${target.id}:${app.slug}`);
     if (pull) log("Temel imajın güncel sürümü kontrol ediliyor (günde bir).");
     try {
-      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal, pull }, log);
+      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal, pull, registryconfig }, log);
     } catch (err) {
       if (!pull || !/pull access denied|toomanyrequests|rate limit|manifest unknown|i\/o timeout|TLS handshake|no such host|connection refused/i.test((err as Error).message)) throw err;
       basePulledAt.delete(`${target.id}:${app.slug}`);
       log("Temel imaj tazelenemedi; sunucudaki kopyayla yeniden derleniyor.");
-      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal }, log);
+      await buildImage(dockerFor(target), pack(), { tag, dockerfile, signal, registryconfig }, log);
     }
   };
   // Ayrı derleme sunucusu: ağır derlemeler canlı uygulamaların sunucusunu yormasın; imaj sonra aktarılır.
@@ -540,7 +557,8 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   const base = `xb-${app.slug}-${deploymentId}`;
   const names = Array.from({ length: count }, (_, i) => (i === 0 ? base : `${base}-${i + 1}`));
   const network = await ensureProjectNetwork(server, app.project_id);
-  const hosts = (db.prepare("SELECT host FROM domains WHERE app_id = ? ORDER BY generated, id").all(app.id) as { host: string }[]).map((d) => d.host);
+  // Sağlık kontrolü gerçek Host başlığıyla yapılır; yönlendiren alan adı uygulamanın adresi değildir.
+  const hosts = servingDomains(app.id).map((d) => d.host);
 
   const created: string[] = [];
   const failWithLogs = async (name: string, message: string, extra: { status?: number | null } = {}): Promise<never> => {
@@ -556,6 +574,10 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
     throw new Error(`${message} Eski sürüm yayında kalmaya devam ediyor.`);
   };
 
+  // Trafik yeni sürüme geçmeden bir şey ters giderse (imaj yok, başlatma hatası, ek sunucu hatası...) yeni konteynerler
+  // geride kalmasın: çalışır halde kalan bir kopya, uygulamanın iç adına (xb-<ad>) gelen istekleri almaya devam ederdi.
+  let switched = false;
+  try {
   for (const name of names) {
     log(`Konteyner başlatılıyor: ${name}`);
     const container = await docker.createContainer({
@@ -682,6 +704,7 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   const previousRemote = remoteReplicasOf(fresh);
   const remote = await startRemoteReplicas({ app: fresh, primary: server, image, deploymentId, env, hosts, log, signal }, extras);
 
+  switched = true;
   const previous = [fresh.container, ...(JSON.parse(fresh.replica_containers || "[]") as string[])].filter((n): n is string => Boolean(n) && !names.includes(n!));
   db.prepare("UPDATE apps SET container = ?, replica_containers = ?, remote_replicas = ?, current_image = ? WHERE id = ?").run(
     names[0]!,
@@ -716,6 +739,10 @@ async function runContainer(app: AppRow, server: ServerRow, image: string, deplo
   }
   await removeRemoteReplicas(previousRemote.filter((r) => !remote.some((x) => x.container === r.container)), log);
   if (!worker) await waitForCertificates(server, app.id, log);
+  } catch (err) {
+    if (!switched) for (const n of created) await removeContainer(docker, n).catch(() => {});
+    throw err;
+  }
 }
 
 /** HTTPS'li alan adlarının sertifikası alınana kadar (en fazla 90 sn) bekler; alınamazsa sebebini söyler. */
@@ -871,8 +898,15 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
 
   const env = composeEnv(server, workdir);
   const args = ["compose", "-p", `xb-${app.slug}`, "-f", composePath, "-f", overridePath];
+  // Kayıt deposu girişleri: deploy klasörünün dışında, yalnız bu komut süresince var olan bir DOCKER_CONFIG.
+  const auth = prepareComposeDockerConfig();
+  if (auth) env.DOCKER_CONFIG = auth.dir;
   log("docker compose up çalıştırılıyor...");
-  await run(dockerBin(), [...args, "up", "-d", "--build", "--remove-orphans", "--wait", "--wait-timeout", "120"], { cwd: dir, env, log, signal });
+  try {
+    await run(dockerBin(), [...args, "up", "-d", "--build", "--remove-orphans", "--wait", "--wait-timeout", "120"], { cwd: dir, env, log, signal, redact: auth?.secrets });
+  } finally {
+    auth?.cleanup();
+  }
   db.prepare("UPDATE apps SET container = ? WHERE id = ?").run(`xb-${app.slug}`, app.id);
   await applyCaddyConfig(server);
 }

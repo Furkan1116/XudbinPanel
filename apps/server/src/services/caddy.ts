@@ -247,6 +247,9 @@ type DomainRow = {
   status: string;
   kind: string;
   replica_containers: string;
+  /** Yönlendirme hedefi (aynı uygulamanın yönlendirmeyen bir alan adı); yoksa null. */
+  redirect_host: string | null;
+  redirect_https: number | null;
 };
 
 /**
@@ -319,9 +322,9 @@ function blockRoute(ranges: string[], reason: string): Route {
   };
 }
 
-function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; handlers: Route[] } {
+/** Uygulamanın IP engel ve izin listesi rotaları. */
+function ipRoutes(sec: AppSecurity): Route[] {
   const routes: Route[] = [];
-  const handlers: Route[] = [];
   if (sec.denyIps.length) routes.push(blockRoute(sec.denyIps, "deny"));
   if (sec.allowIps.length) {
     routes.push({
@@ -330,6 +333,12 @@ function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; ha
       terminal: true,
     });
   }
+  return routes;
+}
+
+function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; handlers: Route[] } {
+  const routes = ipRoutes(sec);
+  const handlers: Route[] = [];
   if (sec.rateLimit && sec.rateLimit > 0) {
     handlers.push({
       handler: "rate_limit",
@@ -380,9 +389,31 @@ const WAF_ERROR_ROUTES: Route[] = [
   },
 ];
 
+/**
+ * Yönlendiren alan adının rotası: Caddy kalıcı (301) yönlendirmeyi kendisi yapar, yol ve sorgu korunur.
+ * Önce engelli IP'ler, uygulamanın engel ve izin listesi uygulanır; WAF, hız sınırı ve şifre koruması
+ * yönlendirme yanıtında gereksiz (hedef adreste zaten uygulanır).
+ */
+export function redirectRoute(host: string, origin: string, blocked: string[], sec: AppSecurity): Route {
+  return {
+    match: [{ host: [host] }],
+    handle: [
+      {
+        handler: "subroute",
+        routes: [
+          ...(blocked.length ? [blockRoute(blocked, "blocklist")] : []),
+          ...ipRoutes(sec),
+          { handle: [{ handler: "static_response", status_code: 301, headers: { Location: [`${origin}{http.request.uri}`] } }] },
+        ],
+      },
+    ],
+    terminal: true,
+  };
+}
+
 function upstreamsFor(d: DomainRow): string[] {
   if (d.kind === "worker") return [];
-  if (d.source_type === "compose") return d.compose_service ? [`xb-${d.app_slug}-${d.compose_service}-1:${d.port}`] : [];
+  if (d.source_type === "compose") return d.compose_service && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(d.compose_service) ? [`xb-${d.app_slug}-${d.compose_service}-1:${d.port}`] : [];
   if (!d.container) return [];
   const replicas = (() => {
     try {
@@ -404,8 +435,11 @@ export function buildCaddyConfig(server: ServerRow) {
   const domains = db
     .prepare(
       `SELECT d.host, d.https, a.id AS app_id, a.slug AS app_slug, a.source_type, a.container, a.compose_service,
-              a.port, a.security, a.status, a.kind, a.replica_containers
+              a.port, a.security, a.status, a.kind, a.replica_containers,
+              t.host AS redirect_host, t.https AS redirect_https
        FROM domains d JOIN apps a ON a.id = d.app_id
+       -- Hedef yalnız aynı uygulamanın yönlendirmeyen alan adı olabilir (API de denetler; burada ikinci kez).
+       LEFT JOIN domains t ON t.id = d.redirect_to AND t.app_id = d.app_id AND t.redirect_to IS NULL
        WHERE a.server_id = ? ORDER BY d.id`,
     )
     .all(server.id) as DomainRow[];
@@ -464,6 +498,12 @@ export function buildCaddyConfig(server: ServerRow) {
   const relayIn = httpsOff ? { routes: [], hosts: [] } : incomingRelays(server);
 
   for (const d of domains) {
+    if (d.redirect_host) {
+      const sec = parseSecurity(d.security);
+      const scheme = d.redirect_https && !httpsOff ? "https" : "http";
+      add(d.host, Boolean(d.https), redirectRoute(d.host, `${scheme}://${d.redirect_host}`, blocked, sec));
+      continue;
+    }
     const relay = d.kind === "worker" ? undefined : relayOut.get(d.app_id);
     const upstreams = relay ? relay.upstreams.map((u) => u.dial) : upstreamsFor(d);
     const sec = parseSecurity(d.security);

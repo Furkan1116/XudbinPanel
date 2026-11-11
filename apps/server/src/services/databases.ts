@@ -392,6 +392,11 @@ async function doVerify(d: DatabaseRow, backupId: number) {
 
 /** Dakikada bir: zamanı gelen otomatik yedekleri alır. */
 export function startBackupScheduler() {
+  // Panel yeniden başlarken yarıda kalan yedekler ve görevler "çalışıyor" görünmesin.
+  const note = "Panel yeniden başlatıldığı için yarıda kaldı";
+  for (const table of ["backups", "volume_backups", "panel_backups"]) db.prepare(`UPDATE ${table} SET status = 'failed', error = ? WHERE status = 'running'`).run(note);
+  db.prepare("UPDATE backups SET verify_status = 'failed', verify_note = ? WHERE verify_status = 'running'").run(note);
+  db.prepare("UPDATE cron_runs SET status = 'failed', finished_at = ?, output = ? WHERE status = 'running'").run(Date.now(), note);
   setInterval(() => {
     const due = db
       .prepare(

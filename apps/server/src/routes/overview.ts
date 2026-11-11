@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { db } from "../db.js";
+import { SERVING_DOMAIN } from "../services/domain-policy.js";
 import { nextRun } from "../lib/cron.js";
 import type { AppEnv } from "../lib/types.js";
 import { accessibleProjectIds } from "../services/access.js";
@@ -68,8 +69,8 @@ export const overviewRoutes = new Hono<AppEnv>()
     const apps = db
       .prepare(
         `SELECT a.id, a.name, a.status, a.uptime_enabled AS uptimeEnabled, p.id AS projectId, p.name AS projectName,
-                (SELECT host FROM domains WHERE app_id = a.id ORDER BY generated, id LIMIT 1) AS host,
-                (SELECT https FROM domains WHERE app_id = a.id ORDER BY generated, id LIMIT 1) AS https,
+                (SELECT host FROM domains WHERE app_id = a.id AND ${SERVING_DOMAIN} ORDER BY generated, id LIMIT 1) AS host,
+                (SELECT https FROM domains WHERE app_id = a.id AND ${SERVING_DOMAIN} ORDER BY generated, id LIMIT 1) AS https,
                 (SELECT COUNT(*) FROM uptime_checks WHERE app_id = a.id AND at > ?) AS n24,
                 (SELECT SUM(ok) FROM uptime_checks WHERE app_id = a.id AND at > ?) AS ok24,
                 (SELECT COUNT(*) FROM uptime_checks WHERE app_id = a.id AND at > ?) AS n7,

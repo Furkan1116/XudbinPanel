@@ -26,7 +26,10 @@ import { databaseRoutes } from "./routes/databases.js";
 import { securityRoutes } from "./routes/security.js";
 import { serverRoutes, sshKeyRoutes } from "./routes/servers.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { registryRoutes } from "./routes/registries.js";
 import { userRoutes } from "./routes/users.js";
+import { terminalRoutes } from "./routes/terminal.js";
+import { terminals } from "./services/terminal.js";
 import { applyCaddyConfig, ensureCaddy } from "./services/caddy.js";
 import { startBackupScheduler } from "./services/databases.js";
 import { startPanelBackupScheduler } from "./services/panel-backup.js";
@@ -87,6 +90,8 @@ app.use("/api/*", auditTrail);
 app.route("/api/servers", serverRoutes);
 app.route("/api/ssh-keys", sshKeyRoutes);
 app.route("/api/projects", projectRoutes);
+// Web terminali (/api/apps/:id/terminal...): uygulama uçlarından önce, ayrı dosyada.
+app.route("/api/apps", terminalRoutes);
 app.route("/api/apps", appRoutes);
 app.route("/api/frameworks", frameworkRoutes);
 app.route("/api/uploads", uploadRoutes);
@@ -96,6 +101,7 @@ app.route("/api/security", securityRoutes);
 app.route("/api/analytics", analyticsRoutes);
 app.route("/api/templates", templateRoutes);
 app.route("/api/overview", overviewRoutes);
+app.route("/api/settings/registries", registryRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/users", userRoutes);
 app.all("/api/*", (c) => c.json({ error: "Bulunamadı" }, 404));
@@ -160,5 +166,8 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: config.hos
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => server.close(() => process.exit(0)));
+  process.on(signal, () => {
+    // Açık terminallerin kabukları konteynerlerde kalmasın (en fazla birkaç saniye beklenir).
+    void Promise.race([terminals.closeAll(), new Promise((r) => setTimeout(r, 5_000))]).finally(() => server.close(() => process.exit(0)));
+  });
 }

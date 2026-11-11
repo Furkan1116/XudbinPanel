@@ -1,4 +1,5 @@
 /** Demo modu: API isteklerini (yöntem + yol) örnek verilerle yanıtlar. */
+import { primaryDomain } from "@/lib/api";
 import { getLang } from "@/lib/i18n";
 import frameworks from "./frameworks.json";
 import templates from "./templates.json";
@@ -105,7 +106,7 @@ on("GET", "/overview/monitoring", () => {
     .filter((a) => a.kind === "web")
     .map((a) => {
       const monitored = a.uptimeEnabled && a.domains.length > 0;
-      if (!monitored) return { id: a.id, name: a.name, status: a.status, projectName: projectName(a.projectId), url: a.domains[0]?.url ?? null, monitored, down: false, downSince: null, up24h: null, up7d: null, lastMs: null, avgMs: null, bars: Array(24).fill(null) };
+      if (!monitored) return { id: a.id, name: a.name, status: a.status, projectName: projectName(a.projectId), url: primaryDomain(a.domains)?.url ?? null, monitored, down: false, downSince: null, up24h: null, up7d: null, lastMs: null, avgMs: null, bars: Array(24).fill(null) };
       const u = D.uptimeOf(a.id);
       const end = Date.now();
       const bars = Array.from({ length: 24 }, (_, i) => {
@@ -120,7 +121,7 @@ on("GET", "/overview/monitoring", () => {
         name: a.name,
         status: a.status,
         projectName: projectName(a.projectId),
-        url: a.domains[0]?.url ?? null,
+        url: primaryDomain(a.domains)?.url ?? null,
         monitored,
         down: u.down,
         downSince: inc?.startedAt ?? null,
@@ -343,6 +344,12 @@ on("GET", "/settings/backup", () => ({
 on("GET", "/settings/sso", () => ({ sso: null, redirectUri: `${location.origin}/api/auth/oidc/callback` }));
 on("GET", "/settings/github", () => ({ app: null, installations: [] }));
 on("GET", "/settings/github/repos", () => ({ connected: false, repos: [] }));
+on("GET", "/settings/registries", () => ({
+  registries: [
+    { id: 1, name: "GitHub Container Registry", host: "ghcr.io", username: "ornekfirma-ci", createdAt: Date.now() - 41 * 86_400_000, verifiedAt: Date.now() - 2 * 3_600_000 },
+    { id: 2, name: "Docker Hub", host: "docker.io", username: "ornekfirma", createdAt: Date.now() - 12 * 86_400_000, verifiedAt: null },
+  ],
+}));
 on("GET", "/settings/audit", ({ query }) => {
   const q = (query.get("q") ?? "").toLowerCase();
   const before = Number(query.get("before") ?? 0);

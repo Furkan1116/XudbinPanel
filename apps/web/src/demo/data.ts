@@ -3,7 +3,7 @@
  * "canlı" görünsün. Yalnız VITE_DEMO=1 derlemesinde (dinamik import ile) yüklenir.
  */
 import { getLang } from "@/lib/i18n";
-import type { App, Backup, Database, Deployment, Finding, Project, Server, ServerStats } from "@/lib/api";
+import { primaryDomain, type App, type Backup, type Database, type Deployment, type Finding, type Project, type Server, type ServerStats } from "@/lib/api";
 
 export const NOW = Date.now();
 export const MIN = 60_000;
@@ -144,7 +144,7 @@ export const projects: Omit<Project, "apps" | "databases" | "running">[] = [
   { id: 3, name: "Deneme", description: "Yeni fikirler ve denemeler", createdAt: NOW - 21 * DAY },
 ];
 
-type AppSeed = Partial<App> & Pick<App, "id" | "projectId" | "name" | "slug" | "sourceType" | "framework" | "status"> & { serverId: number; customDomain?: string };
+type AppSeed = Partial<App> & Pick<App, "id" | "projectId" | "name" | "slug" | "sourceType" | "framework" | "status"> & { serverId: number; customDomain?: string; apexRedirect?: boolean };
 
 function makeApp(s: AppSeed): App {
   const server = servers.find((x) => x.id === s.serverId)!;
@@ -154,11 +154,15 @@ function makeApp(s: AppSeed): App {
     s.kind === "worker"
       ? []
       : [
-          ...(s.customDomain ? [{ id: s.id * 10 + 1, host: s.customDomain, https: true, generated: false, url: `https://${s.customDomain}` }] : []),
-          { id: s.id * 10, host: sslip(s.slug, ip), https: true, generated: true, url: `https://${sslip(s.slug, ip)}` },
+          ...(s.customDomain ? [{ id: s.id * 10 + 1, host: s.customDomain, https: true, generated: false, url: `https://${s.customDomain}`, redirectTo: null, redirectHost: null }] : []),
+          // www.ornek.com servis ederken ornek.com ona kalıcı yönlendirir.
+          ...(s.customDomain && s.apexRedirect
+            ? [{ id: s.id * 10 + 2, host: s.customDomain.replace(/^www\./, ""), https: true, generated: false, url: `https://${s.customDomain.replace(/^www\./, "")}`, redirectTo: s.id * 10 + 1, redirectHost: s.customDomain }]
+            : []),
+          { id: s.id * 10, host: sslip(s.slug, ip), https: true, generated: true, url: `https://${sslip(s.slug, ip)}`, redirectTo: null, redirectHost: null },
         ];
   const token = Array.from({ length: 24 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(r() * 36)]).join("");
-  const { serverId: _s, customDomain: _c, ...rest } = s;
+  const { serverId: _s, customDomain: _c, apexRedirect: _r, ...rest } = s;
   return {
     server: { id: server.id, name: server.name, status: server.status },
     buildOptions: {},
@@ -425,6 +429,7 @@ export const apps: App[] = [
     framework: "nextjs",
     status: "running",
     customDomain: "www.ornekfirma.com.tr",
+    apexRedirect: true,
     gitUrl: "https://github.com/ornekfirma/kurumsal-site",
     buildOptions: { nodeVersion: "22" },
     port: 3000,
@@ -683,7 +688,7 @@ function buildLog(a: App, d: { id: number; title: string; commitSha: string | nu
     L.push(`İşçi kontrolü: ${name} 10 sn çalışmaya devam etmeli...`, `${name} çalışıyor.`);
   } else {
     L.push(`Uygulamanın ${a.port} portunu açması bekleniyor...`, `${name} çalışıyor, ${a.port} portu ${2 + (d.id % 4)} sn içinde yanıt verdi.`);
-    if (a.httpCheck && a.domains[0]) L.push(`HTTP kontrolü: GET ${a.healthPath ?? "/"} (Host: ${a.domains[0].host})`, "HTTP kontrolü geçti: HTTP/1.1 200 OK");
+    if (a.httpCheck && primaryDomain(a.domains)) L.push(`HTTP kontrolü: GET ${a.healthPath ?? "/"} (Host: ${primaryDomain(a.domains)!.host})`, "HTTP kontrolü geçti: HTTP/1.1 200 OK");
     L.push(`Eski konteyner kaldırılıyor: xb-${a.slug}-${String(d.id - 1).padStart(3, "0")}`);
     L.push("HTTPS sertifikaları hazır.");
   }
@@ -1135,7 +1140,7 @@ type Row = { value: string; visitors: number; pageviews: number };
 const SITE_WEIGHT: Record<number, number> = { 1: 1, 2: 0.08, 3: 0.55, 4: 0.32, 5: 0.25, 8: 0.04, 10: 0.12 };
 export const analyticsSites = apps
   .filter((a) => SITE_WEIGHT[a.id] !== undefined)
-  .map((a) => ({ id: a.id, name: a.name, project: projects.find((p) => p.id === a.projectId)!.name, host: a.domains[0]?.host ?? null }));
+  .map((a) => ({ id: a.id, name: a.name, project: projects.find((p) => p.id === a.projectId)!.name, host: primaryDomain(a.domains)?.host ?? null }));
 
 const PAGES: Record<number, string[]> = {
   1: ["/", "/hizmetler", "/hakkimizda", "/iletisim", "/referanslar", "/kariyer", "/hizmetler/web-tasarim", "/hizmetler/e-ticaret", "/kvkk"],
@@ -1195,7 +1200,7 @@ export function analyticsReport(site: string, range: string) {
     bounceRate: 0.41 + (mul - 1) * 0.3,
     avgDurationMs: Math.round(146_000 * (mul > 1 ? 0.93 : 1)),
   });
-  const pageEntries: [string, number][] = ids.flatMap((id) => (PAGES[id] ?? ["/"]).map((p, i): [string, number] => [ids.length > 1 ? `${apps.find((a) => a.id === id)!.domains[0]?.host ?? ""}${p}` : p, (SITE_WEIGHT[id] ?? 0.1) / (i + 1.3)]));
+  const pageEntries: [string, number][] = ids.flatMap((id) => (PAGES[id] ?? ["/"]).map((p, i): [string, number] => [ids.length > 1 ? `${primaryDomain(apps.find((a) => a.id === id)!.domains)?.host ?? ""}${p}` : p, (SITE_WEIGHT[id] ?? 0.1) / (i + 1.3)]));
   const pages = rowsFrom(pageEntries, pageviews / 2.2, 2.2).slice(0, 12);
   const entries = rowsFrom(pageEntries.slice(0, 10).map(([p, w], i) => [p, w * (i === 0 ? 2.5 : 1)]), visitors * 0.9, 1).slice(0, 10);
   return {

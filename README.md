@@ -30,12 +30,14 @@ It tackles three things these panels leave out from the start:
 - Environment variables read in the code and `.env.example` can be added in one click; values such as secret keys and domains are generated automatically
 - Zero-downtime deploys: traffic switches only after the new version answers a real HTTP request on its actual domain; if it returns 400/5xx, the old version stays live
 - **Deploy Doctor:** explains known errors in the logs of failed deploys (Django ALLOWED_HOSTS, CSRF, missing secret key, database connection, migrations, missing packages or environment variables, out of memory) and fixes the suitable ones in one click with a redeploy
+- **Web terminal:** a shell in the app's running container from the browser (Compose services and replicas included); admins and project developers only, and opening one is recorded in the audit log
 - Mandatory and domain-dependent environment variables a framework needs are added during deploy if missing; for Django, the variable names `settings.py` actually reads are detected
 - Per-app memory/CPU limits; running deploys can be cancelled, with a 30-minute timeout
 - After every deploy the image is scanned for known vulnerabilities with Trivy
 - One-click rollback to a previous version, live deploy and app logs
 - Automatic deploys from Git push webhooks (GitHub, GitLab, Gitea...) with HMAC signature verification
 - **GitHub App:** created from the panel in one click; private repos deploy without entering a token, repos are picked from a list, push and PR events arrive without setting up webhooks
+- **Private image registries:** admin-managed logins for GHCR, Docker Hub, GitLab or your own registry, stored encrypted and used automatically for image pulls, private base images in builds and Compose deploys
 - **Pull request previews:** each PR gets its own address, updates on new commits and is removed when the PR closes; the address is posted as a PR comment. PRs from forks are not deployed
 - **One-click templates:** WordPress, Ghost, n8n, Uptime Kuma, Vaultwarden, Gitea, Nextcloud, Metabase, Grafana, Directus, Matomo and more
 - Background workers (services without a port) and multiple replicas for web apps; Caddy load-balances between replicas and takes a crashed one out of rotation
@@ -70,7 +72,7 @@ It tackles three things these panels leave out from the start:
 
 **Notifications:** email (SMTP), Discord, Telegram, Slack, generic webhook. Events: site down / recovered, deploy result, critical image vulnerability, HTTPS certificate expiring, server disk or memory filling up, failed scheduled job, banned IP, failed backup, unreachable server.
 
-**Domains:** give a server your own wildcard domain (`*.apps.mycompany.com`) and new apps get addresses under it. DNS records are checked from the panel ("this record should point to this IP"). **Cloudflare Tunnel** support for servers without open ports.
+**Domains:** give a server your own wildcard domain (`*.apps.mycompany.com`) and new apps get addresses under it. DNS records are checked from the panel ("this record should point to this IP"). **Cloudflare Tunnel** support for servers without open ports. **Redirects:** a domain can permanently redirect to another domain of the same app (`www.example.com → example.com`), keeping the path and query; Caddy handles it and issues the certificate.
 
 **Users and teams:** admin and member roles; members are added to projects as **developer** or **viewer** and are meant to see only those projects (the member role is not yet a strong security boundary, see [SECURITY.md](SECURITY.md)). **Single sign-on (SSO):** log in with OpenID Connect providers such as Google Workspace, Microsoft Entra, Keycloak, Authentik and GitLab. **Audit log:** who changed what and when. **API tokens:** with expiry, optionally read-only; for the `xb` command-line tool and CI/CD. New users are added with a temporary password and set their own on first login.
 

@@ -25,6 +25,20 @@ Sertifika ilk ziyarette otomatik alınır ve yenilenir. Alan adı Cloudflare pro
 
 Django, Rails veya Vite gibi uygulamalar tanımadıkları alan adlarını reddedebilir. İzinli adresleri `{{XUDBIN_DOMAINS}}` ile doldurursan yeni alan adları her deploy'da otomatik eklenir (bkz. [SSS](12-sss.md)).
 
+## Yönlendirme (www → ornek.com)
+
+`www.ornek.com` ile `ornek.com`'u aynı uygulamaya bağladıysan birini asıl adres yapıp diğerini ona yönlendirebilirsin:
+
+1. İki alan adının da A kaydı sunucuyu göstermeli; ikisini de **Domainler** sekmesine ekle. `www.ornek.com` eklerken `ornek.com` zaten listedeyse (ya da tersi) formda **ornek.com adresine yönlendir** seçeneği çıkar.
+2. Sonradan değiştirmek için listede alan adının yanındaki seçimden **... adresine yönlendir**'i seç; **Uygulamayı açar** yönlendirmeyi kaldırır.
+
+Yönlendiren alan adı listede `www.ornek.com → ornek.com` olarak görünür. Ziyaretçi kalıcı yönlendirmeyle (301) hedef adrese gider; yol ve sorgu korunur (`www.ornek.com/blog?s=1` → `ornek.com/blog?s=1`). Yönlendirmeyi Caddy yapar, uygulamaya istek gitmez; yönlendiren alan adı da kendi HTTPS sertifikasını alır.
+
+- Hedef yalnız aynı uygulamanın, kendisi yönlendirmeyen bir alan adı olabilir; zincir ve döngü kurulamaz, başka bir siteye yönlendirme yapılamaz.
+- Başka adreslerin yönlendirdiği bir alan adı silinemez; önce onların yönlendirmesini kaldır.
+- IP engel ve izin listesi ile otomatik banlar yönlendirmede de geçerlidir. WAF, hız sınırı ve şifre koruması hedef adreste uygulanır.
+- Yönlendiren alan adları uygulamanın adresi sayılmaz: `{{XUDBIN_URL}}`, `{{XUDBIN_DOMAINS}}` ve `{{XUDBIN_ORIGINS}}`'e girmez (bir sonraki deploy'da güncellenir); erişilebilirlik izleme ve sağlık kontrolü asıl adresle yapılır.
+
 ## Wildcard uygulama alan adı
 
 Yeni uygulamaların sslip.io yerine kendi alan adının altında adres almasını istiyorsan:

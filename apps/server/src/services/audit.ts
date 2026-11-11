@@ -19,8 +19,11 @@ const LABELS: [RegExp, string, string?][] = [
   [/^POST \/api\/apps\/\d+\/(start|stop|restart)$/, "Uygulamayı başlattı/durdurdu"],
   [/^POST \/api\/apps\/\d+\/domains/, "Alan adı ekledi"],
   [/^DELETE \/api\/apps\/\d+\/domains\/\d+$/, "Alan adını sildi"],
+  [/^PUT \/api\/apps\/\d+\/domains\/\d+$/, "Alan adı yönlendirmesini değiştirdi"],
   [/^POST \/api\/apps\/\d+\/upload$/, "Yeni sürüm yükledi"],
   [/^POST \/api\/apps\/\d+\/webhook\/regenerate$/, "Webhook adresini yeniledi"],
+  [/^POST \/api\/apps\/\d+\/terminal$/, "Konteynerde terminal açtı"],
+  [/^POST \/api\/apps\/\d+\/terminal\/[\w-]+\/close$/, "Terminali kapattı"],
   [/^POST \/api\/databases$/, "Veritabanı oluşturdu"],
   [/^DELETE \/api\/databases\/\d+$/, "Veritabanını sildi"],
   [/^POST \/api\/databases\/\d+\/backups\/\d+\/restore$/, "Yedekten geri yükledi"],
@@ -42,9 +45,17 @@ const LABELS: [RegExp, string, string?][] = [
   [/^(POST|DELETE) \/api\/settings\/account\/tokens/, "API anahtarlarını değiştirdi"],
   [/^PUT \/api\/settings\/(panel|backup|sso)$/, "Panel ayarlarını değiştirdi"],
   [/^(POST|DELETE) \/api\/settings\/notifications/, "Bildirim kanallarını değiştirdi"],
+  [/^POST \/api\/settings\/registries\/test$/, "Kayıt deposu girişini denedi"],
+  [/^POST \/api\/settings\/registries\/\d+\/test$/, "Kayıt deposu girişini denedi"],
+  [/^POST \/api\/settings\/registries$/, "Kayıt deposu girişi ekledi"],
+  [/^PATCH \/api\/settings\/registries\/\d+$/, "Kayıt deposu girişini değiştirdi"],
+  [/^DELETE \/api\/settings\/registries\/\d+$/, "Kayıt deposu girişini sildi"],
   [/^POST \/api\/security\/score\/fix$/, "Güvenlik düzeltmesi uyguladı"],
   [/^(POST|DELETE|PUT) \/api\/security/, "Güvenlik ayarlarını değiştirdi"],
 ];
+
+/** Kaydedilmeyen istekler: terminal tuş vuruşları ve boyut değişimi (her tuş bir istek; içerik zaten saklanmaz). */
+const SKIP = [/^POST \/api\/apps\/\d+\/terminal\/[\w-]+\/(input|resize)$/];
 
 export function actionLabel(method: string, path: string) {
   const key = `${method} ${path}`;
@@ -70,6 +81,7 @@ export const auditTrail = createMiddleware<AppEnv>(async (c, next) => {
   if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.method === "OPTIONS") return;
   const user = c.get("user");
   if (!user) return;
+  if (SKIP.some((re) => re.test(`${c.req.method} ${c.req.path}`))) return;
   try {
     recordAudit({
       userId: user.id,
