@@ -838,7 +838,7 @@ export const en: Record<string, string> = {
   "Kaydediliyor…": "Saving…",
   "Kaydet": "Save",
   "Kaydet ve uygula": "Save and apply",
-  "Kayıtlı bir token var. Değiştirmek için yenisini gir.": "A token is saved. Enter a new one to replace it.",
+  "Kayıtlı bir token var. Değiştirmek için yenisini gir; repo adresini değiştirirsen kayıtlı token silinir.": "A token is saved. Enter a new one to replace it; changing the repo URL deletes the saved token.",
   "Kaynak": "Source",
   "Kendi alan adın": "Your domain",
   "Kendi imzalı sertifika (iç ağ, test)": "Self-signed certificate (internal network, testing)",

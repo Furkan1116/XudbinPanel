@@ -710,7 +710,7 @@ function Settings({ app }: { app: App }) {
                   <input className="input" value={form.gitBranch} onChange={set("gitBranch")} />
                 </Field>
               </div>
-              <Field label={t("Erişim token'ı")} hint={app.hasGitToken ? t("Kayıtlı bir token var. Değiştirmek için yenisini gir.") : t("Yalnız özel repolar için.")}>
+              <Field label={t("Erişim token'ı")} hint={app.hasGitToken ? t("Kayıtlı bir token var. Değiştirmek için yenisini gir; repo adresini değiştirirsen kayıtlı token silinir.") : t("Yalnız özel repolar için.")}>
                 <input className="input" type="password" autoComplete="off" value={form.gitToken} onChange={set("gitToken")} />
               </Field>
             </>

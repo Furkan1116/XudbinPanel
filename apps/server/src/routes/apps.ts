@@ -340,7 +340,7 @@ export const appRoutes = new Hono<AppEnv>()
       // Adres değiştiyse App token onayı yeniden değerlendirilir; üye yeni bir özel repo bağlarsa onay düşer (O3).
       git_app_url: input.gitUrl === undefined || input.gitUrl === app.git_url ? undefined : approvedAppUrl(c.get("user"), app.project_id, input.gitUrl, app.id),
       git_branch: input.gitBranch,
-      git_token: input.gitToken === undefined ? undefined : input.gitToken ? encrypt(input.gitToken) : null,
+      git_token: storedGitToken(input.gitToken, input.gitUrl !== undefined && !sameGitRepo(input.gitUrl ?? "", app.git_url ?? "")),
       build_type: input.buildType,
       framework: input.framework === undefined ? undefined : input.framework === "auto" || getFramework(input.framework) ? input.framework : undefined,
       build_options: input.buildOptions ? JSON.stringify(input.buildOptions) : undefined,
@@ -413,7 +413,8 @@ export const appRoutes = new Hono<AppEnv>()
         git_branch: input.gitBranch || "main",
         git_app_url: input.gitUrl === app.git_url ? app.git_app_url : approvedAppUrl(c.get("user"), app.project_id, input.gitUrl, app.id),
       });
-      if (input.gitToken !== undefined) map.git_token = input.gitToken ? encrypt(input.gitToken) : null;
+      const token = storedGitToken(input.gitToken, !sameGitRepo(input.gitUrl ?? "", app.git_url ?? ""));
+      if (token !== undefined) map.git_token = token;
     } else {
       // Git'ten ayrılınca önizlemeler anlamsız; imajda da git bilgisi tutulmaz (token sızmasın).
       Object.assign(map, { previews_enabled: 0, git_url: null, git_app_url: null, git_token: null });
@@ -1167,6 +1168,16 @@ export const webhookRoutes = new Hono().post("/deploy/:token", async (c) => {
   });
 
 /** İki git adresi aynı repoyu mu gösteriyor? (büyük/küçük harf, sondaki .git ve / farkı yok sayılır) */
+/**
+ * Kaydedilecek git token'ı: istekte yeni token varsa o, boş gelirse silinir. Repo değiştiyse ve yeni token
+ * verilmediyse saklı token silinir; yoksa yöneticinin girdiği (API'den okunamayan) token bir sonraki deploy'da
+ * üyenin yazdığı yeni adrese gönderilirdi. undefined: dokunulmaz.
+ */
+function storedGitToken(input: string | null | undefined, repoChanged: boolean): string | null | undefined {
+  if (input) return encrypt(input);
+  return input !== undefined || repoChanged ? null : undefined;
+}
+
 export function sameGitRepo(a: string, b: string): boolean {
   const norm = (u: string) => {
     try {

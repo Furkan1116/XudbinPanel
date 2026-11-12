@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { db } from "../src/db.js";
-import { encrypt } from "../src/lib/crypto.js";
+import { decrypt, encrypt } from "../src/lib/crypto.js";
 import { HttpError } from "../src/lib/http.js";
 import type { AppEnv } from "../src/lib/types.js";
 import { appRoutes } from "../src/routes/apps.js";
@@ -13,6 +13,8 @@ const h = new Hono<AppEnv>();
 h.use("*", async (c, next) => { c.set("user", { id: admin, email: "", name: "", role: "admin", mustChangePassword: false }); await next(); });
 h.route("/api/apps", appRoutes);
 h.onError((e, c) => (e instanceof HttpError ? c.json({ error: e.message }, e.status) : c.json({ error: String(e) }, 500)));
+const send = (method: string, url: string, body: object) => h.request(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const patch = (id: number, body: object) => send("PATCH", `/api/apps/${id}`, body);
 const put = (id: number, body: object) => h.request(`/api/apps/${id}/source`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 function seed(source: string, extra: Record<string, unknown> = {}) {
@@ -72,4 +74,38 @@ test("kaynak değiştirme: geçersiz istekler reddedilir, kayıt değişmez", as
   seed("git", { parent_app_id: parent, preview_pr: 3 });
   assert.equal((await put(parent, { sourceType: "image", image: "nginx" })).status, 400);
   assert.equal(row(parent).source_type, "git");
+});
+
+test("git token: repo adresi değişince saklı token silinir, aynı repoda korunur, yeni token kullanılır", async () => {
+  const id = seed("git", { git_url: "https://github.com/ornek/ozel", git_token: encrypt("yonetici-tokeni") });
+  const token = () => decrypt(row(id).git_token as string | null);
+  // Aynı repo (sonda .git ya da /) ve yalnız dal değişikliği token'a dokunmaz.
+  assert.equal((await patch(id, { gitUrl: "https://github.com/ornek/ozel.git", gitBranch: "canli" })).status, 200);
+  assert.equal(token(), "yonetici-tokeni");
+  // Başka bir repo/host: token yeni adrese gitmesin diye silinir.
+  assert.equal((await patch(id, { gitUrl: "https://saldirgan.example.com/ornek/ozel" })).status, 200);
+  assert.equal(row(id).git_token, null);
+  // Yeni adresle birlikte yeni token verilirse o saklanır.
+  assert.equal((await patch(id, { gitUrl: "https://github.com/ornek/diger", gitToken: "yeni-token" })).status, 200);
+  assert.equal(token(), "yeni-token");
+});
+
+test("git token: kaynak değiştirme ve kopyalama saklı token'ı başka repoya taşımaz", async () => {
+  const id = seed("git", { git_url: "https://github.com/ornek/ozel", git_token: encrypt("yonetici-tokeni") });
+  assert.equal((await put(id, { sourceType: "git", gitUrl: "https://github.com/ornek/ozel/", gitBranch: "main" })).status, 200);
+  assert.equal(decrypt(row(id).git_token as string), "yonetici-tokeni");
+  assert.equal((await put(id, { sourceType: "git", gitUrl: "https://saldirgan.example.com/x/y" })).status, 200);
+  assert.equal(row(id).git_token, null);
+  assert.equal((await put(id, { sourceType: "git", gitUrl: "https://github.com/ornek/z", gitToken: "yeni" })).status, 200);
+  assert.equal(decrypt(row(id).git_token as string), "yeni");
+
+  // Kopya aynı repoyu ve token'ı alır; kopyanın adresi değişince token orada da silinir.
+  const res = await send("POST", `/api/apps/${id}/clone`, { name: "Kopya" });
+  assert.equal(res.status, 201, await res.clone().text());
+  const copy = ((await res.json()) as { app: { id: number } }).app.id;
+  assert.equal(row(copy).git_url, "https://github.com/ornek/z");
+  assert.equal(decrypt(row(copy).git_token as string), "yeni");
+  assert.equal((await patch(copy, { gitUrl: "https://saldirgan.example.com/x/y" })).status, 200);
+  assert.equal(row(copy).git_token, null);
+  assert.equal(decrypt(row(id).git_token as string), "yeni");
 });
