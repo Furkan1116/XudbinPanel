@@ -47,6 +47,8 @@ import { timeZone } from "../services/analytics.js";
 import { accessibleAppIds, accessibleProjectIds, canUpload, canWriteProject, hostShellLocked, requireSecretAccess, SECRET_MASK, secretsVisible } from "../services/access.js";
 import { appsForRepo, appTokenAllowed, approvedAppUrl, completeManifest, gitTokenFor, verifyGithubSignature } from "../services/github-app.js";
 import { extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas } from "../services/remote-replicas.js";
+import { checkAppNow, PreflightCheckError } from "../services/preflight/check.js";
+import { parseReport, PREFLIGHT_MODES, preflightMode } from "../services/preflight/gate.js";
 
 const parseJson = (raw: string | null) => {
   try {
@@ -128,6 +130,7 @@ function publicApp(a: AppRow, secrets = true) {
     scan: { status: a.scan_status, at: a.scanned_at, summary: parseJson(a.scan_summary) },
     healthPath: a.health_path,
     memoryLimit: a.memory_limit,
+    preflightMode: preflightMode(a),
     domains: domains.map((d) => ({
       ...d,
       https: Boolean(d.https) && httpsActive,
@@ -256,11 +259,13 @@ export const appRoutes = new Hono<AppEnv>()
   .get("/:id", (c) => {
     const app = loadApp(idParam(c));
     const deployments = db
-      .prepare("SELECT id, status, trigger, title, commit_sha AS commitSha, image, started_at AS startedAt, finished_at AS finishedAt, diagnosis FROM deployments WHERE app_id = ? ORDER BY id DESC LIMIT 30")
+      .prepare("SELECT id, status, trigger, title, commit_sha AS commitSha, image, started_at AS startedAt, finished_at AS finishedAt, diagnosis, preflight FROM deployments WHERE app_id = ? ORDER BY id DESC LIMIT 30")
       .all(app.id)
       .map((d) => {
-        const row = d as { diagnosis: string | null };
-        return { ...row, diagnosis: row.diagnosis ? (JSON.parse(row.diagnosis) as Finding[]) : null };
+        const { preflight, ...row } = d as { diagnosis: string | null; preflight: string | null };
+        // Yayın kontrolünün yalnız özeti; bulgular /deployments/:id/preflight ucundan okunur.
+        const report = parseReport(preflight);
+        return { ...row, diagnosis: row.diagnosis ? (JSON.parse(row.diagnosis) as Finding[]) : null, preflight: report ? { outcome: report.outcome ?? null, counts: report.counts } : null };
       });
     // Okuma yetkisi sır yetkisi değildir: izleyici ve salt okunur anahtar env/önizleme env/webhook sırrını görmez.
     const secrets = secretsVisible(c, app.project_id);
@@ -308,6 +313,7 @@ export const appRoutes = new Hono<AppEnv>()
         extraServerIds: z.array(z.number().int()).max(5).optional(),
         healthPath: z.string().trim().max(200).regex(/^\/[\w\-./?=&%~]*$/, "Sağlık yolu / ile başlamalı, ör. /health").nullable().optional(),
         memoryLimit: z.number().int().min(32).max(1024 * 1024).nullable().optional(),
+        preflightMode: z.enum(PREFLIGHT_MODES).optional(),
         volumes: z
           .array(z.object({ name: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,40}$/i, "Volume adı yalnız harf, rakam, - ve _ içerebilir"), path: z.string().startsWith("/", "Yol / ile başlamalı").max(300) }))
           .max(20)
@@ -372,6 +378,7 @@ export const appRoutes = new Hono<AppEnv>()
       extra_server_ids: input.extraServerIds ? JSON.stringify([...new Set(input.extraServerIds)]) : undefined,
       health_path: input.healthPath,
       memory_limit: input.memoryLimit,
+      preflight_mode: input.preflightMode,
       volumes: input.volumes ? JSON.stringify(input.volumes) : undefined,
     };
     const entries = Object.entries(map).filter(([, v]) => v !== undefined);
@@ -696,10 +703,29 @@ export const appRoutes = new Hono<AppEnv>()
     return c.json({ app: publicApp(loadApp(app.id)) });
   })
 
-  .post("/:id/deploy", (c) => {
+  // skipPreflight: yayın kontrolünün kritik bulgularını bilerek geç. Yayın başlatabilen her rol kullanabilir;
+  // işlem kaydına ayrı etiketle yazılır, yayın günlüğünde de görünür.
+  .post("/:id/deploy", async (c) => {
     const app = loadApp(idParam(c));
-    const id = enqueueDeploy(app.id, "manual");
+    const { skipPreflight } = await body(c, z.object({ skipPreflight: z.boolean().optional() }));
+    if (skipPreflight) c.set("auditAction", "Yayın kontrolünü bilerek geçerek deploy başlattı");
+    const id = enqueueDeploy(app.id, "manual", { skipPreflight });
     return c.json({ deploymentId: id }, 202);
+  })
+
+  // Yayın kontrolü: son rapor (gizli değer içermez; görüntüleyici de görür) ve yayınlamadan kontrol.
+  .get("/:id/preflight", (c) => {
+    const app = loadApp(idParam(c));
+    return c.json({ mode: preflightMode(app), report: parseReport(app.preflight_report) });
+  })
+  .post("/:id/preflight", async (c) => {
+    const app = loadApp(idParam(c));
+    try {
+      return c.json({ mode: preflightMode(app), report: await checkAppNow(app) });
+    } catch (err) {
+      if (err instanceof PreflightCheckError) throw new HttpError(422, err.message);
+      throw err;
+    }
   })
 
   .post("/:id/rollback/:deploymentId", (c) => {
@@ -837,6 +863,7 @@ export const appRoutes = new Hono<AppEnv>()
       uptime_enabled: src.uptime_enabled,
       kind: src.kind,
       replicas: src.replicas,
+      preflight_mode: src.preflight_mode,
       // Kopya kendiliğinden deploy olmasın: otomatik deploy ve önizlemeler kapalı başlar.
       auto_deploy: 0,
       previews_enabled: 0,
@@ -957,6 +984,10 @@ export const deploymentRoutes = new Hono<AppEnv>()
   .get("/:id", (c) => {
     const dep = must(db.prepare("SELECT * FROM deployments WHERE id = ?").get(idParam(c)), "Deploy bulunamadı");
     return c.json({ deployment: dep });
+  })
+  .get("/:id/preflight", (c) => {
+    const dep = must(db.prepare("SELECT preflight FROM deployments WHERE id = ?").get(idParam(c)) as { preflight: string | null } | undefined, "Deploy bulunamadı");
+    return c.json({ report: parseReport(dep.preflight) });
   })
   .post("/:id/cancel", (c) => {
     if (!cancelDeployment(idParam(c))) throw new HttpError(409, "Bu deploy zaten bitmiş");

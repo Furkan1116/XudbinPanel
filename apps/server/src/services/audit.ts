@@ -16,6 +16,7 @@ const LABELS: [RegExp, string, string?][] = [
   [/^POST \/api\/apps\/\d+\/env\/merge$/, "Deploy Doktoru düzeltmesini uyguladı"],
   [/^PUT \/api\/apps\/\d+\/security$/, "Uygulama güvenlik ayarlarını değiştirdi"],
   [/^POST \/api\/apps\/\d+\/deploy$/, "Deploy başlattı"],
+  [/^POST \/api\/apps\/\d+\/preflight$/, "Yayın kontrolü çalıştırdı"],
   [/^POST \/api\/apps\/\d+\/rollback\/\d+$/, "Önceki sürüme döndü"],
   [/^POST \/api\/apps\/\d+\/(start|stop|restart)$/, "Uygulamayı başlattı/durdurdu"],
   [/^POST \/api\/apps\/\d+\/domains/, "Alan adı ekledi"],
@@ -91,7 +92,7 @@ export const auditTrail = createMiddleware<AppEnv>(async (c, next) => {
     recordAudit({
       userId: user.id,
       email: user.email,
-      action: actionLabel(c.req.method, c.req.path),
+      action: c.get("auditAction") ?? actionLabel(c.req.method, c.req.path),
       method: c.req.method,
       path: c.req.path,
       status: c.res.status,

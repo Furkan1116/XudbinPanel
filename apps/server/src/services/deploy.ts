@@ -26,6 +26,7 @@ import { resourceLimits } from "../lib/limits.js";
 import { assertSafeGitUrl } from "../lib/ssrf.js";
 import { buildRegistryConfig, prepareComposeDockerConfig, pullAuthFor, registryHostOf } from "./registries.js";
 import { ensureRelayCa, extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas, startRemoteReplicas } from "./remote-replicas.js";
+import { PreflightBlockedError, preflightForDeploy, preflightSkipped, recordComposePolicy, uploadTime } from "./preflight/gate.js";
 
 export type AppRow = {
   id: number;
@@ -82,6 +83,8 @@ export type AppRow = {
   extra_server_ids: string;
   remote_replicas: string;
   relay_secret: string | null;
+  preflight_mode: string;
+  preflight_report: string | null;
   created_at: number;
 };
 
@@ -161,10 +164,11 @@ const MAX_CONCURRENT = 2;
 const DEPLOY_TIMEOUT_MS = 30 * 60_000;
 const controllers = new Map<number, AbortController>();
 
-export function enqueueDeploy(appId: number, trigger: "manual" | "webhook" | "rollback", opts: { title?: string; image?: string } = {}) {
+/** `skipPreflight`: elle başlatılan yayında yayın kontrolünün kritik bulgularını bilerek geç (webhook'ta yok sayılır). */
+export function enqueueDeploy(appId: number, trigger: "manual" | "webhook" | "rollback", opts: { title?: string; image?: string; skipPreflight?: boolean } = {}) {
   const res = db
-    .prepare("INSERT INTO deployments (app_id, status, trigger, title, image, started_at) VALUES (?, 'queued', ?, ?, ?, ?)")
-    .run(appId, trigger, opts.title ?? "", opts.image ?? null, Date.now());
+    .prepare("INSERT INTO deployments (app_id, status, trigger, title, image, started_at, preflight_skip) VALUES (?, 'queued', ?, ?, ?, ?, ?)")
+    .run(appId, trigger, opts.title ?? "", opts.image ?? null, Date.now(), opts.skipPreflight && trigger === "manual" ? 1 : 0);
   const id = Number(res.lastInsertRowid);
   queue.push(id);
   db.prepare("UPDATE apps SET status = 'deploying' WHERE id = ?").run(appId);
@@ -255,7 +259,8 @@ function makeLogger(deploymentId: number) {
 }
 
 async function runDeployment(deploymentId: number) {
-  const dep = db.prepare("SELECT * FROM deployments WHERE id = ?").get(deploymentId) as { app_id: number; trigger: string; image: string | null };
+  const dep = db.prepare("SELECT * FROM deployments WHERE id = ?").get(deploymentId) as { app_id: number; trigger: string; image: string | null; preflight_skip: number };
+  const gate = { trigger: dep.trigger, skip: Boolean(dep.preflight_skip) };
   const app = getApp(dep.app_id);
   const { log, flush } = makeLogger(deploymentId);
   db.prepare("UPDATE deployments SET status = 'running', started_at = ? WHERE id = ?").run(Date.now(), deploymentId);
@@ -276,20 +281,22 @@ async function runDeployment(deploymentId: number) {
     if (!app.container && server.https_mode !== "off") await applyCaddyConfig(server).catch(() => {});
 
     if (app.source_type === "compose") {
-      await deployCompose(app, server, workdir, log, signal);
+      await deployCompose(app, server, deploymentId, workdir, log, signal, gate);
     } else {
       let image: string;
       if (dep.image) {
         image = dep.image;
         log(`Önceki sürüme dönülüyor: ${image}`);
+        log("Önceki sürüme dönüşte yayın kontrolü çalışmaz.");
       } else if (app.source_type === "image") {
         image = app.image!;
+        preflightSkipped(app, deploymentId, log);
         log(`İmaj çekiliyor: ${image}`);
         const auth = pullAuthFor(image);
         if (auth) log(`${registryHostOf(image)} için kayıtlı giriş kullanılıyor.`);
         await pullImage(dockerFor(server), image, log, auth);
       } else {
-        image = await buildFromSource(app, server, deploymentId, workdir, log, signal);
+        image = await buildFromSource(app, server, deploymentId, workdir, log, signal, gate);
       }
       db.prepare("UPDATE deployments SET image = ? WHERE id = ?").run(image, deploymentId);
       await runContainer(app, server, image, deploymentId, log, signal);
@@ -309,7 +316,7 @@ async function runDeployment(deploymentId: number) {
     const message = signal.aborted ? String(signal.reason) : (err as Error).message;
     log(`Hata: ${message}`);
     // Konteyner aşamasına gelmeden (ör. derlemede) düşen deploy'lar da deploy loguna bakılarak teşhis edilir.
-    if (app && !signal.aborted) {
+    if (app && !signal.aborted && !(err instanceof PreflightBlockedError)) {
       flush();
       const row = db.prepare("SELECT log, diagnosis FROM deployments WHERE id = ?").get(deploymentId) as { log: string; diagnosis: string | null };
       if (!row.diagnosis) recordDiagnosis(deploymentId, diagnose(row.log.split("\n"), { framework: app.framework, env: effectiveEnv(app), hosts: [] }), log);
@@ -417,19 +424,26 @@ async function cloneRepo(app: AppRow, workdir: string, log: (l: string) => void,
   return { dir: path.join(workdir, "src"), sha, msg };
 }
 
-async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: number, workdir: string, log: (l: string) => void, signal: AbortSignal) {
+type Gate = { trigger: string; skip: boolean };
+
+async function buildFromSource(app: AppRow, server: ServerRow, deploymentId: number, workdir: string, log: (l: string) => void, signal: AbortSignal, gate: Gate) {
   let dir: string;
+  let source: { commit?: string | null; uploadedAt?: number | null };
   if (app.source_type === "upload") {
     const zip = latestAppUpload(app.slug);
     if (!zip) throw new Error("Yüklenmiş dosya yok. Uygulama sayfasından proje klasörünü veya zip'i yükle.");
     log(`Yüklenen dosya açılıyor (${(fs.statSync(zip).size / 1024 / 1024).toFixed(1)} MB)...`);
     dir = await extractZip(zip, path.join(workdir, "src"));
+    source = { uploadedAt: uploadTime(zip) };
     db.prepare("UPDATE deployments SET title = CASE WHEN title = '' THEN 'Dosya yüklemesi' ELSE title END WHERE id = ?").run(deploymentId);
   } else {
     const cloned = await cloneRepo(app, workdir, log, signal);
     dir = cloned.dir;
+    source = { commit: cloned.sha };
     db.prepare("UPDATE deployments SET commit_sha = ?, title = CASE WHEN title = '' THEN ? ELSE title END WHERE id = ?").run(cloned.sha, cloned.msg, deploymentId);
   }
+  // Yayın kontrolü: kaynak alındı, panel henüz dosya yazmadı (Dockerfile.xudbin, .env...), derleme başlamadı.
+  preflightForDeploy({ app, deploymentId, ...gate, root: dir, source, settingsModule: effectiveEnv(app).DJANGO_SETTINGS_MODULE, log });
 
   const contextDir = resolveInside(dir, app.build_context || ".");
   if (!contextDir) throw new Error("Derleme klasörü repo dışında olamaz");
@@ -861,12 +875,15 @@ export function composeEnv(server: ServerRow, workdir: string): NodeJS.ProcessEn
   return { HOME: home, DOCKER_HOST: "ssh://xudbin-target", DOCKER_CONFIG: path.join(home, ".docker") };
 }
 
-async function deployCompose(app: AppRow, server: ServerRow, workdir: string, log: (l: string) => void, signal: AbortSignal) {
+async function deployCompose(app: AppRow, server: ServerRow, deploymentId: number, workdir: string, log: (l: string) => void, signal: AbortSignal, gate: Gate) {
   let dir: string;
   let composePath: string;
   if (app.git_url) {
     const cloned = await cloneRepo(app, workdir, log, signal);
     dir = cloned.dir;
+    db.prepare("UPDATE deployments SET commit_sha = ? WHERE id = ?").run(cloned.sha, deploymentId);
+    // Yayın kontrolü (yalnız gizli bilgi grubu): .env ve override dosyası yazılmadan önce.
+    preflightForDeploy({ app, deploymentId, ...gate, root: dir, source: { commit: cloned.sha }, log });
     const found = resolveInside(dir, app.dockerfile_path || "docker-compose.yml");
     if (!found) throw new Error("Compose dosyası repo dışında olamaz");
     composePath = found;
@@ -877,6 +894,7 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
     fs.mkdirSync(dir, { recursive: true });
     composePath = path.join(dir, "docker-compose.yml");
     fs.writeFileSync(composePath, app.compose_file);
+    preflightForDeploy({ app, deploymentId, ...gate, root: null, source: {}, log });
   }
 
   const doc = YAML.parse(fs.readFileSync(composePath, "utf8")) as { services?: Record<string, unknown> };
@@ -913,11 +931,12 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
       const resolved = await composeConfig(dockerBin(), args, { cwd: dir, env, signal });
       if (!resolved) log("docker compose config çalıştırılamadı; katı denetim uygulanıyor (değişkenli yollar ve << reddedilir)");
       const issues = resolved ? composeConfigIssues(resolved, dir, project) : composeHostAccessIssues(doc as Parameters<typeof composeHostAccessIssues>[0]);
+      recordComposePolicy(deploymentId, app.id, issues);
       if (issues.length) {
         issues.forEach((i) => log(`  ${i}`));
         throw new Error("Compose dosyası sunucunun kendisine erişim istiyor. Bu ayarlar konteynere sunucuda root yetkisi verebileceği için ancak bir yönetici uygulama ayarlarından \"Sunucu erişimi\" iznini açarsa çalıştırılır.");
       }
-    }
+    } else recordComposePolicy(deploymentId, app.id, null);
     log("docker compose up çalıştırılıyor...");
     await run(dockerBin(), [...args, "-f", overridePath, "up", "-d", "--build", "--remove-orphans", "--wait", "--wait-timeout", "120"], { cwd: dir, env, log, signal, redact: auth?.secrets });
   } finally {

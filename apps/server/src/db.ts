@@ -12,7 +12,7 @@ db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_k
  * Sıralı migration listesi. Yeni bir şema değişikliği gerektiğinde sona ekle,
  * mevcut olanları asla değiştirme. Hangisinin uygulandığını PRAGMA user_version tutar.
  */
-const migrations: string[] = [
+export const migrations: string[] = [
   `
   CREATE TABLE users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -477,38 +477,49 @@ const migrations: string[] = [
   `
   ALTER TABLE projects ADD COLUMN env TEXT;
   `,
+  // Yayın kontrolü (derlemeden önce dosya kontrolü). Yeni uygulamalar kritik bulguda durur (block); var olan
+  // uygulamalar panel güncellenince canlı sitelerin yayını bir anda durmasın diye "yalnız uyar" (warn) ile başlar.
+  // Raporlar gizli değer içermez: yalnız dosya yolu, satır ve anahtar adı.
+  `
+  ALTER TABLE apps ADD COLUMN preflight_mode TEXT NOT NULL DEFAULT 'block';
+  UPDATE apps SET preflight_mode = 'warn';
+  ALTER TABLE apps ADD COLUMN preflight_report TEXT;
+  ALTER TABLE deployments ADD COLUMN preflight TEXT;
+  ALTER TABLE deployments ADD COLUMN preflight_skip INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
-function migrate() {
-  const version = () => (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-  for (let v = version(); v < migrations.length; v++) {
+/** Migration'ları sırayla uygular (`upTo` verilirse yalnız o sürüme kadar; testler için). */
+export function applyMigrations(database: DatabaseSync, upTo = migrations.length) {
+  const version = () => (database.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+  for (let v = version(); v < upTo; v++) {
     const sql = migrations[v]!;
     // Tablo yeniden kuran migration'lar için (PRAGMA işlem içinde değiştirilemez).
     const fkOff = sql.trimStart().startsWith("-- foreign_keys_off");
-    if (fkOff) db.exec("PRAGMA foreign_keys = OFF");
+    if (fkOff) database.exec("PRAGMA foreign_keys = OFF");
     // Yazma kilidi alınıp sürüm yeniden okunur: aynı anda açılan başka bir süreç (ör. panel ve xudbin komutu)
     // bu migration'ı az önce uyguladıysa atlanır.
-    db.exec("BEGIN IMMEDIATE");
+    database.exec("BEGIN IMMEDIATE");
     try {
       if (version() > v) {
-        db.exec("COMMIT");
+        database.exec("COMMIT");
         v = version() - 1;
         continue;
       }
-      db.exec(sql);
+      database.exec(sql);
       if (fkOff) {
-        const broken = db.prepare("PRAGMA foreign_key_check").all();
+        const broken = database.prepare("PRAGMA foreign_key_check").all();
         if (broken.length) throw new Error(`Migration ${v + 1} yabancı anahtarları bozdu`);
       }
-      db.exec(`PRAGMA user_version = ${v + 1}`);
-      db.exec("COMMIT");
+      database.exec(`PRAGMA user_version = ${v + 1}`);
+      database.exec("COMMIT");
     } catch (err) {
-      db.exec("ROLLBACK");
+      database.exec("ROLLBACK");
       throw err;
     } finally {
-      if (fkOff) db.exec("PRAGMA foreign_keys = ON");
+      if (fkOff) database.exec("PRAGMA foreign_keys = ON");
     }
   }
 }
 
-migrate();
+applyMigrations(db);
