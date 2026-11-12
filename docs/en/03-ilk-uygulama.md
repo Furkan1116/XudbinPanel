@@ -48,6 +48,29 @@ Click **Create and deploy**. The live log streams on the **Deployments** tab. Th
 
 Once the app is live you'll find its automatic address on the **Overview** tab.
 
+## Pre-deploy check
+
+Source from Git or an upload is checked at the start of every deploy, before the build begins. The **Pre-deploy check** section on the **Overview** tab shows the latest report (critical/warning/info counts, when, which commit or upload) and each finding with file:line; **Check now** runs it without deploying.
+
+What it looks at:
+
+- **Secrets and unneeded files.** Critical: a complete private key, a `.env` with filled-in secret values (`.env.example`, `.env.sample`, `.env.template` excluded), a service account JSON with its private key. Warning: SQLite files, `node_modules`, virtual environments, `__pycache__`, files over 50 MB, credential files (`id_rsa`, `.pem`, `.p12`). Info: no `.gitignore` or `.dockerignore`. Secret values themselves are never written to the report, the log or API responses; only the file path, line and key name.
+- **Django.** Critical: a hard-coded `DEBUG = True` in the settings file that will certainly be used in production, or `runserver` as the start command. With several settings files and no certain choice the DEBUG finding is a warning and lists the files checked. Warning: hard-coded `SECRET_KEY`, `ALLOWED_HOSTS = ["*"]`, no gunicorn/uvicorn/daphne with your own Dockerfile, missing `STATIC_ROOT`/whitenoise. Info: no `CSRF_TRUSTED_ORIGINS`.
+- **Node.js and Next.js.** Critical: the start command is a development server (`next dev`, `vite`, a dev server behind `npm run dev`...). Warning: no lockfile, no `build` script or a missing called script, no Node version. Info: no `output: "standalone"` in Next.js.
+- **Dockerfile and port** (only when the repo's Dockerfile is used; with a preset the panel generates the Dockerfile). Warning: no `USER`, an untagged or `latest` base image, `EXPOSE` not matching the panel's port, `ADD` from a URL, `COPY . .` without `.dockerignore`, a server listening only on `127.0.0.1`.
+
+For Compose sources only the secrets group and the Compose policy result go into the report. Image sources have no source files, so the check is skipped; rollbacks don't run it.
+
+**Modes** (chosen in the section):
+
+- **Stop the deploy on critical findings** (default for new apps): with a critical finding the build doesn't start and the previous version stays live. Warnings and info never stop a deploy.
+- **Warn only** (default for apps that existed before the panel update): findings go to the log and the report, the deploy continues.
+- **Off.**
+
+If a deploy you started was stopped, **Deploy anyway** on the deploy record skips the check knowingly; the decision is written to the audit log and the deploy log. Deploys from a Git push can't skip it: the deploy fails and a notification is sent. If the check itself fails, the deploy is not stopped.
+
+This is a static, heuristic file check: it doesn't run code and catches common known mistakes early. It is not a security guarantee; "no issues found" does not mean the app is secure. In large repos it looks at the first 20,000 files within a few seconds and does not follow symlinks.
+
 ## Deploy Doctor
 
 If a deploy fails or the app is misbehaving, click **Diagnose** on the **Deploy Doctor** card on the **Overview** tab. A request is sent to the real domain and the logs are scanned. Known problems (Django ALLOWED_HOSTS, CSRF, a missing secret key, database connection, migrations, a missing package or environment variable, out of memory) are explained, and where possible a one-click fix applies the change and starts a redeploy.

@@ -29,6 +29,7 @@ It tackles three things these panels leave out from the start:
 - Framework-aware deploys: the repo is scanned when you add an app and a matching framework is suggested; each framework shows its settings, required environment variables and what will happen on deploy
 - Environment variables read in the code and `.env.example` can be added in one click; values such as secret keys and domains are generated automatically
 - Zero-downtime deploys: traffic switches only after the new version answers a real HTTP request on its actual domain; if it returns 400/5xx, the old version stays live
+- **Pre-deploy check:** a static check of the source files before every deploy for secrets, unneeded files and Django/Node/Dockerfile mistakes; can stop the deploy on critical findings (heuristic, not a security guarantee)
 - **Deploy Doctor:** explains known errors in the logs of failed deploys (Django ALLOWED_HOSTS, CSRF, missing secret key, database connection, migrations, missing packages or environment variables, out of memory) and fixes the suitable ones in one click with a redeploy
 - **Web terminal:** a shell in the app's running container from the browser (Compose services and replicas included); admins and project developers only, and opening one is recorded in the audit log
 - **Shared environment variables:** defined per project and given to every app in it (the app's own value wins; not given to PR previews)

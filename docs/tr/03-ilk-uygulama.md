@@ -48,6 +48,29 @@ Değişikliklerin geçerli olması için yeniden deploy et.
 
 Uygulama yayına girince **Genel** sekmesinde otomatik adresini görürsün.
 
+## Yayın kontrolü
+
+Git ve dosya yüklemesiyle gelen kaynak, her yayının başında, derleme başlamadan önce kontrol edilir. **Genel** sekmesindeki **Yayın kontrolü** bölümünde son rapor (kritik/uyarı/bilgi sayısı, ne zaman, hangi commit ya da yükleme) ve bulgular dosya:satır ile birlikte görünür; **Kontrol et** yayınlamadan kontrol eder.
+
+Kontrol edilenler:
+
+- **Gizli bilgi ve gereksiz dosyalar.** Kritik: gövdesiyle birlikte özel anahtar, dolu gizli değer içeren `.env` (`.env.example`, `.env.sample`, `.env.template` hariç), özel anahtarlı servis hesabı JSON'u. Uyarı: SQLite dosyası, `node_modules`, sanal ortam, `__pycache__`, 50 MB üstü dosya, kimlik dosyaları (`id_rsa`, `.pem`, `.p12`). Bilgi: `.gitignore` ya da `.dockerignore` yok. Gizli değerlerin kendisi rapora, günlüğe ya da API yanıtına yazılmaz; yalnız dosya yolu, satır ve anahtar adı.
+- **Django.** Kritik: üretimde kullanılacağı kesin olan ayar dosyasında sabit `DEBUG = True`, başlatma komutunun `runserver` olması. Birden çok ayar dosyası varsa ve hangisinin kullanıldığı kesin değilse DEBUG bulgusu uyarıdır ve bakılan dosyalar yazılır. Uyarı: koda gömülü `SECRET_KEY`, `ALLOWED_HOSTS = ["*"]`, kendi Dockerfile'ında gunicorn/uvicorn/daphne yokluğu, eksik `STATIC_ROOT`/whitenoise. Bilgi: `CSRF_TRUSTED_ORIGINS` yok.
+- **Node.js ve Next.js.** Kritik: başlatma komutunun geliştirme sunucusu olması (`next dev`, `vite`, `npm run dev` ile çağrılan bir geliştirme sunucusu...). Uyarı: kilit dosyası, `build` ya da çağrılan betik yok, Node sürümü belirtilmemiş. Bilgi: Next.js'te `output: "standalone"` yok.
+- **Dockerfile ve port** (yalnız depodaki Dockerfile kullanılıyorsa; ön ayarda Dockerfile'ı panel üretir). Uyarı: `USER` yok, taban imaj etiketsiz ya da `latest`, `EXPOSE` paneldeki portla uyuşmuyor, `ADD` ile uzak adres, `.dockerignore` olmadan `COPY . .`, sunucunun yalnız `127.0.0.1` dinlemesi.
+
+Compose kaynağında yalnız gizli bilgi grubu ve Compose politikasının sonucu rapora girer. İmaj kaynağında kaynak dosya olmadığı için kontrol atlanır; önceki sürüme dönüşte çalışmaz.
+
+**Modlar** (bölümdeki seçimle değişir):
+
+- **Kritik bulguda yayını durdur** (yeni uygulamalarda varsayılan): kritik bulgu varsa derleme başlamaz, eski sürüm yayında kalır. Uyarı ve bilgiler yayını durdurmaz.
+- **Yalnız uyar** (panel güncellenmeden önce var olan uygulamalarda varsayılan): bulgular günlüğe ve rapora yazılır, yayın sürer.
+- **Kapalı.**
+
+Elle başlattığın yayın durduysa deploy kaydındaki **Yine de yayınla** ile kontrolü bilerek geçebilirsin; bu karar işlem kaydına ve yayın günlüğüne yazılır. Git push ile gelen yayında geçiş yoktur: yayın başarısız olur ve bildirim gider. Kontrolün kendisi hata verirse yayın durmaz.
+
+Bu statik, sezgisel bir dosya kontrolüdür: kod çalıştırmaz, bilinen yaygın hataları erken gösterir. Güvenlik garantisi değildir; "sorun bulunmadı" sonucu uygulamanın güvenli olduğu anlamına gelmez. Büyük depolarda ilk 20.000 dosyaya ve birkaç saniyelik süreye bakılır, kısayollar (symlink) izlenmez.
+
 ## Deploy Doktoru
 
 Deploy başarısız olursa ya da uygulama hata veriyorsa **Genel** sekmesindeki **Deploy Doktoru** kartında **Teşhis et**'e bas. Gerçek alan adına istek atılır ve loglar taranır. Bilinen sorunlar (Django ALLOWED_HOSTS, CSRF, eksik gizli anahtar, veritabanı bağlantısı, migration, eksik paket veya ortam değişkeni, bellek yetmezliği) açıklanır; uygun olanlarda tek tıkla düzeltme yapılıp yeniden deploy başlatılır.

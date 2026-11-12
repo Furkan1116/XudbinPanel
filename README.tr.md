@@ -29,6 +29,7 @@ Bu panellerde eksik kalan üç şeyi baştan çözüyor:
 - Framework'e göre deploy: uygulama eklerken repo taranır, uygun framework önerilir; her framework'ün ayarları, gereken ortam değişkenleri ve "deploy'da ne olacak" adımları gösterilir
 - Kodda okunan ortam değişkenleri ve `.env.example` tek tıkla eklenir; gizli anahtar, alan adı gibi değerler otomatik üretilir
 - Kesintisiz deploy: trafik, yeni sürüm gerçek alan adıyla yapılan HTTP isteğine sağlıklı yanıt verince geçer; 400/5xx dönerse eski sürüm yayında kalır
+- **Yayın kontrolü:** her yayından önce kaynak dosyalarda gizli bilgi, gereksiz dosya ve Django/Node/Dockerfile hatalarını arayan statik kontrol; kritik bulguda yayını durdurabilir (sezgiseldir, güvenlik garantisi değildir)
 - **Deploy Doktoru:** başarısız deploy'larda loglardaki bilinen hataları (Django ALLOWED_HOSTS, CSRF, eksik gizli anahtar, veritabanı bağlantısı, migration, eksik paket veya ortam değişkeni, bellek yetmezliği) açıklar, uygun olanları tek tıkla düzeltip yeniden deploy eder
 - Framework'ün istediği zorunlu ve alan adına bağlı ortam değişkenleri eksikse deploy sırasında eklenir; Django'da settings.py'nin hangi değişken adını okuduğu bulunur
 - Uygulama başına bellek/CPU sınırı; çalışan deploy iptal edilebilir, 30 dakikada biten zaman aşımı
