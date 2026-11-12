@@ -34,6 +34,8 @@ export class SourceTree {
   truncated = false;
   readBytes = 0;
   readLimited = false;
+  /** Süre sınırı taramayı da içerik okumayı da kapsar: yavaş diskte (ağ diski, bulut eşitlemesi) kontrol yayını bekletmesin. */
+  private deadline = Infinity;
   private readonly index = new Map<string, FileEntry>();
 
   private constructor(
@@ -45,6 +47,7 @@ export class SourceTree {
   static scan(root: string, limits: Limits = LIMITS): SourceTree {
     const tree = new SourceTree(fs.realpathSync(root), limits);
     const deadline = Date.now() + limits.timeMs;
+    tree.deadline = deadline;
     const stack: { dir: string; rel: string; depth: number }[] = [{ dir: tree.root, rel: "", depth: 0 }];
     while (stack.length) {
       const { dir, rel, depth } = stack.pop()!;
@@ -116,7 +119,7 @@ export class SourceTree {
     const file = this.get(rel);
     if (!file) return null;
     const want = Math.min(max, file.size);
-    if (this.readBytes + want > this.limits.maxTotalRead) {
+    if (this.readBytes + want > this.limits.maxTotalRead || Date.now() > this.deadline) {
       this.readLimited = true;
       return null;
     }
