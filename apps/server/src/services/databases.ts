@@ -272,7 +272,16 @@ export async function restoreBackup(d: DatabaseRow, file: string) {
     env: [`P=${password}`],
     timeoutMs: 30 * 60_000,
   });
-  if (res.exitCode !== 0) throw new Error(res.stderr.trim().split("\n").pop() || "Geri yükleme başarısız");
+  if (res.exitCode !== 0) throw new Error(toolError(res.stderr) || "Geri yükleme başarısız");
+}
+
+/**
+ * Veritabanı aracının hata çıktısından kullanıcıya gösterilecek satır. psql hatayı "ERROR: ..." satırında verir,
+ * ardından sorguyu ve "^" işaretini yazar; son satırı almak yalnız "^" gösterirdi.
+ */
+export function toolError(stderr: string) {
+  const lines = stderr.split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines.findLast((l) => /error|fatal|hata/i.test(l)) ?? lines.at(-1) ?? "";
 }
 
 /** Dosya gzip mi? (ilk iki bayt 1f 8b) */
@@ -299,7 +308,7 @@ export async function importDump(d: DatabaseRow, file: string) {
     env: [`P=${decrypt(d.db_password)}`],
     timeoutMs: 30 * 60_000,
   });
-  if (res.exitCode !== 0) throw new Error(res.stderr.trim().split("\n").pop() || "İçe aktarma başarısız");
+  if (res.exitCode !== 0) throw new Error(toolError(res.stderr) || "İçe aktarma başarısız");
 }
 
 // ---------------------------------------------------------------------------

@@ -243,3 +243,10 @@ test("uygulama kopyalama: ayarlar ve görevler kopyalanır; alan adı, webhook a
   db.prepare("INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'viewer', ?)").run(s.project, viewer, now());
   assert.equal((await api(viewer, "member").request(`/apps/${src}/clone`, json("POST", { name: "x" }))).status, 403);
 });
+
+test("içe aktarma hatası: psql'in '^' satırı yerine asıl hata gösterilir", async () => {
+  const { toolError } = await import("../src/services/databases.js");
+  assert.equal(toolError('ERROR:  syntax error at or near "BU"\nLINE 1: BU GEÇERLİ SQL DEĞİL;\n        ^\n'), 'ERROR:  syntax error at or near "BU"');
+  assert.equal(toolError("mysql: bir şey oldu\n"), "mysql: bir şey oldu");
+  assert.equal(toolError(""), "");
+});
