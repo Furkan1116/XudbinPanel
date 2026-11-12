@@ -12,7 +12,7 @@ import { bus } from "../lib/events.js";
 import { removeEscapingSymlinks, resolveInside, writeInside } from "../lib/paths.js";
 import { detectFrameworks, getFramework, missingDefaultEnv, openRepo, type Framework, type Options } from "./frameworks/index.js";
 import { applyCaddyConfig, CADDY_CONTAINER, certificateReady } from "./caddy.js";
-import { composeHostAccessIssues } from "./compose-policy.js";
+import { composeConfig, composeConfigIssues, composeHostAccessIssues } from "./compose-policy.js";
 import { diagnose, isHealthy, probeHttp, type Finding } from "./doctor.js";
 import { buildImage, containerState, dockerFor, execIn, pullImage, removeContainer, type ServerRow } from "./docker.js";
 import { ensureProjectNetwork } from "./networks.js";
@@ -882,13 +882,6 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
   const doc = YAML.parse(fs.readFileSync(composePath, "utf8")) as { services?: Record<string, unknown> };
   const services = Object.keys(doc?.services ?? {});
   if (!services.length) throw new Error("Compose dosyasında servis yok");
-  if (!app.host_access) {
-    const issues = composeHostAccessIssues(doc as Parameters<typeof composeHostAccessIssues>[0]);
-    if (issues.length) {
-      issues.forEach((i) => log(`  ${i}`));
-      throw new Error("Compose dosyası sunucunun kendisine erişim istiyor. Bu ayarlar konteynere sunucuda root yetkisi verebileceği için ancak bir yönetici uygulama ayarlarından \"Sunucu erişimi\" iznini açarsa çalıştırılır.");
-    }
-  }
   log(`Servisler: ${services.join(", ")}`);
 
   // Her servisi Xudbin ağına da bağla ki Caddy alan adlarını yönlendirebilsin.
@@ -898,6 +891,7 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
   };
   const overridePath = writeInside(dir, "docker-compose.xudbin.yml", YAML.stringify(override));
   // Compose, .env dosyasındaki değişkenleri ${AD} biçimindeki yerlere koyar; yer tutucular önce doldurulur.
+  // Denetim de aynı değişkenlerle yapılsın diye .env, politika denetiminden önce yazılır.
   const composeVars = fillPlaceholders(effectiveEnv(app), app.id, server.https_mode !== "off").env;
   // Tek tırnak: Compose içini olduğu gibi okur ($ işareti değişken sanılmaz). Tek tırnak içeren değerler çift tırnakla.
   const quote = (v: string) => (v.includes("'") || v.includes("\n") ? JSON.stringify(v) : `'${v}'`);
@@ -907,14 +901,25 @@ async function deployCompose(app: AppRow, server: ServerRow, workdir: string, lo
   if (skipped.length) log(`Geçersiz adlı ${skipped.length} ortam değişkeni Compose .env dosyasına yazılmadı`);
   writeInside(dir, ".env", Object.entries(composeVars).filter(([k]) => validKey(k)).map(([k, v]) => `${k}=${quote(v)}`).join("\n") + "\n", 0o600);
 
+  const project = `xb-${app.slug}`;
   const env = composeEnv(server, workdir);
-  const args = ["compose", "-p", `xb-${app.slug}`, "-f", composePath, "-f", overridePath];
+  const args = ["compose", "-p", project, "-f", composePath];
   // Kayıt deposu girişleri: deploy klasörünün dışında, yalnız bu komut süresince var olan bir DOCKER_CONFIG.
   const auth = prepareComposeDockerConfig();
   if (auth) env.DOCKER_CONFIG = auth.dir;
-  log("docker compose up çalıştırılıyor...");
   try {
-    await run(dockerBin(), [...args, "up", "-d", "--build", "--remove-orphans", "--wait", "--wait-timeout", "120"], { cwd: dir, env, log, signal, redact: auth?.secrets });
+    if (!app.host_access) {
+      // Denetim, up ile aynı dosya, klasör ve ortamla Compose'un yorumladığı hâl üzerinde yapılır (override bizim dosyamız).
+      const resolved = await composeConfig(dockerBin(), args, { cwd: dir, env, signal });
+      if (!resolved) log("docker compose config çalıştırılamadı; katı denetim uygulanıyor (değişkenli yollar ve << reddedilir)");
+      const issues = resolved ? composeConfigIssues(resolved, dir, project) : composeHostAccessIssues(doc as Parameters<typeof composeHostAccessIssues>[0]);
+      if (issues.length) {
+        issues.forEach((i) => log(`  ${i}`));
+        throw new Error("Compose dosyası sunucunun kendisine erişim istiyor. Bu ayarlar konteynere sunucuda root yetkisi verebileceği için ancak bir yönetici uygulama ayarlarından \"Sunucu erişimi\" iznini açarsa çalıştırılır.");
+      }
+    }
+    log("docker compose up çalıştırılıyor...");
+    await run(dockerBin(), [...args, "-f", overridePath, "up", "-d", "--build", "--remove-orphans", "--wait", "--wait-timeout", "120"], { cwd: dir, env, log, signal, redact: auth?.secrets });
   } finally {
     auth?.cleanup();
   }
