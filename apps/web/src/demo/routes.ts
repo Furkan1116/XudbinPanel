@@ -4,6 +4,7 @@ import { getLang } from "@/lib/i18n";
 import frameworks from "./frameworks.json";
 import templates from "./templates.json";
 import * as D from "./data";
+import { blocked, preflightOf } from "./preflight";
 
 export type DemoResponse = { status: number; body: unknown };
 type Ctx = { params: Record<string, string>; query: URLSearchParams; body: unknown };
@@ -254,6 +255,25 @@ on("GET", "/apps/:id/cron/:job/runs", ({ params }) => ({ runs: D.cronJobs.find((
 on("GET", "/apps/:id/diagnose", ({ params }) => {
   const a = findApp(params.id!);
   return { probe: { status: 200, statusLine: "HTTP/1.1 200 OK" }, healthy: true, findings: a.id === 2 ? [] : [] };
+});
+on("GET", "/apps/:id/preflight", ({ params }) => {
+  const a = findApp(params.id!);
+  const last = D.appDeployments(a.id).find((d) => d.preflight);
+  const report = preflightOf(a.id, a.sourceType);
+  return { mode: a.preflightMode, report: report && { ...report, deploymentId: last?.id } };
+});
+// "Kontrol et" demoda da çalışır: hiçbir şeyi değiştirmez, örnek raporu şimdiki zamanla döndürür.
+on("POST", "/apps/:id/preflight", ({ params }) => {
+  const a = findApp(params.id!);
+  const report = preflightOf(a.id, a.sourceType);
+  return { mode: a.preflightMode, report: report && { ...report, at: Date.now(), deploymentId: undefined, outcome: undefined } };
+});
+on("GET", "/deployments/:id/preflight", ({ params }) => {
+  const d = D.deployments.find((x) => x.id === num(params.id));
+  if (!d) throw new HttpError(404, "Deploy bulunamadı");
+  const a = findApp(String(d.appId));
+  const report = d.preflight?.outcome === "blocked" ? blocked : preflightOf(a.id, a.sourceType);
+  return { report: report && { ...report, deploymentId: d.id } };
 });
 on("GET", "/apps/:id/domains/check", ({ params }) => {
   const a = findApp(params.id!);

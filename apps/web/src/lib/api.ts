@@ -149,6 +149,8 @@ export type App = {
       | null;
   };
   healthPath: string | null;
+  /** Yayın kontrolü modu: block (kritikte dur), warn (yalnız uyar), off. */
+  preflightMode: PreflightMode;
   status: "idle" | "deploying" | "running" | "stopped" | "failed";
   container: string | null;
   currentImage: string | null;
@@ -172,6 +174,32 @@ export type Deployment = {
   startedAt: number;
   finishedAt: number | null;
   diagnosis?: Finding[] | null;
+  /** Yayın kontrolünün özeti; bulgular /deployments/:id/preflight ucundan okunur. */
+  preflight?: { outcome: PreflightOutcome | null; counts: PreflightCounts } | null;
+};
+
+/* Sunucudaki services/preflight/types.ts ile aynı biçim. Metinler Türkçe kaynak metin, {ad} yer tutucuları vars ile dolar. */
+export type PreflightMode = "block" | "warn" | "off";
+export type PreflightLevel = "critical" | "warning" | "info";
+export type PreflightGroup = "secrets" | "django" | "node" | "docker" | "compose";
+export type PreflightOutcome = "passed" | "warned" | "blocked" | "bypassed" | "error" | "skipped";
+export type PreflightCounts = { critical: number; warning: number; info: number };
+export type PreflightVars = Record<string, string | number>;
+export type PreflightFinding = { id: string; group: PreflightGroup; level: PreflightLevel; title: string; detail: string; fix?: string; vars?: PreflightVars; file?: string; line?: number };
+export type PreflightReport = {
+  v: 1;
+  at: number;
+  status: "done" | "skipped" | "error";
+  source: { type: "git" | "upload" | "compose" | "image"; commit?: string | null; uploadedAt?: number | null };
+  counts: PreflightCounts;
+  findings: PreflightFinding[];
+  groups: PreflightGroup[];
+  notes: { text: string; vars?: PreflightVars }[];
+  scanned: { files: number; truncated: boolean; ms: number };
+  error?: string;
+  mode?: PreflightMode;
+  outcome?: PreflightOutcome;
+  deploymentId?: number;
 };
 
 export type Finding = { id: string; title: string; detail: string; fix?: { label: string; env?: Record<string, string>; buildOptions?: Record<string, string | boolean> } };

@@ -6,6 +6,7 @@ import { CronJobs } from "@/components/CronJobs";
 import { DeployDoctor } from "@/components/DeployDoctor";
 import { DropZone, uploadZip } from "@/components/DropZone";
 import { ImageScan } from "@/components/ImageScan";
+import { DeploymentPreflight, PreflightCard } from "@/components/Preflight";
 import { UptimeCard } from "@/components/UptimeCard";
 import { VolumeBackups } from "@/components/VolumeBackups";
 import { FrameworkLogo } from "@/components/FrameworkLogo";
@@ -147,6 +148,7 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
   if (!last && app.sourceType === "upload") return <UploadNewVersion app={app} first />;
   if (!last)
     return (
+      <div className="space-y-6">
       <div className="panel px-5 py-6">
         <h2 className="font-medium">{t("İlk deploy'a hazır")}</h2>
         <p className="mt-1 max-w-xl text-[14px] leading-relaxed text-muted">
@@ -158,6 +160,8 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
           {t("Ortam değişkenleri gerekiyorsa önce onları gir.")}
         </p>
         <Button variant="primary" className="mt-4" onClick={onDeploy}>{t("Deploy et")}</Button>
+      </div>
+      {app.sourceType !== "image" && <PreflightCard app={app} />}
       </div>
     );
 
@@ -211,6 +215,7 @@ function Overview({ data, onDeploy }: { data: AppData; onDeploy: () => void }) {
         </Section>
       )}
       <UptimeCard app={app} />
+      <PreflightCard app={app} />
       <DeployDoctor app={app} last={last} />
       <ImageScan app={app} />
 
@@ -312,6 +317,7 @@ function Deployments({ data }: { data: AppData }) {
               )}
             </div>
           </div>
+          <DeploymentPreflight app={app} dep={dep} />
           <LogViewer url={`/api/deployments/${dep.id}/stream`} onDone={() => qc.invalidateQueries({ queryKey: ["app", app.id] })} />
         </div>
       )}

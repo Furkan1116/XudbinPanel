@@ -4,6 +4,7 @@
  */
 import { getLang } from "@/lib/i18n";
 import { primaryDomain, type App, type Backup, type Database, type Deployment, type Finding, type Project, type Server, type ServerStats } from "@/lib/api";
+import { blocked, preflightOf } from "./preflight";
 
 export const NOW = Date.now();
 export const MIN = 60_000;
@@ -197,6 +198,7 @@ function makeApp(s: AppSeed): App {
     previews: [],
     scan: { status: null, at: null, summary: null },
     healthPath: null,
+    preflightMode: "block",
     container: s.status === "stopped" || s.status === "failed" ? (s.status === "stopped" ? `xb-${s.slug}` : null) : `xb-${s.slug}`,
     currentImage: `xb-${s.slug}:${sha(r)}`,
     internalHost: `xb-${s.slug}`,
@@ -630,6 +632,16 @@ const COMMITS: Record<number, string[]> = {
 const FW_NAME: Record<string, string> = { nextjs: "Next.js", django: "Django", static: "Statik site (HTML/CSS/JS)", laravel: "Laravel", fastapi: "FastAPI", node: "Node.js (Express, Fastify, Hono...)", flask: "Flask" };
 
 export type DemoDeployment = Deployment & { appId: number; log: string };
+
+/** Yayın günlüğündeki kontrol özeti (sunucudaki summaryLines biçimi). */
+function preflightLines(a: App) {
+  const r = preflightOf(a.id, a.sourceType);
+  if (!r || a.id === 9) return [];
+  const { critical, warning, info } = r.counts;
+  const head = critical + warning + info ? `Yayın kontrolü: ${critical} kritik, ${warning} uyarı, ${info} bilgi (statik sezgisel kontrol; güvenlik garantisi değildir).` : "Yayın kontrolü: sorun bulunmadı (statik sezgisel kontrol; güvenlik garantisi değildir).";
+  const label = { critical: "kritik", warning: "uyarı", info: "bilgi" } as const;
+  return [head, ...r.findings.filter((f) => f.level !== "info").map((f) => `  [${label[f.level]}] ${f.title.replace(/\{(\w+)\}/g, (_, k: string) => String(f.vars?.[k] ?? ""))}`)];
+}
 export const deployments: DemoDeployment[] = [];
 
 const failDiag: Finding[] = [
@@ -658,6 +670,7 @@ function buildLog(a: App, d: { id: number; title: string; commitSha: string | nu
     } else {
       L.push("Yüklenen dosya açılıyor (2.4 MB)...");
     }
+    L.push(...preflightLines(a));
     L.push(`Framework: ${FW_NAME[a.framework] ?? a.framework}`);
     L.push("Temel imajın güncel sürümü kontrol ediliyor (günde bir).");
     L.push(`İmaj derleniyor: ${d.image ?? `xb-${a.slug}:${d.commitSha}`}`);
@@ -740,11 +753,36 @@ function buildLog(a: App, d: { id: number; title: string; commitSha: string | nu
     const startedAt = NOW - p.agoH * HOUR;
     const title = p.trigger === "rollback" ? "Önceki sürüme dönüş" : a.sourceType === "image" ? `İmaj: ${a.image}` : titles[(n - 1) % titles.length]!;
     const image = p.status === "success" && a.sourceType !== "compose" ? (a.sourceType === "image" ? a.image : `xb-${a.slug}:${commitSha ?? sha(r)}`) : null;
-    const d = { id, status: p.status, trigger: p.trigger, title, commitSha, image, startedAt, finishedAt: startedAt + p.dur * 1000, diagnosis: p.status === "failed" && a.id === 6 ? failDiag : null, appId: a.id };
+    const pf = preflightOf(a.id, a.sourceType);
+    const preflight = pf && a.id !== 9 ? { outcome: pf.outcome ?? null, counts: pf.counts } : null;
+    const d = { id, status: p.status, trigger: p.trigger, title, commitSha, image, startedAt, finishedAt: startedAt + p.dur * 1000, diagnosis: p.status === "failed" && a.id === 6 ? failDiag : null, appId: a.id, preflight };
     deployments.push({ ...d, log: buildLog(a, d) });
     id++;
   }
   deployments.reverse(); // yeniden eskiye
+  // Yayın kontrolünün durdurduğu örnek yayın (flask-deneme): kritik bulgu, derleme başlamadı.
+  const flask = apps.find((x) => x.id === 9)!;
+  deployments.unshift({
+    id,
+    status: "failed",
+    trigger: "webhook",
+    title: "Mail ayarları eklendi",
+    commitSha: "4be81d0",
+    image: null,
+    startedAt: blocked.at,
+    finishedAt: blocked.at + 4000,
+    diagnosis: null,
+    appId: flask.id,
+    preflight: { outcome: "blocked", counts: blocked.counts },
+    log: [
+      `${flask.name} → ana-sunucu`,
+      `Klonlanıyor: ${flask.gitUrl} (main)`,
+      "Commit 4be81d0: Mail ayarları eklendi",
+      "Yayın kontrolü: 1 kritik, 0 uyarı, 1 bilgi (statik sezgisel kontrol; güvenlik garantisi değildir).",
+      "  [kritik] .env dosyasında dolu gizli değer var",
+      'Hata: Yayın kontrolü 1 kritik bulgu buldu; otomatik yayın durduruldu, eski sürüm yayında. Bulguları düzeltip yeniden push et ya da uygulama sayfasından "Yine de yayınla" ile elle yayınla.',
+    ].join("\n"),
+  });
   // Uygulamaların çalışan imajı son başarılı deploy'unki olsun.
   for (const a of apps) {
     const last = deployments.find((d) => d.appId === a.id && d.status === "success");
