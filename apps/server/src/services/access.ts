@@ -87,6 +87,14 @@ export function requireSecretAccess(c: Context<AppEnv>, projectId: number) {
   if (!secretsVisible(c, projectId)) throw new HttpError(403, "Bu dosya sır içerebilir; indirmek için yazma yetkisi gerekiyor");
 }
 
+/**
+ * "Sunucu erişimi" (host_access) açık uygulamanın konteyneri sunucuda root yetkisi taşıyabilir (privileged,
+ * / bağlama...). Orada kabuk açmak ya da komut çalıştırmak sunucuda root olmak demektir: yalnız yönetici.
+ */
+export function hostShellLocked(c: Context<AppEnv>, app: { host_access: number }) {
+  return Boolean(app.host_access) && c.get("user").role !== "admin";
+}
+
 /** Maskelenmiş sır değerlerinin yerine konan sabit metin. */
 export const SECRET_MASK = "••••";
 

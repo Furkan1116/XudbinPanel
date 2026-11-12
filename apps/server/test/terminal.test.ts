@@ -158,6 +158,25 @@ test("terminal: yönetici ve geliştirici açar; izleyici, yabancı ve her türl
   await mgr.closeAll();
 });
 
+test("terminal: sunucu erişimi açık uygulamada yalnız yönetici açar; açık oturum da kullanılamaz", async () => {
+  const s = seed();
+  const { h, mgr } = harness();
+  // Onaydan önce geliştiricinin açtığı oturum.
+  const before = (await (await open(h, cookie(s.dev), s.a1)).json()) as { sessionId: string };
+  db.prepare("UPDATE apps SET host_access = 1 WHERE id = ?").run(s.a1);
+  const r = await open(h, cookie(s.dev), s.a1);
+  assert.equal(r.status, 403);
+  assert.match(((await r.json()) as { error: string }).error, /sunucu erişimi açık/);
+  assert.equal((await h.request(`/api/apps/${s.a1}/terminal`, { headers: cookie(s.dev) })).status, 403);
+  const input = await h.request(`/api/apps/${s.a1}/terminal/${before.sessionId}/input`, json(cookie(s.dev), { data: Buffer.from("id\n").toString("base64") }));
+  assert.equal(input.status, 403);
+  assert.equal((await h.request(`/api/apps/${s.a1}/terminal/${before.sessionId}/stream`, { headers: cookie(s.dev) })).status, 403);
+  // Yönetici açabilir; erişimi kapalı diğer uygulamada geliştirici açmaya devam eder.
+  assert.equal((await open(h, cookie(s.admin), s.a1)).status, 201);
+  assert.equal((await open(h, cookie(s.dev), s.a2)).status, 201);
+  await mgr.closeAll();
+});
+
 test("terminal: başkasının oturum kimliği ve başka uygulamanın yolu kullanılamaz", async () => {
   const s = seed();
   const { h, mgr, opened } = harness();

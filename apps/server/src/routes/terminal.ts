@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { body, HttpError, idParam, must } from "../lib/http.js";
 import type { AppEnv } from "../lib/types.js";
-import { secretsVisible } from "../services/access.js";
+import { hostShellLocked, secretsVisible } from "../services/access.js";
 import { getApp } from "../services/deploy.js";
 import { encodeChunk, type EndReason, terminals, type TerminalManager } from "../services/terminal.js";
 
@@ -14,6 +14,7 @@ import { encodeChunk, type EndReason, terminals, type TerminalManager } from "..
  *  - API anahtarına hiç açılmaz (yazma yetkili olsa bile): etkileşimli kabuk gerçek bir panel oturumu ister.
  *  - Yalnız sır görebilenlere (yönetici, proje geliştiricisi) açılır. Çıktı akışı GET olduğu için
  *    genel ara katman izleyiciyi geçirir; kural burada her uçta açıkça uygulanır.
+ *  - "Sunucu erişimi" açık uygulamada yalnız yöneticiye açılır (kabuk sunucuda root yetkisi verebilir).
  */
 export function terminalAccess(c: Context<AppEnv>, projectId: number) {
   if (c.get("viaToken")) throw new HttpError(403, "Terminal API anahtarıyla açılamaz; panelde oturum açmış olman gerekiyor");
@@ -23,6 +24,7 @@ export function terminalAccess(c: Context<AppEnv>, projectId: number) {
 function loadApp(c: Context<AppEnv>) {
   const app = must(getApp(idParam(c)), "Uygulama bulunamadı");
   terminalAccess(c, app.project_id);
+  if (hostShellLocked(c, app)) throw new HttpError(403, "Bu uygulamada sunucu erişimi açık; terminal yalnız yöneticiye açık (konteyner sunucuda root yetkisi taşıyabilir)");
   return app;
 }
 

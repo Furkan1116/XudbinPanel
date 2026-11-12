@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Hono } from "hono";
+import { db } from "../src/db.js";
+import { HttpError } from "../src/lib/http.js";
 import { cronMatches, nextRun, parseCron } from "../src/lib/cron.js";
+import type { AppEnv } from "../src/lib/types.js";
+import { appRoutes } from "../src/routes/apps.js";
 
 const at = (iso: string) => Date.parse(iso);
 
@@ -49,4 +54,44 @@ test("nextRun: atlamalı arama, dakika dakika aramayla aynı sonucu verir (yaz s
   let seed = 7;
   for (let i = 0; i < 5; i++) starts.push(Date.UTC(2026, 0, 1) + ((seed = (seed * 48271) % 2147483647) % (365 * 24 * 60)) * 60_000);
   for (const e of exprs) for (const tz of zones) for (const f of starts) assert.equal(nextRun(e, f, tz), brute(e, f, tz), `${e} ${tz} ${new Date(f).toISOString()}`);
+});
+
+test("zamanlanmış görev: sunucu erişimi açık uygulamada ekleme, düzenleme ve çalıştırma yalnız yöneticiye", async () => {
+  const now = Date.now();
+  const tag = Math.random().toString(36).slice(2, 8);
+  const user = (role: string) => Number(db.prepare("INSERT INTO users (email, name, password_hash, role, created_at) VALUES (?, 'u', 'x', ?, ?)").run(`cron-${role}-${tag}@t`, role, now).lastInsertRowid);
+  const server =
+    (db.prepare("SELECT id FROM servers LIMIT 1").get() as { id: number } | undefined)?.id ??
+    Number(db.prepare("INSERT INTO servers (name, kind, status, created_at) VALUES ('local', 'local', 'pending', ?)").run(now).lastInsertRowid);
+  const project = Number(db.prepare("INSERT INTO projects (name, description, created_at) VALUES (?, '', ?)").run(`cp-${tag}`, now).lastInsertRowid);
+  const app = (hostAccess: number) =>
+    Number(db.prepare("INSERT INTO apps (project_id, server_id, name, slug, source_type, webhook_token, host_access, created_at) VALUES (?, ?, 'a', ?, 'image', ?, ?, ?)")
+      .run(project, server, `c-${hostAccess}-${tag}`, `cw-${hostAccess}-${tag}`, hostAccess, now).lastInsertRowid);
+  const api = (id: number, role: "admin" | "member") => {
+    const h = new Hono<AppEnv>();
+    h.use("*", async (c, next) => { c.set("user", { id, email: "t@t", name: "t", role, mustChangePassword: false } as AppEnv["Variables"]["user"]); await next(); });
+    h.route("/apps", appRoutes);
+    h.onError((err, c) => c.json({ error: err.message }, err instanceof HttpError ? err.status : 500));
+    return h;
+  };
+  const req = (h: Hono<AppEnv>, method: string, url: string, body?: unknown) =>
+    h.request(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const dev = api(user("member"), "member");
+  const admin = api(user("admin"), "admin");
+  const job = { name: "kabuk", schedule: "0 3 * * *", command: "chroot /host sh" };
+
+  const locked = app(1);
+  const created = await req(admin, "POST", `/apps/${locked}/cron`, job);
+  assert.equal(created.status, 201);
+  const jobId = ((await created.json()) as { id: number }).id;
+  for (const [method, url] of [["POST", `/apps/${locked}/cron`], ["PUT", `/apps/${locked}/cron/${jobId}`], ["POST", `/apps/${locked}/cron/${jobId}/run`]] as const) {
+    const r = await req(dev, method, url, job);
+    assert.equal(r.status, 403, `${method} ${url}`);
+    assert.match(((await r.json()) as { error: string }).error, /sunucu erişimi açık/);
+  }
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM cron_jobs WHERE app_id = ?").get(locked) as { n: number }).n, 1);
+  // Listeleme açık; yönetici düzenleyebilir. Erişimi kapalı uygulamada geliştirici görev ekler.
+  assert.equal((await req(dev, "GET", `/apps/${locked}/cron`)).status, 200);
+  assert.equal((await req(admin, "PUT", `/apps/${locked}/cron/${jobId}`, job)).status, 200);
+  assert.equal((await req(dev, "POST", `/apps/${app(0)}/cron`, job)).status, 201);
 });

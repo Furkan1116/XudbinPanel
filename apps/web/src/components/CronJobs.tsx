@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button, Dialog, Empty, Field, StatusBadge, Toggle, useAction } from "@/components/ui";
+import { Button, Dialog, Empty, Field, Notice, StatusBadge, Toggle, useAction } from "@/components/ui";
 import { api, type App } from "@/lib/api";
+import { useAuthStatus } from "@/lib/auth";
 import { timeAgo } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
@@ -24,14 +25,22 @@ export function CronJobs({ app }: { app: App }) {
   const runNow = useAction((id: number) => api.post(`/apps/${app.id}/cron/${id}/run`), { success: t("Görev başlatıldı"), invalidate: [["app", app.id, "cron"]] });
   const del = useAction((id: number) => api.del(`/apps/${app.id}/cron/${id}`), { success: t("Görev silindi"), invalidate: [["app", app.id, "cron"]] });
   const fmt = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" });
+  // "Sunucu erişimi" açıksa görev komutu sunucuda root olabilir: ekleme, düzenleme ve çalıştırma yalnız yöneticiye.
+  const admin = useAuthStatus().data?.user?.role === "admin";
+  const locked = app.hostAccess && !admin;
 
   if (app.sourceType === "compose") return <Empty>{t("Zamanlanmış görevler Compose uygulamalarında desteklenmez; Compose dosyana ayrı bir servis olarak ekleyebilirsin.")}</Empty>;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-xl text-[14px] text-muted">{t("Komut, uygulamanın son imajıyla, aynı ortam değişkenleri ve kalıcı klasörlerle ayrı bir konteynerde çalışır. Ör. php artisan schedule:run, python manage.py clearsessions.")}</p>
-        <Button variant="primary" onClick={() => setEdit({ schedule: "0 3 * * *", enabled: true, timeoutMin: 60 })}>{t("Görev ekle")}</Button>
+        <Button variant="primary" onClick={() => setEdit({ schedule: "0 3 * * *", enabled: true, timeoutMin: 60 })} disabled={locked}>{t("Görev ekle")}</Button>
       </div>
+      {locked && (
+        <Notice tone="warn" title={t("Görevleri yalnız yönetici yönetebilir")}>
+          {t("Bu uygulamada sunucu erişimi açık; görev komutu sunucuda root yetkisiyle çalışabilir. Görev ekleme, düzenleme ve çalıştırma yalnız yöneticiye açık.")}
+        </Notice>
+      )}
       {!data ? null : data.jobs.length === 0 ? (
         <Empty>{t("Henüz zamanlanmış görev yok.")}</Empty>
       ) : (
@@ -48,9 +57,9 @@ export function CronJobs({ app }: { app: App }) {
               </div>
               {j.lastRun && <StatusBadge status={j.lastRun.status} />}
               <div className="flex gap-1">
-                <Button size="sm" variant="ghost" onClick={() => runNow.mutate(j.id)} disabled={j.lastRun?.status === "running"}>{t("Şimdi çalıştır")}</Button>
+                <Button size="sm" variant="ghost" onClick={() => runNow.mutate(j.id)} disabled={locked || j.lastRun?.status === "running"}>{t("Şimdi çalıştır")}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setRunsOf(j)}>{t("Çıktılar")}</Button>
-                <Button size="sm" variant="ghost" onClick={() => setEdit(j)}>{t("Düzenle")}</Button>
+                <Button size="sm" variant="ghost" onClick={() => setEdit(j)} disabled={locked}>{t("Düzenle")}</Button>
                 <Button size="sm" variant="ghost" onClick={() => del.mutate(j.id)}>{t("Sil")}</Button>
               </div>
             </div>

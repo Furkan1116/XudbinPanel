@@ -95,7 +95,7 @@ export function AppDetailPage() {
           <LogSearch appId={id} />
         </div>
       )}
-      {tab === "terminal" && !data.secretsHidden && <TerminalTab appId={id} />}
+      {tab === "terminal" && !data.secretsHidden && <TerminalTab appId={id} hostAccess={app.hostAccess} />}
       {tab === "env" && <Env data={data} />}
       {tab === "domains" && <Domains app={app} />}
       {tab === "cron" && <CronJobs app={app} />}

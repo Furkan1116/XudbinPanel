@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useState } from "react";
 import { Notice } from "@/components/ui";
 import { api } from "@/lib/api";
+import { useAuthStatus } from "@/lib/auth";
 import { t } from "@/lib/i18n";
 
 // xterm.js yalnız bu sekme açılınca indirilir.
@@ -9,14 +10,26 @@ const TerminalView = lazy(() => import("@/components/TerminalView"));
 
 type Info = { containers: { name: string; label: string }[]; error?: string; limits?: { idleMinutes: number } };
 
-/** Uygulamanın çalışan konteynerinde kabuk. Yalnız yönetici ve proje geliştiricileri kullanabilir. */
-export function TerminalTab({ appId }: { appId: number }) {
+/**
+ * Uygulamanın çalışan konteynerinde kabuk. Yalnız yönetici ve proje geliştiricileri kullanabilir;
+ * "sunucu erişimi" açık uygulamada yalnız yönetici (kabuk sunucuda root yetkisi verebilir).
+ */
+export function TerminalTab({ appId, hostAccess }: { appId: number; hostAccess: boolean }) {
   const demo = import.meta.env.VITE_DEMO === "1";
-  const info = useQuery({ queryKey: ["terminal", appId], queryFn: () => api.get<Info>(`/apps/${appId}/terminal`), enabled: !demo, retry: false });
+  const admin = useAuthStatus().data?.user?.role === "admin";
+  const locked = hostAccess && !admin;
+  const info = useQuery({ queryKey: ["terminal", appId], queryFn: () => api.get<Info>(`/apps/${appId}/terminal`), enabled: !demo && !locked, retry: false });
   const [picked, setPicked] = useState<string | null>(null);
 
   if (demo) {
     return <Notice tone="info" title={t("Terminal demo modunda kapalı")}>{t("Gerçek kurulumda burada uygulamanın konteynerine bağlanan bir komut satırı açılır.")}</Notice>;
+  }
+  if (locked) {
+    return (
+      <Notice tone="warn" title={t("Terminal yalnız yöneticiye açık")}>
+        {t("Bu uygulamada sunucu erişimi açık; konteynerdeki kabuk sunucuda root yetkisi verebilir. Terminali yalnız yönetici açabilir.")}
+      </Notice>
+    );
   }
   if (info.isPending) return <p className="text-[14px] text-muted">{t("Yükleniyor...")}</p>;
   if (info.isError) return <Notice tone="warn" title={t("Terminal açılamıyor")}>{info.error.message}</Notice>;

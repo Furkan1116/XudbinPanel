@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { isValidIpOrCidr } from "../lib/cidr.js";
 import bcrypt from "bcryptjs";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -43,7 +44,7 @@ import { domainProblem, primaryDomain, REDIRECT_DELETE_ERROR, REDIRECT_TARGET_ER
 import { runCronJob, type CronJob } from "../services/cron.js";
 import { nextRun, parseCron } from "../lib/cron.js";
 import { timeZone } from "../services/analytics.js";
-import { accessibleAppIds, accessibleProjectIds, canUpload, canWriteProject, requireSecretAccess, SECRET_MASK, secretsVisible } from "../services/access.js";
+import { accessibleAppIds, accessibleProjectIds, canUpload, canWriteProject, hostShellLocked, requireSecretAccess, SECRET_MASK, secretsVisible } from "../services/access.js";
 import { appsForRepo, appTokenAllowed, approvedAppUrl, completeManifest, gitTokenFor, verifyGithubSignature } from "../services/github-app.js";
 import { extraServerProblem, parseIds, remoteReplicasOf, removeRemoteReplicas } from "../services/remote-replicas.js";
 
@@ -184,6 +185,11 @@ function validateCron(expr: string) {
 
 function loadApp(id: number) {
   return must(getApp(id), "Uygulama bulunamadı");
+}
+
+/** Görev komutu uygulamanın konteynerinde çalışır: "sunucu erişimi" açıksa sunucuda root olabilir, yalnız yönetici. */
+function requireCronWrite(c: Context<AppEnv>, app: { host_access: number }) {
+  if (hostShellLocked(c, app)) throw new HttpError(403, "Bu uygulamada sunucu erişimi açık; zamanlanmış görev ekleme, düzenleme ve çalıştırma yalnız yöneticiye açık");
 }
 
 export const appRoutes = new Hono<AppEnv>()
@@ -495,6 +501,7 @@ export const appRoutes = new Hono<AppEnv>()
   })
   .post("/:id/cron", async (c) => {
     const app = loadApp(idParam(c));
+    requireCronWrite(c, app);
     const input = await body(c, cronInput);
     validateCron(input.schedule);
     const res = db
@@ -504,6 +511,7 @@ export const appRoutes = new Hono<AppEnv>()
   })
   .put("/:id/cron/:jobId", async (c) => {
     const app = loadApp(idParam(c));
+    requireCronWrite(c, app);
     const input = await body(c, cronInput);
     validateCron(input.schedule);
     db.prepare("UPDATE cron_jobs SET name = ?, schedule = ?, command = ?, enabled = ?, timeout_min = ? WHERE id = ? AND app_id = ?").run(
@@ -518,6 +526,7 @@ export const appRoutes = new Hono<AppEnv>()
   })
   .post("/:id/cron/:jobId/run", (c) => {
     const app = loadApp(idParam(c));
+    requireCronWrite(c, app);
     const job = must(db.prepare("SELECT id FROM cron_jobs WHERE id = ? AND app_id = ?").get(idParam(c, "jobId"), app.id) as { id: number } | undefined, "Görev bulunamadı");
     runCronJob(job.id, "manual").catch(() => {});
     return c.json({ ok: true }, 202);
