@@ -54,7 +54,7 @@ export function SettingsPage() {
 function PanelSettings() {
   const { data } = useQuery({
     queryKey: ["settings"],
-    queryFn: () => api.get<{ panelDomain: string; panelHttps: boolean; panelWaf: "off" | "detect" | "block"; panelIpAccess: boolean; panelIpPort: number; panelIpAvailable: boolean; localServerIp: string | null; version: string; timezone: string; uptimeEnabled: boolean }>("/settings"),
+    queryFn: () => api.get<{ panelDomain: string; panelHttps: boolean; panelWaf: "off" | "detect" | "block"; panelIpAccess: boolean; panelAllowIps: string[]; requesterIp: string; panelIpPort: number; panelIpAvailable: boolean; localServerIp: string | null; version: string; timezone: string; uptimeEnabled: boolean }>("/settings"),
   });
   const [form, setForm] = useState<{ panelDomain: string; panelHttps: boolean; panelWaf: "off" | "detect" | "block"; panelIpAccess: boolean; timezone: string; uptimeEnabled: boolean } | null>(null);
   const f = form ?? (data ? { panelDomain: data.panelDomain, panelHttps: data.panelHttps, panelWaf: data.panelWaf, panelIpAccess: data.panelIpAccess, timezone: data.timezone, uptimeEnabled: data.uptimeEnabled } : null);
@@ -111,8 +111,60 @@ function PanelSettings() {
           <Button type="submit" variant="primary" loading={save.isPending}>{t("Kaydet")}</Button>
         </div>
       </form>
+      <PanelAccess saved={data.panelAllowIps} requesterIp={data.requesterIp} />
       <SsoSettings />
     </div>
+  );
+}
+
+/**
+ * Panelin IP izin listesi. Ayrı kaydedilir: sunucu, kaydeden kişinin IP'si listede değilse reddeder (kendini dışarıda bırakmasın).
+ */
+function PanelAccess({ saved, requesterIp }: { saved: string[]; requesterIp: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const value = text ?? saved.join("\n");
+  const list = value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  const save = useAction(() => api.put("/settings/panel-access", { allowIps: list }), {
+    success: list.length ? t("Panel IP izin listesi kaydedildi") : t("Panel IP izin listesi kaldırıldı"),
+    invalidate: [["settings"]],
+  });
+  const ipKnown = requesterIp && requesterIp !== "unknown";
+  return (
+    <Section
+      title={t("Panel IP izin listesi")}
+      description={t("Panele (alan adı ve IP girişi) yalnız bu adreslerden ulaşılsın. Liste boşsa panel her IP'ye açık.")}
+    >
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate(undefined, { onSuccess: () => setText(null) });
+        }}
+        className="panel space-y-4 p-5"
+      >
+        <Field
+          label={t("İzin verilen IP'ler")}
+          hint={t("Satır başına bir IP veya CIDR (ör. 203.0.113.7, 10.8.0.0/24). Listede olmayan adres 403 alır. Git sağlayıcılarının deploy webhook'ları etkilenmez.")}
+        >
+          <textarea className="input h-28 font-mono text-[13px]" value={value} onChange={(e) => setText(e.target.value)} placeholder="203.0.113.7" />
+        </Field>
+        {ipKnown && (
+          <div className="flex flex-wrap items-center gap-3 text-[14px] text-muted">
+            <span>{t("Panelin gördüğü IP adresin: {ip}", { ip: requesterIp })}</span>
+            {!list.includes(requesterIp) && (
+              <Button type="button" size="sm" onClick={() => setText([...list, requesterIp].join("\n"))}>
+                {t("Listeye ekle")}
+              </Button>
+            )}
+          </div>
+        )}
+        <Notice tone="info" title={t("Panele erişemezsen")}>
+          {t("IP adresin değişirse ya da yanlış bir liste kaydedersen sunucuda şu komutla listeyi boşaltabilirsin: sudo xudbin panel-allow clear (yeni adres eklemek için: sudo xudbin panel-allow add <ip>).")}
+        </Notice>
+        <div className="flex justify-end">
+          <Button type="submit" variant="primary" loading={save.isPending}>{t("Kaydet ve uygula")}</Button>
+        </div>
+      </form>
+    </Section>
   );
 }
 

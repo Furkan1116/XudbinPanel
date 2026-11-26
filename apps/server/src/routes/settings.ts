@@ -17,6 +17,8 @@ import { VERSION } from "../lib/version.js";
 import { updateInfo } from "../lib/update-check.js";
 import { config } from "../config.js";
 import { createRateLimiter } from "../lib/rate-limit.js";
+import { clientIp } from "../lib/client-ip.js";
+import { invalidAllowEntries, normalizeAllowList, selfLockoutError } from "../lib/panel-access.js";
 import { applyDockerFirewall, hostExec } from "../services/firewall.js";
 import { createApiToken } from "../auth/api-tokens.js";
 import type { AppEnv } from "../lib/types.js";
@@ -59,6 +61,9 @@ export const settingsRoutes = new Hono<AppEnv>()
       panelHttps: s.panelHttps,
       panelWaf: s.panelWaf,
       panelIpAccess: s.panelIpAccess,
+      panelAllowIps: s.panelAllowIps,
+      // Panelin gördüğü istemci IP'si: izin listesine kendi adresini eklemek için.
+      requesterIp: clientIp(c),
       // IP girişi sunucuda kullanılabilir mi (port .env'de kapalı değil, HTTPS açık, IP biliniyor) ve adresi.
       panelIpPort: config.panelIpPort,
       panelIpAvailable: Boolean(config.panelIpPort && local && local.https_mode !== "off" && local.public_ip),
@@ -112,6 +117,26 @@ systemd-run --unit=xudbin-update --collect --description="Xudbin güncellemesi" 
       await applyDockerFirewall(local).catch((err) => console.error((err as Error).message));
     }
     return c.json({ ok: true });
+  })
+
+  // Panelin IP izin listesi. Kaydeden yönetici kendi IP'si listede değilse reddedilir (kilitlenme koruması);
+  // yine de kilitlenilirse sunucuda: xudbin panel-allow clear
+  .put("/panel-access", async (c) => {
+    const input = await body(c, z.object({ allowIps: z.array(z.string().max(64)).max(200) }));
+    const list = normalizeAllowList(input.allowIps);
+    const invalid = invalidAllowEntries(list);
+    if (invalid.length) throw new HttpError(422, `Geçersiz IP veya CIDR: ${invalid.join(", ")}`);
+    const lockout = selfLockoutError(list, clientIp(c));
+    if (lockout) throw new HttpError(422, lockout);
+    const before = getSettings().panelAllowIps;
+    updateSettings({ panelAllowIps: list });
+    c.set("auditAction", list.length ? `Panel IP izin listesini değiştirdi: ${list.join(", ")}` : before.length ? "Panel IP izin listesini kaldırdı (herkese açık)" : "Panel IP izin listesini kaydetti (boş)");
+    const local = listServers().find((x) => x.kind === "local");
+    if (local?.status === "ready") {
+      // Caddy uygulanamasa da panel listeyi kendi içinde uygular; yönetici sorunu görsün diye hata yine döner.
+      await applyCaddyConfig(local);
+    }
+    return c.json({ ok: true, panelAllowIps: list });
   })
 
   // --- Hesap ---------------------------------------------------------------

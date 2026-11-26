@@ -14,6 +14,9 @@ let resolvedAt = 0;
 async function refreshProxyIps() {
   resolvedAt = Date.now();
   const ips = await lookup("xudbin-caddy", { all: true }).catch(() => []);
+  // Ad geçici olarak çözülemezse bilinen Caddy adresi korunur; yoksa panel herkesi Caddy'nin IP'siyle görür
+  // (hız sınırı karışır, panel IP izin listesi herkesi keser).
+  if (!ips.length) return;
   proxyIps = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1", ...ips.flatMap((a) => [a.address, `::ffff:${a.address}`])]);
 }
 if (config.trustProxy) void refreshProxyIps();

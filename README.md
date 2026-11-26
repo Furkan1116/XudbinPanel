@@ -68,7 +68,7 @@ It tackles three things these panels leave out from the start:
 - Per-app WAF, rate limit, security headers, password protection, IP lists
 - Attack screen built from the Caddy logs of all servers: timeline, top attacking IPs, targeted addresses
 - IPs over the threshold are banned automatically on all servers
-- Panel: setup key, two-factor authentication (TOTP), login rate limiting, WAF on the panel address (detect-only by default; Settings > Panel WAF), CSRF protection, session management
+- Panel: setup key, two-factor authentication (TOTP), login rate limiting, WAF on the panel address (detect-only by default; Settings > Panel WAF), restricting panel access by IP/CIDR (Settings > Panel IP allowlist; if you lock yourself out, run `sudo xudbin panel-allow clear` on the server), CSRF protection, session management
 - SSH keys, git tokens, environment variables and database passwords are encrypted with AES-256-GCM
 
 **Traffic analytics:** cookie-free site statistics similar to Google Analytics, with no extra code. Visitors, page views, bounce rate; top pages, traffic sources (referring sites and UTM campaigns), countries, browsers, operating systems and devices. Computed from Caddy access logs on the panel's own server.

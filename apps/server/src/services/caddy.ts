@@ -4,6 +4,7 @@ import { incomingRelays, outgoingRelays } from "./remote-replicas.js";
 import { config } from "../config.js";
 import { db } from "../db.js";
 import { getSettings } from "../lib/settings.js";
+import { PANEL_ALLOW_EXEMPT_PREFIX } from "../lib/panel-access.js";
 import {
   buildImage,
   containerState,
@@ -336,6 +337,18 @@ function ipRoutes(sec: AppSecurity): Route[] {
   return routes;
 }
 
+/**
+ * Panelin IP izin listesi: listede olmayan istemciye 403. Deploy webhook'ları (token korumalı, git sağlayıcısından gelir)
+ * hariç tutulur. "not" içindeki eşleyici kümeleri VEYA ile bağlanır: ne listede ne webhook yolunda olan istek kesilir.
+ */
+export function panelAllowRoute(allow: string[]): Route {
+  return {
+    match: [{ not: [{ client_ip: { ranges: allow } }, { path: [`${PANEL_ALLOW_EXEMPT_PREFIX}*`] }] }],
+    handle: [{ handler: "static_response", status_code: 403, headers: { "X-Xudbin-Block": ["panel-allowlist"] }, body: "Erişim engellendi." }],
+    terminal: true,
+  };
+}
+
 function securityHandlers(sec: AppSecurity, zone: string): { routes: Route[]; handlers: Route[] } {
   const routes = ipRoutes(sec);
   const handlers: Route[] = [];
@@ -463,12 +476,13 @@ export function buildCaddyConfig(server: ServerRow) {
     }
   };
 
-  // Alan adı ve IP girişi aynı korumalardan geçer: engelli IP'ler, hız sınırı, WAF.
+  // Alan adı ve IP girişi aynı korumalardan geçer: engelli IP'ler, panel IP izin listesi, hız sınırı, WAF.
   const panelHandle = [
     {
       handler: "subroute",
       routes: [
         ...(blocked.length ? [blockRoute(blocked, "blocklist")] : []),
+        ...(settings.panelAllowIps.length ? [panelAllowRoute(settings.panelAllowIps)] : []),
         {
           handle: [
             {
