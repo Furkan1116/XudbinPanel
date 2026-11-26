@@ -32,7 +32,11 @@ export function setLang(next: Lang) {
 export const getLang = () => lang;
 
 /** Sözlükte birebir karşılığı olmayan, kalıplı sunucu metinleri (ör. "Frontend/App.csproj bulundu"). */
-const EN_PATTERNS: [RegExp, string][] = [[/^(\S+) bulundu$/, "found $1"]];
+const EN_PATTERNS: [RegExp, string][] = [
+  [/^(\S+) bulundu$/, "found $1"],
+  [/^Şu anki IP adresin \((.+)\) listede yok; kaydedersen panele erişimin kesilir\. Önce kendi adresini ekle\.$/, "Your current IP address ($1) is not on the list; saving would cut off your access to the panel. Add your own address first."],
+  [/^Geçersiz IP veya CIDR: (.+)$/, "Invalid IP or CIDR: $1"],
+];
 
 export function t(text: string, vars?: Record<string, string | number>) {
   let out = text;

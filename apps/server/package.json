@@ -11,10 +11,10 @@
     "test": "DATA_DIR=./test/.data node --import tsx --test --test-concurrency=1 test/*.test.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.5",
+    "@hono/node-server": "^2.1.9",
     "bcryptjs": "^3.0.3",
     "dockerode": "^5.0.1",
-    "hono": "^4.13.13",
+    "hono": "^4.13.19",
     "qrcode": "^1.5.4",
     "ssh2": "^1.17.0",
     "tar-fs": "^2.1.5",

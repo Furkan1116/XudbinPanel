@@ -8,6 +8,11 @@ export type Settings = {
   panelWaf: "off" | "detect" | "block";
   /** Panel https://<sunucu IP'si>:8443 adresinden de açılır (kendinden imzalı sertifika, tarayıcı uyarı verir). */
   panelIpAccess: boolean;
+  /**
+   * Panele (alan adı ve IP girişi) yalnız bu IP/CIDR'lerden erişilir; boşsa herkese açık.
+   * Kilitlenirsen sunucuda: xudbin panel-allow clear
+   */
+  panelAllowIps: string[];
   autoBanEnabled: boolean;
   autoBanThreshold: number;   // pencere içinde kaç engellenen istek
   autoBanWindowMin: number;
@@ -38,6 +43,7 @@ const DEFAULTS: Settings = {
   panelHttps: true,
   panelWaf: "detect",
   panelIpAccess: true,
+  panelAllowIps: [],
   autoBanEnabled: true,
   autoBanThreshold: 30,
   autoBanWindowMin: 10,

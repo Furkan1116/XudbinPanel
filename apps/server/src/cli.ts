@@ -14,8 +14,10 @@ import { config } from "./config.js";
 import { decryptBackupFile, deriveFromKeyFile } from "./lib/backup-crypto.js";
 import { decrypt } from "./lib/crypto.js";
 import { s3Download } from "./lib/s3.js";
-import { getSettings } from "./lib/settings.js";
-import { panelIpUrl } from "./services/caddy.js";
+import { getSettings, updateSettings } from "./lib/settings.js";
+import { invalidAllowEntries, normalizeAllowList } from "./lib/panel-access.js";
+import { recordAudit } from "./services/audit.js";
+import { applyCaddyConfig, panelIpUrl } from "./services/caddy.js";
 import type { ServerRow } from "./services/docker.js";
 import { decryptArchive, unpackTar } from "./services/panel-backup.js";
 import { createUser, deleteUser, resetPassword, type UserRow } from "./services/users.js";
@@ -114,6 +116,10 @@ async function main() {
       console.log(n ? `${G}Ban kaldırıldı:${X} ${ip} (Caddy bir sonraki güncellemede uygular; panelde Güvenlik > Banlı IP'ler'den de kaldırabilirsin)` : `${ip} banlı değil`);
       return;
     }
+    case "panel-allow": {
+      await panelAllow(args);
+      return;
+    }
     case "backup": {
       // xudbin backup decrypt <dosya> [--out çıktı.gz] [--key-file secret.key]: şifreli veritabanı/volume yedeğini gzip'e çevirir.
       const [sub, ...rest] = args;
@@ -141,12 +147,52 @@ async function main() {
   user disable-2fa <e-posta>    İki adımlı doğrulamayı kapatır (telefon kaybolduysa)
   user delete <e-posta>         Kullanıcıyı siler
   unban <ip>                    IP banını kaldırır
+  panel-allow [list]            Panelin IP izin listesini gösterir
+  panel-allow add <ip|cidr>     Listeye adres ekler (IP'n değiştiyse ve panele giremiyorsan)
+  panel-allow clear             Listeyi boşaltır, panel yeniden herkese açılır (kilitlenince kaçış yolu)
   restore <dosya | s3://bucket/anahtar> [--endpoint URL --access-key K --secret-key S --region R]
                                 Panel yedeğini geri yükler (yedek şifresi sorulur), ardından paneli yeniden başlatır
   backup decrypt <dosya> [--out çıktı.gz]
                                 Şifreli veritabanı/volume yedeğini (.xbe) gzip'e çevirir (secret.key bu panelde olmalı)
   update                        Xudbin'i günceller (sunucudaki betik)
   logs                          Panel loglarını izler (sunucudaki betik)`);
+  }
+}
+
+/**
+ * Panelin IP izin listesi, sunucudan. Panele giremeyen yönetici için kaçış yolu: liste veritabanında değişir
+ * (çalışan panel bir sonraki istekte görür) ve Caddy yapılandırması hemen yeniden uygulanır.
+ */
+async function panelAllow(argv: string[]) {
+  const [sub = "list", value] = argv;
+  const current = getSettings().panelAllowIps;
+  if (sub === "list") {
+    if (!current.length) console.log(`Panel IP izin listesi boş: panel her IP'ye açık.`);
+    else console.log(`Panele yalnız bu adreslerden erişilir:\n${current.map((e) => `  ${e}`).join("\n")}`);
+    return;
+  }
+  let next: string[];
+  if (sub === "clear") next = [];
+  else if (sub === "add") {
+    if (!value) throw new Error("IP veya CIDR gerekli: xudbin panel-allow add 203.0.113.7");
+    next = normalizeAllowList([...current, value]);
+    const bad = invalidAllowEntries(next);
+    if (bad.length) throw new Error(`Geçersiz IP veya CIDR: ${bad.join(", ")}`);
+  } else throw new Error(`Bilinmeyen komut: panel-allow ${sub} (list, add, clear)`);
+  updateSettings({ panelAllowIps: next });
+  recordAudit({
+    action: sub === "clear" ? "Panel IP izin listesini sunucudan boşalttı (xudbin panel-allow clear)" : `Panel IP izin listesine sunucudan ekledi: ${value}`,
+    via: "cli",
+  });
+  console.log(sub === "clear" ? `${G}Panel IP izin listesi boşaltıldı.${X} Panel yeniden her IP'ye açık.` : `${G}Eklendi:${X} ${value}  ${D}(liste: ${next.join(", ")})${X}`);
+  const local = db.prepare("SELECT * FROM servers WHERE kind = 'local'").get() as ServerRow | undefined;
+  if (local?.status !== "ready") return;
+  try {
+    await applyCaddyConfig(local);
+    console.log(`${D}Caddy yapılandırması güncellendi.${X}`);
+  } catch (e) {
+    console.log(`${R}Caddy güncellenemedi:${X} ${(e as Error).message}`);
+    console.log(`${D}Panel yeniden başlatılınca (docker restart xudbin) yapılandırma yeniden uygulanır.${X}`);
   }
 }
 
