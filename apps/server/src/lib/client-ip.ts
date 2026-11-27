@@ -10,6 +10,14 @@ import { config } from "../config.js";
  */
 let proxyIps = new Set<string>(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 let resolvedAt = 0;
+let caddyKnown = false;
+
+// Caddy'nin adresi biliniyorsa dakikada bir, bilinmiyorsa (panel açılırken Caddy henüz yok ya da panel ağına sonra
+// bağlanıyor) ya da tanınmayan bir adresten istek gelirse birkaç saniyede bir yeniden çözülür. Eskiden ilk çözüm
+// başarısız olunca panel 60 sn boyunca herkesi Caddy'nin IP'siyle görüyordu: panel IP izin listesi açıkken yönetici de
+// kilitleniyor, giriş hız sınırı herkesi tek kişi sayıyordu (2026-11-27, temiz kurulum denemesi).
+export const PROXY_REFRESH_MS = 60_000;
+export const PROXY_RETRY_MS = 2_000;
 
 async function refreshProxyIps() {
   resolvedAt = Date.now();
@@ -18,6 +26,7 @@ async function refreshProxyIps() {
   // (hız sınırı karışır, panel IP izin listesi herkesi keser).
   if (!ips.length) return;
   proxyIps = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1", ...ips.flatMap((a) => [a.address, `::ffff:${a.address}`])]);
+  caddyKnown = true;
 }
 if (config.trustProxy) void refreshProxyIps();
 
@@ -36,7 +45,9 @@ export function pickForwardedIp(header: string | undefined, xff: string | undefi
 export function clientIp(c: Context): string {
   const remote = getConnInfo(c).remote.address ?? "unknown";
   if (!config.trustProxy) return remote;
-  if (Date.now() - resolvedAt > 60_000) void refreshProxyIps();
-  if (!proxyIps.has(remote)) return remote;
+  const age = Date.now() - resolvedAt;
+  const known = proxyIps.has(remote);
+  if (age > PROXY_REFRESH_MS || (age > PROXY_RETRY_MS && (!caddyKnown || !known))) void refreshProxyIps();
+  if (!known) return remote;
   return pickForwardedIp(c.req.header("x-xudbin-client-ip"), c.req.header("x-forwarded-for")) ?? remote;
 }
