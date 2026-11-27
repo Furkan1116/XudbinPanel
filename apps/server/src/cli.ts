@@ -14,7 +14,7 @@ import { config } from "./config.js";
 import { decryptBackupFile, deriveFromKeyFile } from "./lib/backup-crypto.js";
 import { decrypt } from "./lib/crypto.js";
 import { s3Download } from "./lib/s3.js";
-import { getSettings, updateSettings } from "./lib/settings.js";
+import { configuredPanelUrl, getSettings, updateSettings } from "./lib/settings.js";
 import { invalidAllowEntries, normalizeAllowList } from "./lib/panel-access.js";
 import { recordAudit } from "./services/audit.js";
 import { applyCaddyConfig, panelIpUrl } from "./services/caddy.js";
@@ -26,8 +26,8 @@ const R = "\x1b[31m", G = "\x1b[32m", D = "\x1b[2m", B = "\x1b[1m", X = "\x1b[0m
 const [cmd, ...args] = process.argv.slice(2);
 
 function panelUrl() {
-  const s = getSettings();
-  if (s.panelDomain) return `${s.panelHttps ? "https" : "http"}://${s.panelDomain}`;
+  const configured = configuredPanelUrl(getSettings());
+  if (configured) return configured;
   const ip = (db.prepare("SELECT public_ip FROM servers WHERE kind = 'local'").get() as { public_ip: string | null } | undefined)?.public_ip;
   return ip ? `http://${ip}` : "http://localhost";
 }
@@ -68,6 +68,13 @@ async function main() {
       const ipNotes = ip ? [`IP ile: ${ip}`, "(kendinden imzalı sertifika: tarayıcı uyarı verir)"] : [];
       if (users === 0) await showLink("Kurulum linki: yönetici hesabını oluştur", `${panelUrl()}/?setup=${ensureSetupToken()}`, ["Linki kimseyle paylaşma.", ...ipNotes], qr);
       else await showLink("Xudbin paneli", panelUrl(), ipNotes, qr);
+      return;
+    }
+    case "panel-url": {
+      // install.sh güncellemede hazır olmayı bu adresten yoklar. Alan adı panelden değiştirildiyse
+      // .env'deki kurulum adresi (ör. eski sslip.io) artık yanıt vermez. Ayarlanmamışsa boş çıktı.
+      const url = configuredPanelUrl(getSettings());
+      if (url) console.log(url);
       return;
     }
     case "status": {

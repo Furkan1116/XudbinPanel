@@ -304,14 +304,26 @@ if [[ $SCHEME == https ]]; then
 else
   info "Caddy WAF ve hız sınırı modülleriyle hazırlanıyor..."
 fi
+# Alan adı kurulumdan sonra panelden değiştirildiyse (Ayarlar > Panel) .env'deki adres eskir;
+# hazır olmayı panelin kayıtlı adresinden yokla. Panel yeni açıldığı için komut birkaç kez denenir.
+CHECK_URL="${SCHEME}://${XUDBIN_DOMAIN}"
+for _ in $(seq 1 10); do
+  if PANEL_URL=$(docker exec xudbin node dist/cli.js panel-url 2>/dev/null); then
+    PANEL_URL=$(printf '%s' "$PANEL_URL" | tr -d '\r' | tail -n 1)
+    [[ $PANEL_URL =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] && CHECK_URL=$PANEL_URL
+    break
+  fi
+  sleep 2
+done
+[[ $CHECK_URL != "${SCHEME}://${XUDBIN_DOMAIN}" ]] && info "Panelin kayıtlı adresi: $CHECK_URL"
 READY=0
 for i in $(seq 1 180); do
-  if curl -fsS --max-time 5 "${SCHEME}://${XUDBIN_DOMAIN}/api/auth/status" >/dev/null 2>&1; then READY=1; break; fi
+  if curl -fsS --max-time 5 "${CHECK_URL}/api/auth/status" >/dev/null 2>&1; then READY=1; break; fi
   (( i % 12 == 0 )) && info "Bekleniyor... ($((i * 5 / 60)) dk)"
   sleep 5
 done
 if [[ $READY == 1 ]]; then
-  ok "${SCHEME}://${XUDBIN_DOMAIN} yanıt veriyor"
+  ok "${CHECK_URL} yanıt veriyor"
 else
   echo "   ${Y}!${X} Adres henüz doğrulanamadı. 80/443 portlarının dışarıya açık olduğundan emin ol."
   info "Loglar: xudbin logs   |   docker logs xudbin-caddy"
@@ -319,7 +331,7 @@ fi
 
 # --- 7. Bitti -----------------------------------------------------------------
 step "$([[ $MODE == update ]] && echo "Güncellendi" || echo "Xudbin hazır")"
-docker exec xudbin node dist/cli.js link || echo "   Panel: ${SCHEME}://${XUDBIN_DOMAIN}"
+docker exec xudbin node dist/cli.js link || echo "   Panel: ${CHECK_URL}"
 echo "   ${D}Komutlar: xudbin link | xudbin status | xudbin user list | xudbin update | xudbin logs${X}"
 echo
 }

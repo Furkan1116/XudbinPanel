@@ -141,3 +141,11 @@ test("panel izin listesi: kaydeden kendi IP'si listede değilse reddedilir, kayd
     assert.equal((await app.request("/api/auth/status", {}, env("192.0.2.50"))).status, 200);
   });
 });
+
+test("configuredPanelUrl: install.sh güncellemede panelin kayıtlı adresini yoklar", async () => {
+  const { configuredPanelUrl } = await import("../src/lib/settings.js");
+  assert.equal(configuredPanelUrl({ panelDomain: "", panelHttps: true }), null);
+  assert.equal(configuredPanelUrl({ panelDomain: "  ", panelHttps: true }), null);
+  assert.equal(configuredPanelUrl({ panelDomain: "panel.example.com", panelHttps: true }), "https://panel.example.com");
+  assert.equal(configuredPanelUrl({ panelDomain: " panel.example.com ", panelHttps: false }), "http://panel.example.com");
+});

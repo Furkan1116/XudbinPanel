@@ -69,6 +69,12 @@ export function getSettings(): Settings {
   return { ...DEFAULTS, ...stored };
 }
 
+/** Panelden ayarlanan alan adının adresi (ör. https://panel.example.com); ayarlanmamışsa null. */
+export function configuredPanelUrl(s: Pick<Settings, "panelDomain" | "panelHttps">): string | null {
+  const domain = s.panelDomain.trim();
+  return domain ? `${s.panelHttps ? "https" : "http"}://${domain}` : null;
+}
+
 export function updateSettings(patch: Partial<Settings>) {
   const stmt = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
   for (const [k, v] of Object.entries(patch)) if (v !== undefined) stmt.run(k, JSON.stringify(v));
