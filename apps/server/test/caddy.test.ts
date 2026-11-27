@@ -4,7 +4,7 @@ import { db } from "../src/db.js";
 import { updateSettings } from "../src/lib/settings.js";
 import { pickForwardedIp } from "../src/lib/client-ip.js";
 import { parseIpPort } from "../src/config.js";
-import { buildCaddyConfig, CLIENT_IP_HEADER, panelIpUrl } from "../src/services/caddy.js";
+import { adminNotReady, buildCaddyConfig, CLIENT_IP_HEADER, panelIpUrl } from "../src/services/caddy.js";
 import type { ServerRow } from "../src/services/docker.js";
 
 function fakeServer(over: Partial<ServerRow> = {}): ServerRow {
@@ -121,4 +121,11 @@ test("WAF: Next.js server action istisnası CRS'den önce, yalnız 920420 ve 922
   assert.ok(directives.includes("ctl:ruleRemoveById=920420,ctl:ruleRemoveById=922130"));
   assert.ok(directives.includes('"@streq POST"'), "yalnız POST istekleri");
   assert.ok(!/ruleEngine=Off|ruleRemoveById=9(?!20420|22130)/.test(directives), "başka kural kapatılmamalı");
+});
+
+test("yeni başlayan Caddy'nin kapalı yönetim adresi yeniden denenir, gerçek yapılandırma hatası denenmez", () => {
+  assert.equal(adminNotReady('Error: sending configuration to instance: performing request: Post "http://localhost:2019/load": dial tcp [::1]:2019: connect: connection refused'), true);
+  assert.equal(adminNotReady("read tcp 127.0.0.1:41234->127.0.0.1:2019: read: connection reset by peer"), true);
+  assert.equal(adminNotReady("Error: loading config: json: unknown field \"hadnle\""), false);
+  assert.equal(adminNotReady(""), false);
 });

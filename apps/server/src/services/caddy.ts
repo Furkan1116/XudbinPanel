@@ -207,6 +207,26 @@ export function applyCaddyConfig(server: ServerRow): Promise<void> {
   return next;
 }
 
+/** Caddy'nin yönetim adresi (localhost:2019) henüz dinlemiyor mu: konteyner yeni başlatıldığında birkaç saniye sürer. */
+export function adminNotReady(output: string) {
+  return /connect: connection refused|connection reset by peer/.test(output);
+}
+
+/**
+ * Yeni başlatılan Caddy'ye ayar göndermek: yönetim adresi açılana kadar kısa aralıklarla yeniden denenir (en çok ~30 sn).
+ * Eskiden ilk kurulumda Caddy açılmadan ayar gönderiliyor, "connection refused" ile kurulum hata durumunda kalıyor,
+ * panel 502 veriyordu (2026-11-27, temiz kurulum denemesi).
+ */
+async function reloadWhenReady(docker: ReturnType<typeof dockerFor>, attempts = 15, delayMs = 2_000) {
+  for (let i = 1; ; i++) {
+    const res = await execIn(docker, CADDY_CONTAINER, ["caddy", "reload", "--config", "/etc/caddy/caddy.json", "--force"], {
+      timeoutMs: 30_000,
+    });
+    if (res.exitCode === 0 || i >= attempts || !adminNotReady(`${res.stderr}\n${res.stdout}`)) return res;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+}
+
 async function doApply(server: ServerRow) {
   const docker = dockerFor(server);
   const state = await containerState(docker, CADDY_CONTAINER);
@@ -219,9 +239,7 @@ async function doApply(server: ServerRow) {
     await docker.getContainer(CADDY_CONTAINER).start();
     return;
   }
-  const res = await execIn(docker, CADDY_CONTAINER, ["caddy", "reload", "--config", "/etc/caddy/caddy.json", "--force"], {
-    timeoutMs: 30_000,
-  });
+  const res = await reloadWhenReady(docker);
   if (res.exitCode !== 0) {
     if (previous && previous.exitCode === 0 && previous.stdout.trim()) await putFile(docker, CADDY_CONTAINER, "/etc/caddy", "caddy.json", previous.stdout).catch(() => {});
     const msg = (res.stderr || res.stdout).split("\n").filter(Boolean).pop() ?? "bilinmeyen hata";
