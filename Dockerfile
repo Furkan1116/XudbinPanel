@@ -27,6 +27,9 @@ RUN cd /app && npm ci --omit=dev -w @xudbin/server && npm cache clean --force
 COPY --from=build /src/apps/server/dist ./dist
 # dist/ ES modülü olarak yüklensin (aksi halde Node her açılışta uyarı verir).
 COPY apps/server/package.json ./package.json
+# Çalışma bağımlılıklarının hepsi dist/'in çalıştığı yerden yüklenebilmeli. Kilit dosyası bir paketi kök node_modules
+# yerine apps/server/node_modules altına koyarsa (2026-11-27, hono güncellemesi) panel açılmıyordu; derleme burada durur.
+RUN node --input-type=module -e "import fs from 'node:fs'; const d = Object.keys(JSON.parse(fs.readFileSync('package.json', 'utf8')).dependencies); for (const m of d) await import(m); console.log('Çalışma bağımlılıkları yüklendi:', d.length)"
 COPY --from=build /src/apps/web/dist /app/web
 VOLUME /data
 EXPOSE 3000
